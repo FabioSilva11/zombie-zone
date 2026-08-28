@@ -1,0 +1,9 @@
+{
+  "name": "ecos-de-eldra-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test web-tests/*.test.mjs"
+  }
+}
+
