@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#080b14">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>Ecos de Eldra</title>
+  <link rel="stylesheet" href="./css/game.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <main id="game-root" aria-label="Mundo de Ecos de Eldra"></main>
+
+  <section id="loading-screen" class="screen loading-screen" aria-live="polite">
+    <div class="loading-rune" aria-hidden="true"><span></span></div>
+    <p class="eyebrow">ECOS DE ELDRA</p>
+    <h1>O portal está despertando</h1>
+    <div class="loading-track"><span data-loading-fill></span></div>
+    <div class="loading-copy">
+      <span data-loading-label>Conectando ao reino</span>
+      <strong data-loading-percent>0%</strong>
+    </div>
+    <button id="retry-button" class="primary-button compact" type="button" hidden>Tentar novamente</button>
+  </section>
+
+  <section id="selection-screen" class="screen selection-screen is-hidden">
+    <div class="selection-header">
+      <div>
+        <p class="eyebrow">ESCOLHA SEU VIAJANTE</p>
+        <h1>Quem ouvirá os ecos?</h1>
+        <p class="subtitle">Cada herói domina as mesmas habilidades neste primeiro portal.</p>
+      </div>
+      <div class="selection-seal" aria-hidden="true">18</div>
+    </div>
+    <div class="character-grid" data-character-grid></div>
+    <footer class="selection-footer">
+      <div class="chosen-copy">
+        <span>Viajante escolhido</span>
+        <strong data-selected-name>Kael</strong>
+      </div>
+      <button class="primary-button" data-play-button type="button">
+        <span>ENTRAR NAS RUÍNAS</span><b aria-hidden="true">›</b>
+      </button>
+    </footer>
+  </section>
+
+  <section id="game-hud" class="game-hud is-hidden" aria-label="Interface do jogo">
+    <div class="hud-top">
+      <div class="health-card">
+        <div class="portrait-rune">✦</div>
+        <div class="health-copy">
+          <span data-player-name>Viajante</span>
+          <div class="health-track"><span data-health-fill></span></div>
+        </div>
+      </div>
+      <div class="objective-card">
+        <span class="objective-icon">◇</span>
+        <div><small>OBJETIVO</small><strong data-objective>Derrote os guardiões</strong></div>
+      </div>
+    </div>
+    <div id="camera-zone" aria-label="Área para girar a câmera"></div>
+    <div id="joystick" class="joystick" aria-label="Controle de movimento">
+      <span class="joystick-ring"></span><span class="joystick-knob"></span>
+    </div>
+    <button id="attack-button" class="attack-button" type="button" aria-label="Atacar">
+      <span>⚔</span><small>ATACAR</small>
+    </button>
+  </section>
+
+  <section id="completion-screen" class="completion-card is-hidden">
+    <p class="eyebrow">PORTAL CONQUISTADO</p>
+    <h2>Os ecos responderam</h2>
+    <p>Você derrotou os guardiões e abriu a passagem.</p>
+    <button id="play-again-button" class="primary-button compact" type="button">Jogar novamente</button>
+  </section>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
+
