@@ -5,7 +5,5 @@
         <item name="android:windowFullscreen">true</item>
         <item name="android:colorAccent">#54E1D0</item>
         <item name="android:navigationBarColor">#080B14</item>
-        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>
-

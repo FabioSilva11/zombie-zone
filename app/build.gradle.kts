@@ -26,7 +26,7 @@ kotlin {
 }
 
 dependencies {
+    implementation("androidx.activity:activity-ktx:1.13.0")
     implementation("androidx.webkit:webkit:1.15.0")
     testImplementation("junit:junit:4.13.2")
 }
-

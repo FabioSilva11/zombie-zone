@@ -1,9 +1,7 @@
 package com.fabiosilva.ecosdeeldra
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.graphics.Color
-import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.webkit.ConsoleMessage
@@ -12,11 +10,12 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import java.net.URI
 import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
 
 object NavigationPolicy {
     private const val LOCAL_HOST = "appassets.androidplatform.net"
@@ -25,7 +24,7 @@ object NavigationPolicy {
     fun isAllowedTopLevel(url: String): Boolean {
         return runCatching {
             val uri = URI(url)
-            val decodedPath = URLDecoder.decode(uri.rawPath.orEmpty(), StandardCharsets.UTF_8)
+            val decodedPath = URLDecoder.decode(uri.rawPath.orEmpty(), Charsets.UTF_8.name())
             uri.scheme == "https" &&
                 uri.host == LOCAL_HOST &&
                 decodedPath.startsWith(GAME_PATH_PREFIX) &&
@@ -34,7 +33,7 @@ object NavigationPolicy {
     }
 }
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private lateinit var gameView: WebView
     private lateinit var assetLoader: WebViewAssetLoader
 
@@ -56,7 +55,6 @@ class MainActivity : Activity() {
                 domStorageEnabled = true
                 allowFileAccess = false
                 allowContentAccess = false
-                databaseEnabled = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 mediaPlaybackRequiresUserGesture = false
@@ -79,11 +77,6 @@ class MainActivity : Activity() {
                     request: WebResourceRequest,
                 ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
 
-                @Deprecated("Legacy Android callback")
-                override fun shouldInterceptRequest(view: WebView, url: String): WebResourceResponse? {
-                    return assetLoader.shouldInterceptRequest(Uri.parse(url))
-                }
-
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: WebResourceRequest,
@@ -93,6 +86,16 @@ class MainActivity : Activity() {
         }
 
         setContentView(gameView)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (gameView.canGoBack()) {
+                    gameView.goBack()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
         gameView.loadUrl(GAME_URL)
     }
 
@@ -109,15 +112,6 @@ class MainActivity : Activity() {
     override fun onPause() {
         if (::gameView.isInitialized) gameView.onPause()
         super.onPause()
-    }
-
-    @Deprecated("Android framework callback")
-    override fun onBackPressed() {
-        if (::gameView.isInitialized && gameView.canGoBack()) {
-            gameView.goBack()
-        } else {
-            super.onBackPressed()
-        }
     }
 
     override fun onDestroy() {
