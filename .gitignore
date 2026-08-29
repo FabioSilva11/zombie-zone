@@ -4,6 +4,7 @@ local.properties
 **/build/
 node_modules/
 .playwright-cli/
+.worktrees/
 output/
 kenney_blocky-characters_20/
 kenney_modular-dungeon-kit_1.0/
