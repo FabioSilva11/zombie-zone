@@ -1,4 +1,4 @@
-export function createWeaponState(capacity = 6, reloadSeconds = 1.15) {
+export function createWeaponState(capacity = 30, reloadSeconds = 1.8) {
   let ammo = capacity;
   let reloadRemaining = 0;
   return {
@@ -8,6 +8,7 @@ export function createWeaponState(capacity = 6, reloadSeconds = 1.15) {
     consumeShot() {
       if (reloadRemaining > 0 || ammo <= 0) return false;
       ammo -= 1;
+      if (ammo === 0) reloadRemaining = reloadSeconds;
       return true;
     },
     startReload() {
