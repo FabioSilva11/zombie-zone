@@ -18,8 +18,8 @@ import { controllerFacingFromYaw, modelYawFromDirection } from './movement-headi
 import { createPlayerController } from './player-controller.js?v=tps-unreal-3';
 import { createRifleEffects } from './rifle-effects.js?v=rifle-1';
 import { resolveRifleHitscan } from './rifle-hitscan.js?v=rifle-1';
-import { bindRifleInput } from './rifle-input.js?v=rifle-1';
-import { attachRifle, createRifleModel, createRifleSockets } from './rifle-model.js?v=rifle-1';
+import { bindRifleInput, createRifleIntent } from './rifle-input.js?v=rifle-aim-1';
+import { attachRifle, createRifleModel, createRifleSockets } from './rifle-model.js?v=rifle-aim-1';
 import { createSaveStore } from './save-store.js';
 import { createScreenFlow } from './screen-flow.js';
 import { mountSelection } from './selection.js?v=zombie-zone-13';
@@ -334,6 +334,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   }
 
   const attackButton = document.querySelector('#attack-button');
+  const aimButton = document.querySelector('#aim-button');
   const reloadButton = document.querySelector('#reload-button');
   const dodgeButton = document.querySelector('#dodge-button');
   const ammoCount = document.querySelector('[data-ammo-count]');
@@ -381,26 +382,46 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
     paintWeapon();
     return true;
   };
+  const rifleIntent = createRifleIntent({
+    onAimChange: (held) => {
+      if (held) hybridAim.press();
+      else {
+        hybridAim.release();
+        player.root.visible = true;
+      }
+    },
+    onFireChange: (held) => {
+      if (held) automaticFire.press();
+      else automaticFire.release();
+      attackButton.classList.toggle('is-active', held);
+    },
+  });
   const input = bindRifleInput({
     button: attackButton,
     windowRef: window,
+    onPress: () => rifleIntent.pressFire(),
+    onRelease: () => rifleIntent.releaseFire(),
+  });
+  const aimInput = bindRifleInput({
+    button: aimButton,
+    windowRef: window,
     onPress: () => {
-      hybridAim.press();
-      automaticFire.press();
-      attackButton.classList.add('is-active');
+      aimButton.classList.add('is-active');
+      rifleIntent.pressAim();
     },
     onRelease: () => {
-      hybridAim.release();
-      automaticFire.release();
-      attackButton.classList.remove('is-active');
-      player.root.visible = true;
+      aimButton.classList.remove('is-active');
+      rifleIntent.releaseAim();
     },
   });
   cancelRifleTrigger = () => {
     input.cancel();
+    aimInput.cancel();
+    rifleIntent.cancel();
     automaticFire.cancel();
     hybridAim.cancel();
     attackButton.classList.remove('is-active');
+    aimButton.classList.remove('is-active');
     player.root.visible = true;
   };
   const reload = () => {
@@ -516,13 +537,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   return {
     setPaused(value) {
       paused = Boolean(value);
-      if (paused) {
-        input.cancel();
-        automaticFire.cancel();
-        hybridAim.cancel();
-        attackButton.classList.remove('is-active');
-        player.root.visible = true;
-      }
+      if (paused) cancelRifleTrigger();
       playerController.setEnabled(!paused);
       cameraController.setEnabled(!paused);
     },
@@ -532,8 +547,9 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       if (disposed) return; disposed = true;
       diagnostics?.record('info', 'mission-dispose', { stageId: stage.id });
       detachCanvasDiagnostics?.();
-      input.dispose(); automaticFire.dispose(); weaponAudio.dispose(); effects.dispose(); rifle.dispose();
-      hybridAim.cancel(); attackButton.classList.remove('is-active'); player.root.visible = true;
+      input.dispose(); aimInput.dispose(); rifleIntent.dispose();
+      automaticFire.dispose(); weaponAudio.dispose(); effects.dispose(); rifle.dispose();
+      hybridAim.cancel(); attackButton.classList.remove('is-active'); aimButton.classList.remove('is-active'); player.root.visible = true;
       reloadButton.removeEventListener('click', reload); dodgeButton.removeEventListener('click', dodge);
       minimap.dispose(); playerController.dispose(); cameraController.dispose(); crystalGeometry.dispose(); crystalMaterial.dispose();
       world.scene.remove(camera);

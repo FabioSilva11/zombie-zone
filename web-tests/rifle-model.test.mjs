@@ -23,8 +23,13 @@ test('attachRifle reanexa a única árvore entre os sockets TPS e FPS', () => {
   attachRifle(rifle, sockets.tps, 'tps');
   assert.equal(sockets.tps.children[0], rifle.root);
   assert.deepEqual(rifle.root.position.toArray(), [0.34, 1.52, -0.2]);
-  assert.deepEqual(rifle.root.rotation.toArray(), [0.02, 0.03, -0.06, 'XYZ']);
+  assert.deepEqual(rifle.root.rotation.toArray(), [0.02, Math.PI + 0.03, -0.06, 'XYZ']);
   assert.deepEqual(rifle.root.scale.toArray(), [1.05, 1.05, 1.05]);
+  player.rotation.y = 0.7;
+  player.updateMatrixWorld(true);
+  const muzzleForward = new THREE.Vector3(0, 0, -1).transformDirection(rifle.muzzle.matrixWorld);
+  const playerForward = new THREE.Vector3(0, 0, 1).transformDirection(player.matrixWorld);
+  assert.ok(muzzleForward.dot(playerForward) > 0.995, 'cano TPS deve apontar para a frente do personagem');
   const tpsTransform = {
     position: rifle.root.position.toArray(),
     rotation: rifle.root.rotation.toArray(),

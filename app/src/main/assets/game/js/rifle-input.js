@@ -1,3 +1,52 @@
+export function createRifleIntent({ onAimChange = () => {}, onFireChange = () => {} } = {}) {
+  let aimHeld = false;
+  let fireHeld = false;
+  let aiming = false;
+  let firing = false;
+  let disposed = false;
+
+  const sync = () => {
+    const nextAiming = aimHeld || fireHeld;
+    if (nextAiming !== aiming) {
+      aiming = nextAiming;
+      onAimChange(aiming);
+    }
+    if (fireHeld !== firing) {
+      firing = fireHeld;
+      onFireChange(firing);
+    }
+  };
+  const setAimHeld = (value) => {
+    if (disposed) return;
+    aimHeld = Boolean(value);
+    sync();
+  };
+  const setFireHeld = (value) => {
+    if (disposed) return;
+    fireHeld = Boolean(value);
+    sync();
+  };
+  const cancel = () => {
+    aimHeld = false;
+    fireHeld = false;
+    sync();
+  };
+
+  return {
+    pressAim() { setAimHeld(true); },
+    releaseAim() { setAimHeld(false); },
+    pressFire() { setFireHeld(true); },
+    releaseFire() { setFireHeld(false); },
+    cancel,
+    state() { return { aimHeld, fireHeld, aiming }; },
+    dispose() {
+      if (disposed) return;
+      cancel();
+      disposed = true;
+    },
+  };
+}
+
 export function bindRifleInput({ button, windowRef = window, onPress, onRelease }) {
   let activePointerId = null;
   let disposed = false;

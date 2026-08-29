@@ -1,5 +1,5 @@
 const transforms = {
-  tps: { position: [0.34, 1.52, -0.2], rotation: [0.02, 0.03, -0.06], scale: 1.05 },
+  tps: { position: [0.34, 1.52, -0.2], rotation: [0.02, Math.PI + 0.03, -0.06], scale: 1.05 },
   fps: { position: [0.34, -0.28, -0.72], rotation: [-0.03, 0.02, -0.02], scale: 0.42 },
 };
 

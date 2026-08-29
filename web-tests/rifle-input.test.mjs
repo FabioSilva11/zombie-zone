@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { bindRifleInput } from '../app/src/main/assets/game/js/rifle-input.js';
+import { bindRifleInput, createRifleIntent } from '../app/src/main/assets/game/js/rifle-input.js';
 
 function pointerEvent(type, pointerId = 7) {
   const event = new Event(type, { cancelable: true });
@@ -71,4 +71,62 @@ test('lostpointercapture libera e dispose remove listeners sem deixar gatilho pr
   windowRef.dispatchEvent(new Event('blur'));
 
   assert.deepEqual(calls, ['press', 'release']);
+});
+
+test('MIRAR mantém FPS quando ATIRAR é solto e não mantém disparo', () => {
+  const aimChanges = [];
+  const fireChanges = [];
+  const intent = createRifleIntent({
+    onAimChange: (held) => aimChanges.push(held),
+    onFireChange: (held) => fireChanges.push(held),
+  });
+
+  intent.pressAim();
+  intent.pressFire();
+  intent.releaseFire();
+  assert.deepEqual(intent.state(), { aimHeld: true, fireHeld: false, aiming: true });
+  intent.releaseAim();
+
+  assert.deepEqual(aimChanges, [true, false]);
+  assert.deepEqual(fireChanges, [true, false]);
+});
+
+test('ATIRAR mantém FPS e disparo quando MIRAR é solto', () => {
+  const aimChanges = [];
+  const fireChanges = [];
+  const intent = createRifleIntent({
+    onAimChange: (held) => aimChanges.push(held),
+    onFireChange: (held) => fireChanges.push(held),
+  });
+
+  intent.pressFire();
+  intent.pressAim();
+  intent.releaseAim();
+  assert.deepEqual(intent.state(), { aimHeld: false, fireHeld: true, aiming: true });
+  intent.releaseFire();
+
+  assert.deepEqual(aimChanges, [true, false]);
+  assert.deepEqual(fireChanges, [true, false]);
+});
+
+test('cancel e dispose limpam MIRAR e ATIRAR sem aceitar novas pressões', () => {
+  const aimChanges = [];
+  const fireChanges = [];
+  const intent = createRifleIntent({
+    onAimChange: (held) => aimChanges.push(held),
+    onFireChange: (held) => fireChanges.push(held),
+  });
+
+  intent.pressAim();
+  intent.pressFire();
+  intent.cancel();
+  assert.deepEqual(intent.state(), { aimHeld: false, fireHeld: false, aiming: false });
+  intent.pressFire();
+  intent.dispose();
+  intent.pressAim();
+  intent.pressFire();
+
+  assert.deepEqual(intent.state(), { aimHeld: false, fireHeld: false, aiming: false });
+  assert.deepEqual(aimChanges, [true, false, true, false]);
+  assert.deepEqual(fireChanges, [true, false, true, false]);
 });

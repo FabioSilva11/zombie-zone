@@ -20,9 +20,11 @@ test('HUD inicia o rifle cheio, identifica o gatilho e abre a mira por --spread'
 
   assert.match(html, /data-ammo-count>30\/30</);
   assert.match(html, /id="attack-button"[^>]*aria-label="Atirar"/);
+  assert.match(html, /id="aim-button"[^>]*aria-label="Mirar"[^>]*>[\s\S]*?<small>MIRAR<\/small>/);
+  assert.match(css, /\.aim-button[^}]*min-width:\s*48px[^}]*min-height:\s*48px/s);
   assert.match(css, /\.reticle\s*\{[^}]*--spread:\s*0px[^}]*width:\s*calc\(28px \+ var\(--spread\)\)[^}]*height:\s*calc\(28px \+ var\(--spread\)\)/s);
   assert.match(css, /\.reticle\.fps\s*\{[^}]*border-color:\s*var\(--amber\)/s);
-  assert.match(html, /\.\/css\/game\.css\?v=rifle-1/);
-  assert.match(html, /\.\/js\/bootstrap\.js\?v=rifle-1/);
-  assert.match(bootstrap, /import\('\.\/main\.js\?v=rifle-1'\)/);
+  assert.match(html, /\.\/css\/game\.css\?v=rifle-aim-1/);
+  assert.match(html, /\.\/js\/bootstrap\.js\?v=rifle-aim-1/);
+  assert.match(bootstrap, /import\('\.\/main\.js\?v=rifle-aim-1'\)/);
 });

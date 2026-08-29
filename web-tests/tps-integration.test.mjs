@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const main = readFileSync(new URL('../app/src/main/assets/game/js/main.js', import.meta.url), 'utf8');
+const rifleInput = readFileSync(new URL('../app/src/main/assets/game/js/rifle-input.js', import.meta.url), 'utf8');
 
 test('loop TPS consome controller yaw antes do movimento e segue o personagem depois', () => {
   const input = main.indexOf('cameraController.updateInput(delta)');
@@ -51,9 +52,12 @@ test('missão mantém uma câmera e um rifle e restaura o herói em todo cancela
   assert.equal(main.match(/new THREE\.PerspectiveCamera\(/g)?.length, 1);
   assert.equal(main.match(/createRifleModel\(THREE\)/g)?.length, 1);
   assert.match(main, /hybridAim\.blend >= 0\.92/);
-  assert.match(main, /onRelease:[\s\S]*?player\.root\.visible = true;/);
-  assert.match(main, /setPaused\(value\)[\s\S]*?input\.cancel\(\);[\s\S]*?automaticFire\.cancel\(\);[\s\S]*?hybridAim\.cancel\(\);[\s\S]*?player\.root\.visible = true;/);
-  assert.match(main, /input\.dispose\(\); automaticFire\.dispose\(\); weaponAudio\.dispose\(\); effects\.dispose\(\); rifle\.dispose\(\);/);
+  assert.match(main, /const aimInput = bindRifleInput\(/);
+  assert.match(main, /button: aimButton/);
+  assert.match(main, /createRifleIntent\(/);
+  assert.match(rifleInput, /aimHeld \|\| fireHeld/);
+  assert.match(main, /setPaused\(value\)[\s\S]*?cancelRifleTrigger\(\);/);
+  assert.match(main, /input\.dispose\(\); aimInput\.dispose\(\); rifleIntent\.dispose\(\);/);
   assert.ok(main.match(/cancelRifleTrigger\(\);/g)?.length >= 2, 'vitória e derrota precisam cancelar o gatilho');
 });
 
