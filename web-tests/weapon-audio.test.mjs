@@ -32,15 +32,16 @@ function fakeAudio(url) {
 
 function createSubject(options = {}) {
   const tracks = [];
+  const { audioFactory: suppliedFactory, ...audioOptions } = options;
   const audio = createWeaponAudio({
     fireUrl: 'rifle-fire.mp3',
     reloadUrl: 'rifle-reload.mp3',
     audioFactory: (url) => {
-      const track = fakeAudio(url);
+      const track = suppliedFactory?.(url) ?? fakeAudio(url);
       tracks.push(track);
       return track;
     },
-    ...options,
+    ...audioOptions,
   });
   return { audio, tracks };
 }
@@ -71,13 +72,44 @@ test('recarga usa instância separada, com volume reduzido', async () => {
   assert.equal(tracks[4].url, 'rifle-reload.mp3');
   assert.equal(tracks[4].playCalls, 1);
   assert.equal(tracks.slice(0, 4).reduce((total, track) => total + track.playCalls, 0), 0);
-  assert.equal(tracks[0].preload, 'auto');
-  assert.equal(tracks[0].volume, 0.5);
+  assert.ok(tracks.every((track) => track.preload === 'auto'));
+  assert.ok(tracks.slice(0, 4).every((track) => track.volume === 0.5));
   assert.equal(tracks[4].volume, 0.4);
 });
 
-test('dispose pausa, libera src e impede novas reproduções', async () => {
+test('falhas síncronas e promessas rejeitadas de play retornam false', async () => {
+  const synchronous = createSubject({
+    audioFactory: (url) => {
+      const track = fakeAudio(url);
+      track.play = () => { throw new Error('autoplay bloqueado'); };
+      return track;
+    },
+  });
+  assert.equal(await synchronous.audio.playFire(), false);
+  assert.equal(await synchronous.audio.playReload(), false);
+
+  const rejected = createSubject({
+    audioFactory: (url) => {
+      const track = fakeAudio(url);
+      track.play = () => Promise.reject(new Error('autoplay bloqueado'));
+      return track;
+    },
+  });
+  assert.equal(await rejected.audio.playFire(), false);
+  assert.equal(await rejected.audio.playReload(), false);
+});
+
+test('poolSize inválido é normalizado e playFire permanece seguro', async () => {
+  for (const [poolSize, expectedFireTracks] of [[0, 1], [-4, 1], [2.9, 2]]) {
+    const { audio, tracks } = createSubject({ poolSize });
+    assert.equal(tracks.length, expectedFireTracks + 1);
+    assert.equal(await audio.playFire(), true);
+  }
+});
+
+test('dispose duas vezes libera recursos uma única vez e impede novas reproduções', async () => {
   const { audio, tracks } = createSubject();
+  audio.dispose();
   audio.dispose();
   assert.ok(tracks.every((track) => track.pauseCalls === 1));
   assert.ok(tracks.every((track) => track.removeAttributeCalls === 1));

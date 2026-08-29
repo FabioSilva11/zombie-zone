@@ -6,7 +6,11 @@ export function createWeaponAudio({
   poolSize = 4,
   audioFactory = (url) => new Audio(url),
 }) {
-  const fireTracks = Array.from({ length: poolSize }, () => audioFactory(fireUrl));
+  const requestedPoolSize = Number(poolSize);
+  const normalizedPoolSize = Number.isFinite(requestedPoolSize)
+    ? Math.max(1, Math.floor(requestedPoolSize))
+    : 4;
+  const fireTracks = Array.from({ length: normalizedPoolSize }, () => audioFactory(fireUrl));
   const reloadTrack = audioFactory(reloadUrl);
   const tracks = [...fireTracks, reloadTrack];
   let fireIndex = 0;
