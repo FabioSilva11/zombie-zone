@@ -47,17 +47,17 @@ export function createAvatarPreview({ THREE, GLTFLoader, characterById, hosts, w
   renderer.setPixelRatio(Math.min(windowRef.devicePixelRatio || 1, 1.5));
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1;
   renderer.domElement.className = 'avatar-preview-canvas';
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 60);
   camera.position.set(0, 0.1, 9);
   camera.lookAt(0, 0, 0);
-  scene.add(new THREE.HemisphereLight(0xcdf8ff, 0x271448, 2.35));
-  const key = new THREE.DirectionalLight(0xd9ff8c, 3.1); key.position.set(4, 7, 5); scene.add(key);
-  const rim = new THREE.DirectionalLight(0xa871ff, 2.6); rim.position.set(-4, 4, -2); scene.add(rim);
+  scene.add(new THREE.HemisphereLight(0xfffbf2, 0x665b4d, 2.15));
+  const key = new THREE.DirectionalLight(0xfff2dd, 2.7); key.position.set(4, 7, 5); scene.add(key);
+  const rim = new THREE.DirectionalLight(0xdde7ff, 1.2); rim.position.set(-4, 4, -2); scene.add(rim);
   const loader = new GLTFLoader();
   const clock = new THREE.Clock();
   let model = null;

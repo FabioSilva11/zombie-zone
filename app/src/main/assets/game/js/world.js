@@ -4,6 +4,7 @@ import { loadBundledMap } from './map-library.js';
 import { buildFloorColliders, buildWallColliders, cameraColliderBoxes, circleHitsWall } from './map-collision.js?v=campaign-3';
 import { canOccupy as phaseCanOccupy, floorHeightAt as phaseFloorHeightAt } from './phase-layout.js';
 import { gateBlocksPosition, gateWorldTransform } from './world-navigation.js';
+import { applyDungeonTexture, configureDungeonTexture, dungeonTextureForMap } from './map-appearance.js';
 
 const ACTOR_CAPSULE_HEIGHT = 1.78;
 const ACTOR_CAPSULE_RADIUS = 0.5;
@@ -23,10 +24,10 @@ function prepareModel(root) {
   return root;
 }
 
-async function loadPiece(loader, definition, onProgress) {
+async function loadPiece(loader, definition, onProgress, dungeonTexture) {
   const gltf = await loader.loadAsync(definition.url);
   onProgress?.(definition.id, true);
-  return { root: prepareModel(gltf.scene), animations: gltf.animations };
+  return { root: prepareModel(applyDungeonTexture(gltf.scene, dungeonTexture)), animations: gltf.animations };
 }
 
 function floorWorldCenter(placement, layout) {
@@ -106,14 +107,14 @@ function addPortal(scene, layout) {
   return { portal, portalRing };
 }
 
-export async function createWorld(loader, onAssetProgress, mapSelection) {
+export async function createWorld(loader, onAssetProgress, mapSelection, maxAnisotropy = 4) {
   const layout = await loadBundledMap(mapSelection);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x080a13);
-  scene.fog = new THREE.FogExp2(0x101225, 0.021);
-  scene.add(new THREE.HemisphereLight(0xa6b9ff, 0x171326, 1.35));
+  scene.background = new THREE.Color(0x181715);
+  scene.fog = new THREE.Fog(0x24211d, 70, 260);
+  scene.add(new THREE.HemisphereLight(0xfffbf2, 0x6d6254, 2));
 
-  const sun = new THREE.DirectionalLight(0xffd6a0, 2.1);
+  const sun = new THREE.DirectionalLight(0xfff1da, 2.35);
   sun.position.set(layout.size * 0.5, 70, layout.size * 0.35);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -123,6 +124,20 @@ export async function createWorld(loader, onAssetProgress, mapSelection) {
   sun.shadow.camera.bottom = -110;
   sun.shadow.camera.far = 260;
   scene.add(sun);
+
+  const textureVariant = dungeonTextureForMap(layout.sourceFile);
+  const textureLoader = new THREE.TextureLoader();
+  let dungeonTexture;
+  try {
+    dungeonTexture = configureDungeonTexture(
+      await textureLoader.loadAsync(textureVariant.url),
+      THREE,
+      maxAnisotropy,
+    );
+  } catch (error) {
+    console.error(`Falha ao carregar a textura ${textureVariant.file}`, error);
+    throw new Error(`A textura ${textureVariant.file} não pôde ser carregada.`, { cause: error });
+  }
 
   const motes = addAtmosphere(scene, layout);
   const staticCollisionRoot = new THREE.Group();
@@ -142,7 +157,7 @@ export async function createWorld(loader, onAssetProgress, mapSelection) {
     const placements = placementsByPiece.get(definition.id) ?? [];
     if (!placements.length) continue;
     try {
-      const asset = await loadPiece(loader, definition, onAssetProgress);
+      const asset = await loadPiece(loader, definition, onAssetProgress, dungeonTexture);
       for (const placement of placements) {
         const instance = { ...asset, root: prepareModel(asset.root.clone(true)) };
         const root = placement.edge
@@ -188,6 +203,7 @@ export async function createWorld(loader, onAssetProgress, mapSelection) {
   return {
     scene,
     layout,
+    textureVariant,
     physicsWalls: wallColliders,
     physicsSurfaces: buildFloorColliders(layout),
     cameraColliderMeshes,

@@ -17,8 +17,9 @@ import { createPlayerController } from './player-controller.js?v=tps-unreal-3';
 import { createSaveStore } from './save-store.js';
 import { createScreenFlow } from './screen-flow.js';
 import { mountSelection } from './selection.js?v=zombie-zone-13';
-import { createWorld } from './world.js?v=zombie-zone-5';
+import { createWorld } from './world.js?v=zombie-zone-6';
 import { createWeaponState } from './weapon-state.js?v=campaign-3';
+import { createMusicController, MUSIC_MODES } from './music-controller.js';
 
 const CHARACTER_WORLD_SCALE = 0.72;
 
@@ -48,8 +49,8 @@ function configureRenderer(root) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.16;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1;
   root.replaceChildren(renderer.domElement);
   return renderer;
 }
@@ -60,6 +61,18 @@ export async function startApp(loading, diagnostics = null) {
   const flow = createScreenFlow(progress);
   const selectionScreen = document.querySelector('#selection-screen');
   const hud = document.querySelector('#game-hud');
+  const music = createMusicController({
+    menuUrl: './audio/musica-menu-tps-ambient.mp3',
+    gameplayUrl: './audio/trilha-tps-dark-loop.mp3',
+    enabled: progress.settings.soundEnabled,
+  });
+  const detachMusicActivation = music.bindUserActivation(document);
+  const syncMusicForState = async (state) => {
+    const mode = state.screen === 'gameplay' ? MUSIC_MODES.GAMEPLAY : MUSIC_MODES.MENU;
+    const playing = await music.setMode(mode);
+    document.documentElement.dataset.musicMode = mode;
+    document.documentElement.dataset.musicPlaying = String(playing);
+  };
   let activeGame = null;
   let ui = null;
   let avatarPreview = null;
@@ -128,8 +141,10 @@ export async function startApp(loading, diagnostics = null) {
     activeGame?.setPaused(paused);
     if (state.screen !== 'gameplay') hud.classList.add('is-hidden');
     syncAvatarPreview(state);
+    syncMusicForState(state);
     previousFlowState = state;
   });
+  syncMusicForState(flow.state);
   document.querySelector('#pause-button').addEventListener('click', () => flow.pause());
   document.querySelectorAll('[data-camera-sensitivity]').forEach((input) => input.addEventListener('input', (event) => {
       const value = Number(event.target.value);
@@ -138,6 +153,9 @@ export async function startApp(loading, diagnostics = null) {
     }));
   document.querySelector('[data-sound-enabled]').addEventListener('change', (event) => {
     setProgress({ ...progress, settings: { ...progress.settings, soundEnabled: event.target.checked } });
+    music.setEnabled(event.target.checked).then((playing) => {
+      document.documentElement.dataset.musicPlaying = String(playing);
+    });
   });
   document.querySelector('[data-restart-stage]').addEventListener('click', () => startMission(ui.activeStage()));
 
@@ -155,7 +173,11 @@ export async function startApp(loading, diagnostics = null) {
       ])),
     });
     syncAvatarPreview();
-    window.addEventListener('pagehide', () => avatarPreview?.dispose(), { once: true });
+    window.addEventListener('pagehide', () => {
+      detachMusicActivation();
+      music.dispose();
+      avatarPreview?.dispose();
+    }, { once: true });
   } catch (error) {
     console.error(error); loading.hide(); selectionScreen.classList.add('is-hidden');
     const destination = routeBootFailure(error);
@@ -179,7 +201,8 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   let loadedWorldPieces = 0;
   const world = await createWorld(loader, (label) => {
     loadedWorldPieces += 1; loading.update(label, Math.min(59, 18 + loadedWorldPieces * 1.7));
-  }, stage.mapId);
+  }, stage.mapId, renderer.capabilities.getMaxAnisotropy());
+  document.querySelector('#game-hud').dataset.mapTexture = world.textureVariant.id;
 
   loading.update('Invocando seu viajante', 61);
   const playerData = await loadCharacter(loader, characterId, world.layout.start);

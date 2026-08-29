@@ -13,7 +13,7 @@ async function boot() {
     const timeout = new Promise((_, reject) => {
       window.setTimeout(() => reject(new Error('A conexão demorou mais que o esperado.')), 15000);
     });
-    const gameModule = await Promise.race([import('./main.js?v=tps-unreal-4'), timeout]);
+    const gameModule = await Promise.race([import('./main.js?v=zombie-zone-color-audio-1'), timeout]);
     await gameModule.startApp(loading, diagnostics);
   } catch (error) {
     diagnostics.capture('boot-failure', error);
