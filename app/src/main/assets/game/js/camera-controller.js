@@ -100,6 +100,30 @@ export function thirdPersonComposition(
   };
 }
 
+export function firstPersonComposition(
+  position,
+  yaw,
+  pitch,
+  { eyeHeight = 2.05, forwardOffset = 0.18, aimDistance = 45 } = {},
+) {
+  const cosPitch = Math.cos(pitch);
+  const forward = { x: Math.sin(yaw) * cosPitch, y: -Math.sin(pitch), z: -Math.cos(yaw) * cosPitch };
+  const camera = {
+    x: position.x + forward.x * forwardOffset,
+    y: position.y + eyeHeight + forward.y * forwardOffset,
+    z: position.z + forward.z * forwardOffset,
+  };
+  return {
+    camera,
+    forward,
+    aim: {
+      x: camera.x + forward.x * aimDistance,
+      y: camera.y + forward.y * aimDistance,
+      z: camera.z + forward.z * aimDistance,
+    },
+  };
+}
+
 export function estimatedCharacterScreenFraction(characterHeight, distance = CAMERA_DISTANCE, verticalFov = Math.PI / 3) {
   return 2 * Math.atan(Math.max(0, characterHeight) / (2 * Math.max(0.01, distance))) / verticalFov;
 }
@@ -173,6 +197,7 @@ export function createThirdPersonCamera({
   let lastPointerX = 0;
   let lastPointerY = 0;
   let springArmDistance = null;
+  let viewBlend = 0;
   let collisionState = { angle: pitch, distance: CAMERA_DISTANCE, directDistance: CAMERA_DISTANCE, collided: false };
   const aimTarget = new THREE.Vector3();
 
@@ -228,11 +253,22 @@ export function createThirdPersonCamera({
       delta,
     });
     springArmDistance = resolved.distance;
-    camera.position.set(resolved.position.x, resolved.position.y, resolved.position.z);
+    const first = firstPersonComposition(player.root.position, yaw, pitch);
+    camera.position.set(
+      resolved.position.x + (first.camera.x - resolved.position.x) * viewBlend,
+      resolved.position.y + (first.camera.y - resolved.position.y) * viewBlend,
+      resolved.position.z + (first.camera.z - resolved.position.z) * viewBlend,
+    );
+    const blendedForward = {
+      x: composition.forward.x + (first.forward.x - composition.forward.x) * viewBlend,
+      y: composition.forward.y + (first.forward.y - composition.forward.y) * viewBlend,
+      z: composition.forward.z + (first.forward.z - composition.forward.z) * viewBlend,
+    };
+    const forwardLength = Math.hypot(blendedForward.x, blendedForward.y, blendedForward.z) || 1;
     aimTarget.set(
-      camera.position.x + composition.forward.x * CAMERA_AIM_DISTANCE,
-      camera.position.y + composition.forward.y * CAMERA_AIM_DISTANCE,
-      camera.position.z + composition.forward.z * CAMERA_AIM_DISTANCE,
+      camera.position.x + blendedForward.x / forwardLength * CAMERA_AIM_DISTANCE,
+      camera.position.y + blendedForward.y / forwardLength * CAMERA_AIM_DISTANCE,
+      camera.position.z + blendedForward.z / forwardLength * CAMERA_AIM_DISTANCE,
     );
     camera.lookAt(aimTarget);
     collisionState = {
@@ -249,6 +285,8 @@ export function createThirdPersonCamera({
   return {
     heading() { return yaw; },
     pitch() { return pitch; },
+    setViewBlend(value) { viewBlend = clamp(Number(value) || 0, 0, 1); },
+    viewBlend() { return viewBlend; },
     aimPoint() { return { x: aimTarget.x, y: aimTarget.y, z: aimTarget.z }; },
     collision() { return { ...collisionState }; },
     setEnabled(value) {

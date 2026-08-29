@@ -95,6 +95,27 @@ test('follow acompanha a translação do personagem sem atraso espacial', () => 
   controller.dispose();
 });
 
+test('blend FPS aproxima a única câmera dos olhos sem mudar ControllerYaw/Pitch', () => {
+  const domElement = new EventTarget();
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  const player = { root: { position: new THREE.Vector3(4, 0, 8) } };
+  const controller = createThirdPersonCamera({
+    THREE, camera, domElement, player, wallColliders: [], windowRef: new EventTarget(),
+  });
+  const heading = controller.heading();
+  const pitch = controller.pitch();
+
+  controller.setViewBlend(1);
+  controller.updateFollow(0);
+
+  const eyes = new THREE.Vector3(player.root.position.x, player.root.position.y + 2.05, player.root.position.z);
+  assert.ok(camera.position.distanceTo(eyes) < 0.6, `câmera deve ficar próxima aos olhos: ${camera.position.distanceTo(eyes)}`);
+  assert.equal(controller.heading(), heading);
+  assert.equal(controller.pitch(), pitch);
+  assert.equal(controller.viewBlend(), 1);
+  controller.dispose();
+});
+
 test('SpringArm retrai antes da parede e não atravessa o colisor', () => {
   const wall = { minX: -2, maxX: 2, minY: 0, maxY: 5, minZ: 3, maxZ: 3.4 };
   const result = resolveSpringArmCamera({
