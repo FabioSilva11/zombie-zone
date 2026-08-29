@@ -22,9 +22,23 @@ test('attachRifle reanexa a única árvore entre os sockets TPS e FPS', () => {
   const sockets = createRifleSockets({ THREE, playerRoot: player, camera });
   attachRifle(rifle, sockets.tps, 'tps');
   assert.equal(sockets.tps.children[0], rifle.root);
+  assert.deepEqual(rifle.root.position.toArray(), [0.34, 1.52, -0.2]);
+  assert.deepEqual(rifle.root.rotation.toArray(), [0.02, 0.03, -0.06, 'XYZ']);
+  assert.deepEqual(rifle.root.scale.toArray(), [1.05, 1.05, 1.05]);
+  const tpsTransform = {
+    position: rifle.root.position.toArray(),
+    rotation: rifle.root.rotation.toArray(),
+    scale: rifle.root.scale.toArray(),
+  };
   attachRifle(rifle, sockets.fps, 'fps');
   assert.equal(sockets.tps.children.length, 0);
   assert.equal(sockets.fps.children[0], rifle.root);
   assert.equal(rifle.root.parent, sockets.fps);
+  assert.deepEqual(rifle.root.position.toArray(), [0.34, -0.28, -0.72]);
+  assert.deepEqual(rifle.root.rotation.toArray(), [-0.03, 0.02, -0.02, 'XYZ']);
+  assert.deepEqual(rifle.root.scale.toArray(), [0.42, 0.42, 0.42]);
+  assert.notDeepEqual(rifle.root.position.toArray(), tpsTransform.position);
+  assert.notDeepEqual(rifle.root.rotation.toArray(), tpsTransform.rotation);
+  assert.notDeepEqual(rifle.root.scale.toArray(), tpsTransform.scale);
   rifle.dispose();
 });
