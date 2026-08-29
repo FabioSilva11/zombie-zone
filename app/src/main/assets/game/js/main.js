@@ -9,7 +9,7 @@ import { createThirdPersonCamera } from './camera-controller.js?v=tps-unreal-1';
 import { CAMPAIGN } from './campaign.js?v=zombie-zone-16';
 import { mountCampaignUI } from './campaign-ui.js?v=zombie-zone-16';
 import { characterById, CHARACTERS } from './catalog.js';
-import { CombatSystem } from './combat.js';
+import { CombatSystem } from './combat.js?v=zombie-ai-1';
 import { createExplorationState, mountMinimap, revealAround } from './minimap.js?v=campaign-3';
 import { completeMission, routeBootFailure, shouldDisposeMission } from './mission-lifecycle.js?v=campaign-3';
 import { controllerFacingFromYaw, modelYawFromDirection } from './movement-heading.js?v=zombie-zone-18';
@@ -17,7 +17,7 @@ import { createPlayerController } from './player-controller.js?v=tps-unreal-3';
 import { createSaveStore } from './save-store.js';
 import { createScreenFlow } from './screen-flow.js';
 import { mountSelection } from './selection.js?v=zombie-zone-13';
-import { createWorld } from './world.js?v=zombie-zone-6';
+import { createWorld } from './world.js?v=zombie-zone-7';
 import { createWeaponState } from './weapon-state.js?v=campaign-3';
 import { createMusicController, MUSIC_MODES } from './music-controller.js';
 
@@ -213,7 +213,16 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
 
   loading.update('Despertando os guardiões', 75);
   const enemyData = await Promise.all(world.layout.zombieSpawns.map((spawn) => loadCharacter(loader, spawn.kind === 'green' ? 'l' : 'o', spawn)));
-  const enemies = enemyData.map((data, index) => ({ id: `enemy-${index + 1}`, ...data, health: 70, maxHealth: 70, yaw: Math.PI, speed: 0.28 + index * 0.04, attackCooldown: 0.5 + index * 0.3 }));
+  const enemies = enemyData.map((data, index) => ({
+    id: `enemy-${index + 1}`,
+    ...data,
+    health: 70,
+    maxHealth: 70,
+    yaw: Math.PI,
+    roamSpeed: 0.58 + index * 0.025,
+    chaseSpeed: 1.35 + index * 0.055,
+    attackCooldown: 0.5 + index * 0.3,
+  }));
   for (const enemy of enemies) world.scene.add(enemy.root);
 
   const collectedCrystals = new Set(collectedCrystalIds);
@@ -251,6 +260,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   let displayedHealth = maxHealth;
   const combat = new CombatSystem({
     player, enemies, canMoveTo: (position, radius) => world.canOccupy(position, radius),
+    hasLineOfSight: (from, to) => world.hasLineOfSight(from, to),
     onHudChange: ({ playerHealth, enemiesRemaining, gateOpen }) => {
       healthFill.style.width = `${Math.max(0, playerHealth / maxHealth * 100)}%`;
       if (playerHealth < displayedHealth) {
@@ -374,6 +384,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
         player.animations.play(['idle', 'static']);
       }
       combat.update(delta);
+      gameHud.dataset.enemyStates = enemies.map((enemy) => enemy.state ?? 'idle').join(',');
       weapon.update(delta); paintWeapon();
       dodgeButton.disabled = !playerController.dodgeReady;
       for (const pickup of crystalPickups) {

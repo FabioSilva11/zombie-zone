@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DUNGEON_PIECES, placementBounds } from './dungeon-catalog.js';
 import { loadBundledMap } from './map-library.js';
-import { buildFloorColliders, buildWallColliders, cameraColliderBoxes, circleHitsWall } from './map-collision.js?v=campaign-3';
+import { buildFloorColliders, buildWallColliders, cameraColliderBoxes, circleHitsWall, hasLineOfSight } from './map-collision.js?v=zombie-ai-1';
 import { canOccupy as phaseCanOccupy, floorHeightAt as phaseFloorHeightAt } from './phase-layout.js';
 import { gateBlocksPosition, gateWorldTransform } from './world-navigation.js';
 import { applyDungeonTexture, configureDungeonTexture, dungeonTextureForMap } from './map-appearance.js';
@@ -208,6 +208,13 @@ export async function createWorld(loader, onAssetProgress, mapSelection, maxAnis
     physicsSurfaces: buildFloorColliders(layout),
     cameraColliderMeshes,
     cameraWallColliders: wallColliders,
+    hasLineOfSight(from, to) {
+      return hasLineOfSight(
+        { x: from.x, y: (from.y ?? 0) + 1.15, z: from.z },
+        { x: to.x, y: (to.y ?? 0) + 1.15, z: to.z },
+        wallColliders,
+      );
+    },
     canOccupy(position, radius = 1.2) {
       const collisionRadius = actorCollisionRadius(radius);
       return phaseCanOccupy(position, radius, layout)

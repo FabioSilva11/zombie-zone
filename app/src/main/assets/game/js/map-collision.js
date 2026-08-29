@@ -138,6 +138,21 @@ function rayBoxDistance(origin, direction, maxDistance, collider, padding) {
   return near >= 0 && near <= maxDistance ? near : null;
 }
 
+export function hasLineOfSight(origin, target, colliders, padding = 0.02) {
+  const delta = {
+    x: target.x - origin.x,
+    y: target.y - origin.y,
+    z: target.z - origin.z,
+  };
+  const distance = Math.hypot(delta.x, delta.y, delta.z);
+  if (distance <= 1e-8) return true;
+  const direction = { x: delta.x / distance, y: delta.y / distance, z: delta.z / distance };
+  return !colliders.some((collider) => {
+    const hit = rayBoxDistance(origin, direction, distance, collider, padding);
+    return hit !== null && hit < distance - 0.05;
+  });
+}
+
 export function cameraDistanceBeforeWall(target, desired, colliders, radius, minimumDistance) {
   const delta = {
     x: desired.x - target.x,

@@ -1,16 +1,35 @@
-import { canMeleeHit, canRangedHit, nextEnemyState } from './game-rules.js';
+import { canMeleeHit, canRangedHit } from './game-rules.js';
 import { combatYawFromDirection, modelYawFromDirection } from './movement-heading.js';
+import {
+  alertZombie,
+  chooseSteeredStep,
+  createZombieBrain,
+  updateZombieBrain,
+  ZOMBIE_STATES,
+} from './zombie-ai.js';
 
 export class CombatSystem {
-  constructor({ player, enemies, canMoveTo, onHudChange, onGateOpen, onPlayerDefeated }) {
+  constructor({ player, enemies, canMoveTo, hasLineOfSight, onHudChange, onGateOpen, onPlayerDefeated }) {
     this.player = player;
     this.enemies = enemies;
     this.canMoveTo = canMoveTo ?? (() => true);
+    this.hasLineOfSight = hasLineOfSight ?? (() => true);
     this.onHudChange = onHudChange;
     this.onGateOpen = onGateOpen;
     this.onPlayerDefeated = onPlayerDefeated;
     this.playerAttackCooldown = 0;
     this.gateAnnounced = false;
+    this.enemies.forEach((enemy, index) => {
+      enemy.ai = createZombieBrain({
+        id: enemy.id,
+        position: enemy.root.position,
+        config: {
+          roamDelay: 1.6 + (index % 3) * 0.45,
+          roamSpeed: enemy.roamSpeed ?? 0.62,
+          chaseSpeed: enemy.chaseSpeed ?? 1.45,
+        },
+      });
+    });
   }
 
   attack() {
@@ -52,6 +71,7 @@ export class CombatSystem {
       return { fired: true, hit: false, defeated: false, targetId: target.id ?? null };
     }
     target.health = Math.max(0, target.health - Math.round(28 * (this.player.powerMultiplier ?? 1)));
+    if (target.health > 0) alertZombie(target.ai, this.player.root.position);
     const defeated = target.health === 0;
     if (defeated) target.animations.play(['die', 'idle'], { once: true, fade: 0.1 });
     this.notify();
@@ -64,35 +84,44 @@ export class CombatSystem {
 
     for (const enemy of this.enemies) {
       enemy.attackCooldown = Math.max(0, enemy.attackCooldown - delta);
-      const state = nextEnemyState(
-        { health: enemy.health, x: enemy.root.position.x, z: enemy.root.position.z },
-        { x: playerPosition.x, z: playerPosition.z },
-      );
-      if (state === 'dead') continue;
+      const action = updateZombieBrain(enemy.ai, {
+        health: enemy.health,
+        position: enemy.root.position,
+        playerPosition,
+        hasLineOfSight: this.hasLineOfSight(enemy.root.position, playerPosition),
+        canOccupy: this.canMoveTo,
+      }, delta);
+      enemy.state = action.state;
+      if (action.state === ZOMBIE_STATES.DEAD) {
+        if (action.shouldHide) enemy.root.visible = false;
+        continue;
+      }
 
-      const dx = playerPosition.x - enemy.root.position.x;
-      const dz = playerPosition.z - enemy.root.position.z;
-      const distance = Math.hypot(dx, dz) || 1;
-      enemy.yaw = combatYawFromDirection(dx, dz, enemy.yaw);
-      enemy.root.rotation.y = modelYawFromDirection(dx, dz, enemy.root.rotation.y);
+      if (action.target) {
+        const dx = action.target.x - enemy.root.position.x;
+        const dz = action.target.z - enemy.root.position.z;
+        enemy.yaw = combatYawFromDirection(dx, dz, enemy.yaw);
+        enemy.root.rotation.y = modelYawFromDirection(dx, dz, enemy.root.rotation.y);
+      }
 
-      if (state === 'chase') {
-        const next = {
-          x: enemy.root.position.x + (dx / distance) * enemy.speed * delta,
-          y: enemy.root.position.y,
-          z: enemy.root.position.z + (dz / distance) * enemy.speed * delta,
-        };
-        if (this.canMoveTo(next, 1.2)) {
+      if (action.state === ZOMBIE_STATES.CHASE || action.state === ZOMBIE_STATES.ROAM) {
+        const next = chooseSteeredStep({
+          position: enemy.root.position,
+          target: action.target,
+          maxStep: action.speed * delta,
+          canMoveTo: this.canMoveTo,
+        });
+        if (next) {
           enemy.root.position.x = next.x;
           enemy.root.position.z = next.z;
-        } else {
-          enemy.animations.play(['idle', 'static']);
-        }
-        enemy.animations.play(['walk', 'sprint', 'idle']);
-      } else if (state === 'attack') {
-        enemy.animations.play(['attack-melee-left', 'attack-melee-right', 'idle'], { once: true, fade: 0.08 });
+          enemy.animations.play(action.state === ZOMBIE_STATES.CHASE
+            ? ['sprint', 'walk', 'idle']
+            : ['walk', 'idle']);
+        } else enemy.animations.play(['idle', 'static']);
+      } else if (action.state === ZOMBIE_STATES.ATTACK) {
         if (enemy.attackCooldown <= 0) {
           enemy.attackCooldown = 1.15;
+          enemy.animations.play(['attack-melee-left', 'attack-melee-right', 'idle'], { once: true, fade: 0.08 });
           this.player.health = Math.max(0, this.player.health - 8);
           this.notify();
           if (this.player.health === 0) {
