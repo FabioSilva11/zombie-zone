@@ -18,6 +18,10 @@
 - The Android activity is landscape-only and the game interface is in Brazilian Portuguese.
 - Build with one Gradle worker, no daemon, and Kotlin compilation in process.
 - The final image must be a screenshot of the running renderer, not a mockup.
+- Each phase is exactly 1000 by 1000 metres in logical coordinates.
+- Room and corridor rectangles must not overlap; both player and enemies use the same occupancy collision test.
+- The minimap is dark for unexplored walkable cells, light for explored cells, and opens to a large overlay on tap.
+- The test phase quota is six zombies distributed in separate rooms; the exit remains locked until the quota is zero.
 
 ---
 
@@ -256,3 +260,27 @@ Record exact build/test results, APK path and size, screenshot path, and whether
 git add README.md docs/screenshots/gameplay.png docs/superpowers/plans/2026-08-28-ecos-de-eldra-prototype.md
 git commit -m "docs: add prototype verification evidence"
 ```
+
+### Task 6: Expand to kilometre phase, collision graph, and map UI
+
+**Files:**
+- Create: `app/src/main/assets/game/js/phase-layout.js`
+- Create: `app/src/main/assets/game/js/minimap.js`
+- Modify: `app/src/main/assets/game/js/game-rules.js`
+- Modify: `app/src/main/assets/game/js/world.js`
+- Modify: `app/src/main/assets/game/js/combat.js`
+- Modify: `app/src/main/assets/game/js/main.js`
+- Modify: `app/src/main/assets/game/index.html`
+- Modify: `app/src/main/assets/game/css/game.css`
+- Test: `web-tests/phase-layout.test.mjs`
+- Test: `web-tests/minimap.test.mjs`
+
+**Interfaces:**
+- Produces: `PHASE_SIZE_METERS = 1000`, `PHASE_LAYOUT`, `isWalkable(position, radius)`, `markExplored(position)`, `drawMinimap(context, state)`, and a clickable large-map overlay.
+
+- [ ] **Step 1: Write failing tests for non-overlap, connectivity, collision and map state**
+- [ ] **Step 2: Run tests and verify the missing exports fail**
+- [ ] **Step 3: Implement deterministic 1000m layout, shared collision occupancy, six-zombie quota, and streamed visual pieces**
+- [ ] **Step 4: Implement minimap, explored/unexplored rendering, tap-to-expand behavior and heart avatar icon**
+- [ ] **Step 5: Run all web tests, build, install and capture the updated device screen**
+- [ ] **Step 6: Commit the expansion**

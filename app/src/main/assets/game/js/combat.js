@@ -1,9 +1,11 @@
-import { canMeleeHit, clampToArena, nextEnemyState } from './game-rules.js';
+import { canMeleeHit, canRangedHit, nextEnemyState } from './game-rules.js';
+import { combatYawFromDirection, modelYawFromDirection } from './movement-heading.js';
 
 export class CombatSystem {
-  constructor({ player, enemies, onHudChange, onGateOpen, onPlayerDefeated }) {
+  constructor({ player, enemies, canMoveTo, onHudChange, onGateOpen, onPlayerDefeated }) {
     this.player = player;
     this.enemies = enemies;
+    this.canMoveTo = canMoveTo ?? (() => true);
     this.onHudChange = onHudChange;
     this.onGateOpen = onGateOpen;
     this.onPlayerDefeated = onPlayerDefeated;
@@ -34,6 +36,28 @@ export class CombatSystem {
     return true;
   }
 
+  fire(target) {
+    if (this.playerAttackCooldown > 0 || this.player.health <= 0) {
+      return { fired: false, hit: false, defeated: false, targetId: null };
+    }
+    this.playerAttackCooldown = 0.45;
+    this.player.animations.play(['attack-melee-right', 'attack-melee-left', 'idle'], { once: true, fade: 0.06 });
+    if (!target) return { fired: true, hit: false, defeated: false, targetId: null };
+    const distance = Math.hypot(
+      target.root.position.x - this.player.root.position.x,
+      target.root.position.y - this.player.root.position.y,
+      target.root.position.z - this.player.root.position.z,
+    );
+    if (!canRangedHit({ health: target.health, distance })) {
+      return { fired: true, hit: false, defeated: false, targetId: target.id ?? null };
+    }
+    target.health = Math.max(0, target.health - Math.round(28 * (this.player.powerMultiplier ?? 1)));
+    const defeated = target.health === 0;
+    if (defeated) target.animations.play(['die', 'idle'], { once: true, fade: 0.1 });
+    this.notify();
+    return { fired: true, hit: true, defeated, targetId: target.id ?? null };
+  }
+
   update(delta) {
     this.playerAttackCooldown = Math.max(0, this.playerAttackCooldown - delta);
     const playerPosition = this.player.root.position;
@@ -49,16 +73,21 @@ export class CombatSystem {
       const dx = playerPosition.x - enemy.root.position.x;
       const dz = playerPosition.z - enemy.root.position.z;
       const distance = Math.hypot(dx, dz) || 1;
-      enemy.yaw = Math.atan2(dx, -dz);
-      enemy.root.rotation.y = enemy.yaw + Math.PI;
+      enemy.yaw = combatYawFromDirection(dx, dz, enemy.yaw);
+      enemy.root.rotation.y = modelYawFromDirection(dx, dz, enemy.root.rotation.y);
 
       if (state === 'chase') {
-        const next = clampToArena({
+        const next = {
           x: enemy.root.position.x + (dx / distance) * enemy.speed * delta,
+          y: enemy.root.position.y,
           z: enemy.root.position.z + (dz / distance) * enemy.speed * delta,
-        });
-        enemy.root.position.x = next.x;
-        enemy.root.position.z = next.z;
+        };
+        if (this.canMoveTo(next, 1.2)) {
+          enemy.root.position.x = next.x;
+          enemy.root.position.z = next.z;
+        } else {
+          enemy.animations.play(['idle', 'static']);
+        }
         enemy.animations.play(['walk', 'sprint', 'idle']);
       } else if (state === 'attack') {
         enemy.animations.play(['attack-melee-left', 'attack-melee-right', 'idle'], { once: true, fade: 0.08 });

@@ -14,8 +14,8 @@ export function selectCharacter(model, selectedId) {
   return createSelectionModel(model.cards, selectedId);
 }
 
-export function mountSelection(root, characters, onPlay) {
-  let model = createSelectionModel(characters);
+export function mountSelection(root, characters, onPlay, { selectedId, onSelect } = {}) {
+  let model = createSelectionModel(characters, selectedId);
   const grid = root.querySelector('[data-character-grid]');
   const heroName = root.querySelector('[data-selected-name]');
   const playButton = root.querySelector('[data-play-button]');
@@ -35,6 +35,7 @@ export function mountSelection(root, characters, onPlay) {
       button.addEventListener('click', () => {
         model = selectCharacter(model, character.id);
         render();
+        onSelect?.(model.selected.id);
       });
       return button;
     }));
@@ -44,4 +45,3 @@ export function mountSelection(root, characters, onPlay) {
   render();
   return { getSelected: () => model.selected };
 }
-

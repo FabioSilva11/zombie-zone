@@ -4,26 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <meta name="theme-color" content="#080b14">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'none'">
-  <title>Ecos de Eldra</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>Zombie Zone</title>
   <link rel="icon" href="./images/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./css/game.css">
+  <link rel="stylesheet" href="./css/game.css?v=zombie-zone-13">
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
+      "three": "./vendor/three.module.js",
+      "three/addons/": "./vendor/three/addons/",
+      "camera-controls": "./vendor/camera-controls.module.js",
+      "@dimforge/rapier3d-compat": "./vendor/rapier.mjs",
+      "nipplejs": "./vendor/nipplejs.mjs"
     }
   }
   </script>
 </head>
 <body>
-  <main id="game-root" aria-label="Mundo de Ecos de Eldra"></main>
+  <main id="game-root" aria-label="Mundo de Zombie Zone"></main>
 
   <section id="loading-screen" class="screen loading-screen" aria-live="polite">
     <div class="loading-rune" aria-hidden="true"><span></span></div>
-    <p class="eyebrow">ECOS DE ELDRA</p>
-    <h1>O portal está despertando</h1>
+    <p class="eyebrow">ZOMBIE ZONE</p>
+    <h1>Preparando a Zona Z</h1>
     <div class="loading-track"><span data-loading-fill></span></div>
     <div class="loading-copy">
       <span data-loading-label>Conectando ao reino</span>
@@ -32,57 +35,113 @@
     <button id="retry-button" class="primary-button compact" type="button" hidden>Tentar novamente</button>
   </section>
 
+  <section id="home-screen" class="screen campaign-screen home-screen is-hidden">
+    <header class="campaign-topbar">
+      <div><p class="eyebrow">ZOMBIE ZONE</p><h1>A cidade precisa de você!</h1></div>
+      <div class="resource-row"><span>★ <b data-total-stars>0</b></span><span>◆ <b data-crystals>0</b></span></div>
+    </header>
+    <div class="home-stage">
+      <div class="home-avatar"><span class="avatar-aura"></span><div class="avatar-preview" data-avatar-preview="home" aria-label="Avatar 3D escolhido"></div></div>
+      <div class="home-copy"><p class="eyebrow">ZONA 1</p><h2>A invasão começou!</h2><p data-home-progress>Comece sua missão no centro abandonado.</p><button class="primary-button hero-action" data-home-continue data-primary-action type="button">CONTINUAR AVENTURA <b>›</b></button><div class="secondary-actions"><button data-home-avatar-button type="button">Avatar</button><button data-open-settings type="button">Configurações</button></div></div>
+    </div>
+  </section>
+
+  <section id="chapter-screen" class="screen campaign-screen chapter-screen is-hidden">
+    <header class="campaign-topbar"><button class="back-button" data-chapter-back type="button">‹ Início</button><div><p class="eyebrow">MAPA DA CAMPANHA</p><h1>Zona 1 • Centro Abandonado</h1></div><div class="resource-row"><span>★ <b data-total-stars>0</b></span><span>◆ <b data-crystals>0</b></span></div></header>
+    <div class="chapter-landscape"><div class="chapter-path" data-stage-path></div></div><p class="chapter-hint">Conclua uma fase para liberar a próxima área.</p>
+  </section>
+
+  <section id="story-screen" class="screen campaign-screen story-screen is-hidden">
+    <div class="story-visual"><div class="story-rune">◇</div></div><article class="story-card"><p class="eyebrow" data-story-label>ANTES DA MISSÃO</p><h2 data-story-speaker>Nyra</h2><div data-story-lines></div><footer><button class="text-button" data-story-skip type="button">Pular</button><button class="primary-button compact" data-story-continue data-primary-action type="button">Continuar ›</button></footer></article>
+  </section>
+
+  <section id="preparation-screen" class="screen campaign-screen preparation-screen is-hidden">
+    <header class="campaign-topbar"><button class="back-button" data-preparation-back type="button">‹ Mapa</button><div><p class="eyebrow">PREPARAÇÃO</p><h1 data-preparation-title>Primeiro Alarme</h1></div><div class="resource-row"><span>◆ <b data-crystals>0</b></span></div></header>
+    <div class="preparation-grid"><div class="preparation-avatar avatar-preview" data-avatar-preview="preparation" aria-label="Herói 3D preparado"></div><article class="mission-brief"><span class="mission-number" data-mission-number>01</span><p class="eyebrow">OBJETIVO</p><h2 data-mission-objective>Afaste os zumbis.</h2><div class="mission-metrics"><span>◷ <b data-target-time>02:30</b><small>Tempo-alvo</small></span><span>◆ <b data-first-reward>50</b><small>Primeira vitória</small></span></div></article><div class="upgrade-list"><p class="eyebrow">FORTALEÇA SEU HERÓI</p><article class="upgrade-card"><span class="upgrade-icon">♥</span><div><h3>Vitalidade <small data-vitality-level>Nível 0/5</small></h3><p>Mais vida para resistir às hordas.</p></div><button data-upgrade="vitality" type="button">◆ <b data-vitality-cost>50</b></button></article><article class="upgrade-card"><span class="upgrade-icon power">✦</span><div><h3>Poder <small data-power-level>Nível 0/5</small></h3><p>Mais dano em cada disparo.</p></div><button data-upgrade="power" type="button">◆ <b data-power-cost>50</b></button></article></div></div>
+    <button class="primary-button mission-start" data-start-mission data-primary-action type="button">INICIAR MISSÃO <b>›</b></button>
+  </section>
+
   <section id="selection-screen" class="screen selection-screen is-hidden">
     <div class="selection-header">
       <div>
-        <p class="eyebrow">ESCOLHA SEU VIAJANTE</p>
-        <h1>Quem ouvirá os ecos?</h1>
-        <p class="subtitle">Cada herói domina as mesmas habilidades neste primeiro portal.</p>
+        <p class="eyebrow">ESCOLHA SEU HERÓI</p>
+        <h1>Escolha quem vai salvar a cidade</h1>
+        <p class="subtitle">Todos os heróis estão prontos para enfrentar a Zona Z.</p>
       </div>
       <div class="selection-seal" aria-hidden="true">18</div>
     </div>
-    <div class="character-grid" data-character-grid></div>
+    <div class="selection-content"><div class="selection-preview avatar-preview" data-avatar-preview="avatar" aria-label="Prévia 3D do avatar"></div><div class="character-grid" data-character-grid></div></div>
     <footer class="selection-footer">
       <div class="chosen-copy">
-        <span>Viajante escolhido</span>
+        <span>Herói escolhido</span>
         <strong data-selected-name>Kael</strong>
       </div>
       <button class="primary-button" data-play-button type="button">
-        <span>ENTRAR NAS RUÍNAS</span><b aria-hidden="true">›</b>
+        <span>ENTRAR NA ZONA</span><b aria-hidden="true">›</b>
       </button>
     </footer>
   </section>
 
   <section id="game-hud" class="game-hud is-hidden" aria-label="Interface do jogo">
     <div class="hud-top">
-      <div class="health-card">
-        <div class="portrait-rune">✦</div>
-        <div class="health-copy">
-          <span data-player-name>Viajante</span>
-          <div class="health-track"><span data-health-fill></span></div>
+      <div class="hud-left">
+        <button id="minimap-button" class="minimap-button" type="button" aria-label="Abrir mapa da fase">
+          <canvas id="minimap-canvas" width="180" height="180"></canvas>
+          <span>MAPA</span>
+        </button>
+        <div class="health-card">
+          <div class="portrait-rune" aria-hidden="true">♥</div>
+          <div class="health-copy">
+            <span data-player-name>Herói</span>
+            <div class="health-track"><span data-health-fill></span></div>
+          </div>
         </div>
       </div>
       <div class="objective-card">
         <span class="objective-icon">◇</span>
-        <div><small>OBJETIVO</small><strong data-objective>Derrote os guardiões</strong></div>
+        <div><small>OBJETIVO</small><strong data-objective>Derrote os zumbis</strong></div>
       </div>
     </div>
     <div id="camera-zone" aria-label="Área para girar a câmera"></div>
-    <div id="joystick" class="joystick" aria-label="Controle de movimento">
-      <span class="joystick-ring"></span><span class="joystick-knob"></span>
+    <div class="reticle" data-reticle><span></span><small data-target-health></small></div>
+    <div class="damage-vignette" data-damage-vignette></div>
+    <div class="crystal-feedback" data-crystal-feedback>◆ <b>0</b>/3</div>
+    <button id="pause-button" class="pause-button" type="button" aria-label="Pausar">Ⅱ</button>
+    <div id="joystick" class="movement-zone" aria-label="Controle de movimento"></div>
+    <div class="action-cluster">
+      <button id="reload-button" class="utility-action" type="button" aria-label="Recarregar"><span data-ammo-count>6/6</span><small>RECARREGAR</small></button>
+      <button id="dodge-button" class="utility-action" type="button" aria-label="Esquivar"><span>↝</span><small>ESQUIVA</small></button>
+      <button id="attack-button" class="attack-button" type="button" aria-label="Atacar"><span>✦</span><small>ATIRAR</small></button>
     </div>
-    <button id="attack-button" class="attack-button" type="button" aria-label="Atacar">
-      <span>⚔</span><small>ATACAR</small>
-    </button>
+  </section>
+
+  <section id="map-overlay" class="map-overlay is-hidden" aria-label="Mapa da fase">
+    <div class="map-panel">
+      <div class="map-header">
+        <div>
+          <p class="eyebrow">GRID 50 × 50 • 2 ANDARES</p>
+          <h2>Mapa da Zona Z</h2>
+        </div>
+        <button class="map-close" data-close-map type="button" aria-label="Fechar mapa">×</button>
+      </div>
+      <canvas id="large-map-canvas" width="820" height="820"></canvas>
+      <p class="map-legend"><span class="legend-swatch explored"></span>Explorado <span class="legend-swatch hidden"></span>Não explorado</p>
+    </div>
   </section>
 
   <section id="completion-screen" class="completion-card is-hidden">
-    <p class="eyebrow">PORTAL CONQUISTADO</p>
-    <h2>Os ecos responderam</h2>
-    <p>Você derrotou os guardiões e abriu a passagem.</p>
+    <p class="eyebrow">ÁREA CONQUISTADA</p>
+    <h2>A cidade está mais segura!</h2>
+    <p>Você derrotou os zumbis e liberou a passagem.</p>
     <button id="play-again-button" class="primary-button compact" type="button">Jogar novamente</button>
   </section>
 
-  <script type="module" src="./js/bootstrap.js"></script>
+  <section id="pause-screen" class="modal-screen is-hidden"><div class="pause-panel"><p class="eyebrow">JOGO PAUSADO</p><h2>Respire e volte para a ação</h2><button class="primary-button compact" data-resume-game data-primary-action type="button">Continuar</button><label>Sensibilidade da câmera<input data-camera-sensitivity type="range" min="0.5" max="2" step="0.1" value="1"></label><button data-restart-stage type="button">Reiniciar fase</button><button data-return-map type="button">Voltar ao mapa</button></div></section>
+  <section id="settings-screen" class="modal-screen is-hidden"><div class="settings-panel"><p class="eyebrow">CONFIGURAÇÕES</p><h2>Ajuste sua jornada</h2><label>Sensibilidade da câmera<input data-camera-sensitivity type="range" min="0.5" max="2" step="0.1" value="1"></label><label class="toggle-row"><span>Som do jogo</span><input data-sound-enabled type="checkbox" checked></label><button class="primary-button compact" data-settings-close data-primary-action type="button">Salvar e voltar</button></div></section>
+  <section id="victory-screen" class="modal-screen result-screen is-hidden"><div class="result-panel victory-panel"><p class="eyebrow">MISSÃO CONCLUÍDA</p><h2>Zona liberada!</h2><div class="victory-avatar avatar-preview" data-avatar-preview="victory" aria-label="Avatar 3D comemorando"></div><div class="result-stars" data-result-stars>☆☆☆</div><p><strong>+<span data-result-crystals>0</span></strong> cristais conquistados</p><button class="primary-button compact" data-next-stage data-primary-action type="button">Próxima fase ›</button><button class="text-button" data-result-map type="button">Voltar ao mapa</button></div></section>
+  <section id="defeat-screen" class="modal-screen result-screen is-hidden"><div class="result-panel defeat"><p class="eyebrow">A HORDA VENCEU DESTA VEZ</p><h2 data-defeat-title>Os zumbis bloquearam o caminho</h2><p>Fortaleça seu herói ou tente novamente.</p><button class="primary-button compact" data-retry-stage data-primary-action type="button">Tentar novamente</button><button data-defeat-preparation type="button">Preparação</button><button class="text-button" data-defeat-map type="button">Mapa</button></div></section>
+  <section id="compatibility-screen" class="screen campaign-screen compatibility-screen is-hidden"><div class="compatibility-card"><span>!</span><p class="eyebrow">DISPOSITIVO INCOMPATÍVEL</p><h1>Este portal não pode abrir</h1><p data-compatibility-message>O aparelho não oferece os recursos gráficos necessários.</p><button class="primary-button compact" data-retry-app data-primary-action type="button">Tentar novamente</button></div></section>
+
+  <script type="module" src="./js/bootstrap.js?v=zombie-zone-24"></script>
 </body>
 </html>

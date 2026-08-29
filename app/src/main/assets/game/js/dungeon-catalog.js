@@ -78,3 +78,13 @@ export function rotatePiece(source, turns = 0) {
     }))),
   });
 }
+
+export function placementBounds(placement) {
+  const rotated = rotatePiece(pieceById(placement.pieceId), placement.rotation);
+  return {
+    minX: placement.x,
+    minZ: placement.z,
+    maxX: placement.x + rotated.footprint.width,
+    maxZ: placement.z + rotated.footprint.height,
+  };
+}

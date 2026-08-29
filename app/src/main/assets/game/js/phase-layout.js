@@ -1,13 +1,10 @@
-import { pieceById, rotatePiece } from './dungeon-catalog.js';
-import { generateDungeon, placementBounds } from './dungeon-generator.js';
+import { pieceById, placementBounds, rotatePiece } from './dungeon-catalog.js';
 
 export const GRID_WIDTH = 50;
 export const GRID_HEIGHT = 50;
 export const CELL_SIZE_METERS = 4;
 export const LEVEL_HEIGHT_METERS = 4.05;
 export const PHASE_SIZE_METERS = GRID_WIDTH * CELL_SIZE_METERS;
-
-export const PHASE_LAYOUT = Object.freeze(generateDungeon(8128));
 
 function worldBounds(placement) {
   const bounds = placementBounds(placement);
@@ -19,7 +16,7 @@ function worldBounds(placement) {
   };
 }
 
-export function allRegions(layout = PHASE_LAYOUT) {
+export function allRegions(layout) {
   return layout.placements.filter((placement) => !placement.edge).map((placement) => ({
     ...worldBounds(placement),
     id: placement.id,
@@ -54,7 +51,7 @@ function candidateFloorHeight(placement, position, layout) {
   return base + progress * layout.levelHeight;
 }
 
-export function floorHeightAt(position, layout = PHASE_LAYOUT) {
+export function floorHeightAt(position, layout) {
   const candidates = layout.placements
     .filter((placement) => !placement.edge && containsWorldPoint(placement, position))
     .map((placement) => candidateFloorHeight(placement, position, layout));
@@ -65,11 +62,11 @@ export function floorHeightAt(position, layout = PHASE_LAYOUT) {
   ));
 }
 
-export function pointInLayout(position, layout = PHASE_LAYOUT) {
+export function pointInLayout(position, layout) {
   return floorHeightAt(position, layout) !== null;
 }
 
-export function canOccupy(position, radius = 1.2, layout = PHASE_LAYOUT) {
+export function canOccupy(position, radius = 1.2, layout) {
   const centerHeight = floorHeightAt(position, layout);
   if (centerHeight === null) return false;
   const samples = [
@@ -85,7 +82,7 @@ export function canOccupy(position, radius = 1.2, layout = PHASE_LAYOUT) {
   });
 }
 
-export function layoutIsConnected(layout = PHASE_LAYOUT) {
+export function layoutIsConnected(layout) {
   const floor = layout.placements.filter((placement) => !placement.edge);
   const adjacency = new Map(floor.map((placement) => [placement.id, []]));
   for (const connection of layout.connections) {
@@ -103,7 +100,7 @@ export function layoutIsConnected(layout = PHASE_LAYOUT) {
   return visited.size === floor.length;
 }
 
-export function levelAt(position, layout = PHASE_LAYOUT) {
+export function levelAt(position, layout) {
   const height = floorHeightAt(position, layout);
   return height === null ? null : Math.round(height / layout.levelHeight);
 }

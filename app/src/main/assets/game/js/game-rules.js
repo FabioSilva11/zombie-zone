@@ -24,6 +24,10 @@ export function canMeleeHit(attacker, target, range = 2.15, minDot = 0.25) {
   return dot >= minDot;
 }
 
+export function canRangedHit(target, range = 18) {
+  return Number(target?.health) > 0 && Number(target?.distance) <= range;
+}
+
 export function nextEnemyState(enemy, player) {
   if (enemy.health <= 0) return 'dead';
   const distance = Math.hypot(player.x - enemy.x, player.z - enemy.z);

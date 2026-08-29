@@ -91,3 +91,13 @@ Loading failures show a clear Portuguese message and a retry button. Loading pro
 ## Success criteria
 
 The prototype is complete when a debug APK builds, the game starts with internet access, a player can select any character, enter the dungeon, move and rotate the camera, perform melee attacks, defeat two enemies, and see the gate open. A real screenshot of the running gameplay must be delivered with the result.
+
+## Phase and map expansion
+
+Each phase is a logical square of exactly 1000 by 1000 metres. A deterministic room-and-corridor graph connects the constructions; rooms are placed from non-overlapping rectangles and corridors are explicit traversable links. Visual GLB instances stream around the player, while the complete graph remains available for navigation and the minimap.
+
+The top-left HUD contains a square minimap. Walkable layout cells are dark until revealed, then become light; the player is cyan and nearby zombies are visible only after their cells are explored. Tapping the minimap opens a large map overlay, and a close control returns to gameplay.
+
+Collision uses the same room/corridor occupancy data for player and zombie movement. A circular actor radius is tested against solid borders and blocked cells before every movement step, so neither actor can walk through a wall or leave the phase. Each phase has a configured zombie quota; this test phase uses six zombies distributed across separated rooms, and the exit objective is unavailable until the quota is defeated.
+
+The HUD avatar marker uses a heart icon instead of a star.

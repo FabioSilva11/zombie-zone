@@ -1,4 +1,4 @@
-import { DUNGEON_PIECES, pieceById, rotatePiece } from './dungeon-catalog.js';
+import { DUNGEON_PIECES, pieceById, placementBounds, rotatePiece } from './dungeon-catalog.js';
 
 const OPPOSITE = Object.freeze({ N: 'S', S: 'N', E: 'W', W: 'E' });
 const GRID_SIZE = 50;
@@ -26,15 +26,7 @@ function shuffled(values, random) {
   return copy;
 }
 
-export function placementBounds(placement) {
-  const rotated = rotatePiece(pieceById(placement.pieceId), placement.rotation);
-  return {
-    minX: placement.x,
-    minZ: placement.z,
-    maxX: placement.x + rotated.footprint.width,
-    maxZ: placement.z + rotated.footprint.height,
-  };
-}
+export { placementBounds };
 
 export function socketWorldPosition(placement, socket) {
   const rotated = rotatePiece(pieceById(placement.pieceId), placement.rotation);

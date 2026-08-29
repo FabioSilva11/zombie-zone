@@ -1,0 +1,1042 @@
+{
+  "version": 1,
+  "name": "Mapa aleatório 1219509698 • 111 peças • 1 andar",
+  "width": 50,
+  "height": 50,
+  "cellSize": 4,
+  "levelHeight": 4.05,
+  "maxElements": 200,
+  "maxLevels": 1,
+  "nextId": 112,
+  "placements": [
+    {
+      "id": "generated-1-roomLarge",
+      "pieceId": "roomLarge",
+      "x": 22.5,
+      "z": 22.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "generated-2-corridorIntersection",
+      "pieceId": "corridorIntersection",
+      "x": 27.5,
+      "z": 24.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "generated-3-roomLargeVariation",
+      "pieceId": "roomLargeVariation",
+      "x": 22.5,
+      "z": 17.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "generated-4-corridorJunction",
+      "pieceId": "corridorJunction",
+      "x": 27.5,
+      "z": 19.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "generated-5-roomWideVariation",
+      "pieceId": "roomWideVariation",
+      "x": 23.5,
+      "z": 12.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "generated-6-corridorEnd",
+      "pieceId": "corridorEnd",
+      "x": 21.5,
+      "z": 24.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "generated-7-roomWide",
+      "pieceId": "roomWide",
+      "x": 17.5,
+      "z": 18.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "generated-8-roomCorner",
+      "pieceId": "roomCorner",
+      "x": 18.5,
+      "z": 15.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "generated-9-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 28.5,
+      "z": 19,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "generated-10-corridorWideIntersection",
+      "pieceId": "corridorWideIntersection",
+      "x": 30.5,
+      "z": 19,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "generated-11-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 32.5,
+      "z": 19,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "generated-12-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 32.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "generated-13-gateDoor",
+      "pieceId": "gateDoor",
+      "x": 22.5,
+      "z": 25,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "role": "final",
+      "anchorPlacementId": "p0-roomLarge"
+    },
+    {
+      "id": "generated-14-gateDoorWindow",
+      "pieceId": "gateDoorWindow",
+      "x": 25,
+      "z": 17.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": true,
+      "role": "door",
+      "anchorPlacementId": "p2-roomLargeVariation"
+    },
+    {
+      "id": "generated-15-gate",
+      "pieceId": "gate",
+      "x": 22.5,
+      "z": 20,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "role": "open",
+      "anchorPlacementId": "p2-roomLargeVariation"
+    },
+    {
+      "id": "generated-16-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 28.5,
+      "z": 25,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "role": "blocked",
+      "anchorPlacementId": "p1-corridorIntersection"
+    },
+    {
+      "id": "manual-17-corridor",
+      "pieceId": "corridor",
+      "x": 27.5,
+      "z": 23.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-18-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 30.5,
+      "z": 17,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-19-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 21.5,
+      "z": 16.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-20-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 24.5,
+      "z": 11.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-21-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 25.5,
+      "z": 11.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-22-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 27.5,
+      "z": 22.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-23-corridor",
+      "pieceId": "corridor",
+      "x": 21.5,
+      "z": 17.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-24-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 30.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-25-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 16.5,
+      "z": 19.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-26-corridor",
+      "pieceId": "corridor",
+      "x": 27.5,
+      "z": 25.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-27-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 30.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-28-corridor",
+      "pieceId": "corridor",
+      "x": 24.5,
+      "z": 27.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-29-corridor",
+      "pieceId": "corridor",
+      "x": 27.5,
+      "z": 26.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-30-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 32.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-31-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 34.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-32-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 28.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-33-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 36.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-34-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 30.5,
+      "z": 15,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-35-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 27.5,
+      "z": 27.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-36-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 28.5,
+      "z": 27,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-37-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 24.5,
+      "z": 28.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-38-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 19.5,
+      "z": 21.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-39-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 38.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-40-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 40.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-41-corridor",
+      "pieceId": "corridor",
+      "x": 18.5,
+      "z": 21.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-42-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 16.5,
+      "z": 18.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-43-corridor",
+      "pieceId": "corridor",
+      "x": 25.5,
+      "z": 28.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-44-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 27.5,
+      "z": 20.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-45-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 30.5,
+      "z": 13,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-46-corridor",
+      "pieceId": "corridor",
+      "x": 17.5,
+      "z": 21.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-47-corridor",
+      "pieceId": "corridor",
+      "x": 16.5,
+      "z": 21.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-48-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 40.5,
+      "z": 25,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-49-corridor",
+      "pieceId": "corridor",
+      "x": 26.5,
+      "z": 28.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-50-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 28.5,
+      "z": 13,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-51-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 40.5,
+      "z": 27,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-52-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 28.5,
+      "z": 15,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-53-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 38.5,
+      "z": 27,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-54-corridor",
+      "pieceId": "corridor",
+      "x": 15.5,
+      "z": 21.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-55-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 27.5,
+      "z": 28.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-56-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 13.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-57-corridor",
+      "pieceId": "corridor",
+      "x": 27.5,
+      "z": 29.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-58-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 11.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-59-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 27.5,
+      "z": 30.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-60-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 30.5,
+      "z": 27,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-61-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 9.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-62-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 32.5,
+      "z": 27,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-63-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 38.5,
+      "z": 29,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-64-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 39,
+      "z": 31,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-65-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 7.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-66-corridor",
+      "pieceId": "corridor",
+      "x": 40,
+      "z": 31,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-67-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 5.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-68-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 41,
+      "z": 30.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-69-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 3.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-70-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 3.5,
+      "z": 19,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-71-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 26.5,
+      "z": 30.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-72-corridor",
+      "pieceId": "corridor",
+      "x": 26.5,
+      "z": 29.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-73-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 34.5,
+      "z": 27,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-74-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 43,
+      "z": 30.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-75-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 5.5,
+      "z": 19,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-76-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 36.5,
+      "z": 27,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-77-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 43,
+      "z": 32.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-78-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 5.5,
+      "z": 17,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-79-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 5.5,
+      "z": 15,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-80-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 45,
+      "z": 32.5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-81-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 5.5,
+      "z": 13,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-82-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 6,
+      "z": 12,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-83-corridorWideCorner",
+      "pieceId": "corridorWideCorner",
+      "x": 45,
+      "z": 34.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-84-corridor",
+      "pieceId": "corridor",
+      "x": 5,
+      "z": 12,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-85-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 4,
+      "z": 12,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-86-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 47,
+      "z": 34.5,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-87-corridor",
+      "pieceId": "corridor",
+      "x": 4,
+      "z": 11,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-88-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 49,
+      "z": 35,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-89-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 4,
+      "z": 10,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-90-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 49,
+      "z": 36,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-91-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 3,
+      "z": 10,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-92-corridor",
+      "pieceId": "corridor",
+      "x": 3,
+      "z": 9,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-93-corridor",
+      "pieceId": "corridor",
+      "x": 3,
+      "z": 8,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-94-corridor",
+      "pieceId": "corridor",
+      "x": 3,
+      "z": 7,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-95-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 3,
+      "z": 6,
+      "level": 0,
+      "rotation": 2,
+      "edge": false
+    },
+    {
+      "id": "manual-96-corridorCorner",
+      "pieceId": "corridorCorner",
+      "x": 4,
+      "z": 6,
+      "level": 0,
+      "rotation": 0,
+      "edge": false
+    },
+    {
+      "id": "manual-97-corridor",
+      "pieceId": "corridor",
+      "x": 4,
+      "z": 5,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-98-corridor",
+      "pieceId": "corridor",
+      "x": 4,
+      "z": 4,
+      "level": 0,
+      "rotation": 1,
+      "edge": false
+    },
+    {
+      "id": "manual-99-corridorTransition",
+      "pieceId": "corridorTransition",
+      "x": 3.5,
+      "z": 2,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-100-corridorWide",
+      "pieceId": "corridorWide",
+      "x": 3.5,
+      "z": 0,
+      "level": 0,
+      "rotation": 3,
+      "edge": false
+    },
+    {
+      "id": "manual-101-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 26,
+      "z": 12.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-102-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 28.5,
+      "z": 23,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-103-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 22,
+      "z": 18.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-104-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 28.5,
+      "z": 24,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "socketWidth": "wide",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-105-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 17.5,
+      "z": 19,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-106-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 28.5,
+      "z": 21,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-107-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 30.5,
+      "z": 16,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "socketWidth": "wide",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-108-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 27,
+      "z": 29.5,
+      "level": 0,
+      "rotation": 0,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-109-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 38.5,
+      "z": 28,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-110-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 49,
+      "z": 36.5,
+      "level": 0,
+      "rotation": 1,
+      "edge": true,
+      "socketWidth": "narrow",
+      "role": "generated-closure"
+    },
+    {
+      "id": "manual-111-gateMetalBars",
+      "pieceId": "gateMetalBars",
+      "x": 4.5,
+      "z": 0,
+      "level": 0,
+      "rotation": 0,
+      "edge": true,
+      "socketWidth": "wide",
+      "role": "generated-closure"
+    }
+  ]
+}

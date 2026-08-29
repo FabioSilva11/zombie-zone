@@ -1,0 +1,16 @@
+{
+  "name": "ecos-de-eldra-map-editor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Editor visual Three.js para mapas modulares de dois andares.",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "generate:collisions": "node scripts/generate-collision-templates.mjs"
+  },
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}

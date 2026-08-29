@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canMeleeHit,
+  canRangedHit,
   clampToArena,
   nextEnemyState,
 } from '../app/src/main/assets/game/js/game-rules.js';
@@ -10,6 +11,12 @@ test('arena clamp keeps movement inside the playable rectangle', () => {
   assert.deepEqual(clampToArena({ x: 99, z: -99 }), { x: 11.5, z: -17.5 });
   assert.deepEqual(clampToArena({ x: -99, z: 99 }), { x: -11.5, z: 17.5 });
   assert.deepEqual(clampToArena({ x: 2, z: -3 }), { x: 2, z: -3 });
+});
+
+test('tiro exige alcance e alvo vivo, mas não depende do cone corpo a corpo', () => {
+  assert.equal(canRangedHit({ health: 50, distance: 17.9 }, 18), true);
+  assert.equal(canRangedHit({ health: 50, distance: 18.1 }, 18), false);
+  assert.equal(canRangedHit({ health: 0, distance: 2 }, 18), false);
 });
 
 test('melee hits a nearby target in front but never one behind', () => {

@@ -1,5 +1,17 @@
 import * as THREE from 'three';
-import { DUNGEON_ASSETS } from './catalog.js';
+import { DUNGEON_PIECES, placementBounds } from './dungeon-catalog.js';
+import { loadBundledMap } from './map-library.js';
+import { buildFloorColliders, buildWallColliders, cameraColliderBoxes, circleHitsWall } from './map-collision.js?v=campaign-3';
+import { canOccupy as phaseCanOccupy, floorHeightAt as phaseFloorHeightAt } from './phase-layout.js';
+import { gateBlocksPosition, gateWorldTransform } from './world-navigation.js';
+
+const ACTOR_CAPSULE_HEIGHT = 1.78;
+const ACTOR_CAPSULE_RADIUS = 0.5;
+const ACTOR_STEP_HEIGHT = 0.28;
+
+function actorCollisionRadius(requestedRadius) {
+  return Math.min(ACTOR_CAPSULE_RADIUS, Math.max(0.36, requestedRadius * 0.42));
+}
 
 function prepareModel(root) {
   root.traverse((child) => {
@@ -11,167 +23,199 @@ function prepareModel(root) {
   return root;
 }
 
-async function loadPlaced(loader, definition, onProgress) {
-  try {
-    const gltf = await loader.loadAsync(definition.url);
-    const root = prepareModel(gltf.scene);
-    root.position.set(...definition.position);
-    root.rotation.y = definition.rotation ?? 0;
-    root.scale.setScalar(definition.scale ?? 1);
-    onProgress?.(definition.label, true);
-    return { root, animations: gltf.animations };
-  } catch (error) {
-    console.warn(`Falha ao carregar ${definition.label}`, error);
-    onProgress?.(definition.label, false);
-    return null;
-  }
+async function loadPiece(loader, definition, onProgress) {
+  const gltf = await loader.loadAsync(definition.url);
+  onProgress?.(definition.id, true);
+  return { root: prepareModel(gltf.scene), animations: gltf.animations };
 }
 
-function addFallbackArchitecture(scene) {
-  const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x4d3554, roughness: 0.9 });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(25, 37), floorMaterial);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
-
-  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x625a91, roughness: 0.82 });
-  const wallDefinitions = [
-    [0, 1.3, -18, 25, 2.6, 0.7],
-    [0, 1.3, 18, 25, 2.6, 0.7],
-    [-12, 1.3, 0, 0.7, 2.6, 37],
-    [12, 1.3, 0, 0.7, 2.6, 37],
-  ];
-  for (const [x, y, z, width, height, depth] of wallDefinitions) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), wallMaterial);
-    wall.position.set(x, y, z);
-    wall.castShadow = true;
-    wall.receiveShadow = true;
-    scene.add(wall);
-  }
-
-  const pillarMaterial = new THREE.MeshStandardMaterial({ color: 0x776ea6, roughness: 0.72 });
-  for (const z of [-13, -5, 4, 13]) {
-    for (const x of [-9.8, 9.8]) {
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.78, 3.5, 8), pillarMaterial);
-      pillar.position.set(x, 1.75, z);
-      pillar.castShadow = true;
-      pillar.receiveShadow = true;
-      scene.add(pillar);
-    }
-  }
+function floorWorldCenter(placement, layout) {
+  const bounds = placementBounds(placement);
+  return {
+    x: ((bounds.minX + bounds.maxX) / 2) * layout.cellSize,
+    z: ((bounds.minZ + bounds.maxZ) / 2) * layout.cellSize,
+    y: placement.level * layout.levelHeight,
+  };
 }
 
-function addAtmosphere(scene) {
+function placeFloorPiece(asset, placement, layout, scene) {
+  const root = asset.root;
+  root.rotation.y = -placement.rotation * Math.PI / 2;
+  root.position.set(0, 0, 0);
+  root.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const target = floorWorldCenter(placement, layout);
+  root.position.set(target.x - center.x, target.y - bounds.min.y, target.z - center.z);
+  root.updateMatrixWorld(true);
+  scene.add(root);
+  return root;
+}
+
+function placeGate(asset, placement, layout, scene) {
+  const root = asset.root;
+  const target = gateWorldTransform(placement, layout);
+  if (placement.socketWidth === 'wide') root.scale.x = 2;
+  root.rotation.y = target.rotationY;
+  root.position.set(target.x, target.y, target.z);
+  root.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  root.position.y += target.y - bounds.min.y;
+  root.updateMatrixWorld(true);
+  scene.add(root);
+  return root;
+}
+
+function createGateAction(root, animations) {
+  if (!animations?.length) return null;
+  const mixer = new THREE.AnimationMixer(root);
+  const clip = animations.find((candidate) => /open/i.test(candidate.name)) ?? animations[0];
+  const action = mixer.clipAction(clip);
+  action.setLoop(THREE.LoopOnce, 1);
+  action.clampWhenFinished = true;
+  return { mixer, action };
+}
+
+function addAtmosphere(scene, layout) {
   const geometry = new THREE.BufferGeometry();
   const points = [];
-  for (let index = 0; index < 120; index += 1) {
-    points.push(
-      (Math.random() - 0.5) * 24,
-      0.7 + Math.random() * 6,
-      (Math.random() - 0.5) * 35,
-    );
+  for (let index = 0; index < 360; index += 1) {
+    points.push(Math.random() * layout.size, 0.7 + Math.random() * 8, Math.random() * layout.size);
   }
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-  const material = new THREE.PointsMaterial({
-    color: 0x9fe7df,
-    size: 0.045,
-    transparent: true,
-    opacity: 0.58,
-    depthWrite: false,
-  });
+  const material = new THREE.PointsMaterial({ color: 0x9fe7df, size: 0.18, transparent: true, opacity: 0.3, depthWrite: false });
   const motes = new THREE.Points(geometry, material);
   scene.add(motes);
   return motes;
 }
 
-export async function createWorld(loader, onAssetProgress) {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111426);
-  scene.fog = new THREE.FogExp2(0x16172c, 0.026);
-
-  scene.add(new THREE.HemisphereLight(0xa6b9ff, 0x301f32, 1.25));
-  const sun = new THREE.DirectionalLight(0xffd6a0, 2.35);
-  sun.position.set(7, 13, 9);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.left = -18;
-  sun.shadow.camera.right = 18;
-  sun.shadow.camera.top = 20;
-  sun.shadow.camera.bottom = -20;
-  scene.add(sun);
-
-  const cyanLight = new THREE.PointLight(0x54e1d0, 25, 15, 2);
-  cyanLight.position.set(-7, 2.4, -6);
-  scene.add(cyanLight);
-  const amberLight = new THREE.PointLight(0xff9d55, 22, 14, 2);
-  amberLight.position.set(7, 2.2, 7);
-  scene.add(amberLight);
-
-  addFallbackArchitecture(scene);
-  const motes = addAtmosphere(scene);
-
-  const pieces = [
-    { label: 'Salão ancestral', url: DUNGEON_ASSETS.roomLarge, position: [0, 0.02, 7], rotation: 0, scale: 1 },
-    { label: 'Galeria central', url: DUNGEON_ASSETS.roomWide, position: [0, 0.02, -4], rotation: Math.PI, scale: 1 },
-    { label: 'Câmara do portal', url: DUNGEON_ASSETS.roomSmall, position: [0, 0.02, -13], rotation: 0, scale: 1 },
-  ];
-  const loadedPieces = await Promise.all(pieces.map((piece) => loadPlaced(loader, piece, onAssetProgress)));
-  for (const piece of loadedPieces) if (piece) scene.add(piece.root);
-
-  const gateData = await loadPlaced(loader, {
-    label: 'Portão dos ecos',
-    url: DUNGEON_ASSETS.gateDoor,
-    position: [0, 0.05, -9.4],
-    rotation: 0,
-    scale: 1.15,
-  }, onAssetProgress);
-
-  let gateMixer = null;
-  let gateAction = null;
-  if (gateData) {
-    scene.add(gateData.root);
-    gateMixer = new THREE.AnimationMixer(gateData.root);
-    const openClip = gateData.animations.find((clip) => clip.name === 'open') ?? gateData.animations[0];
-    if (openClip) {
-      gateAction = gateMixer.clipAction(openClip);
-      gateAction.setLoop(THREE.LoopOnce, 1);
-      gateAction.clampWhenFinished = true;
-    }
-  }
-
+function addPortal(scene, layout) {
   const portal = new THREE.Group();
-  portal.position.set(0, 1.65, -14.5);
+  portal.position.set(layout.exit.x, layout.exit.y + 2.2, layout.exit.z);
   const portalRing = new THREE.Mesh(
-    new THREE.TorusGeometry(1.35, 0.12, 12, 48),
+    new THREE.TorusGeometry(1.65, 0.18, 12, 40),
     new THREE.MeshStandardMaterial({ color: 0x71f2de, emissive: 0x276d74, emissiveIntensity: 2.4 }),
   );
   const portalCore = new THREE.Mesh(
-    new THREE.CircleGeometry(1.18, 48),
-    new THREE.MeshBasicMaterial({ color: 0x766fe4, transparent: true, opacity: 0.28, side: THREE.DoubleSide }),
+    new THREE.CircleGeometry(1.48, 32),
+    new THREE.MeshBasicMaterial({ color: 0x766fe4, transparent: true, opacity: 0.3, side: THREE.DoubleSide }),
   );
   portal.add(portalRing, portalCore);
   portal.visible = false;
   scene.add(portal);
+  return { portal, portalRing };
+}
 
+export async function createWorld(loader, onAssetProgress, mapSelection) {
+  const layout = await loadBundledMap(mapSelection);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x080a13);
+  scene.fog = new THREE.FogExp2(0x101225, 0.021);
+  scene.add(new THREE.HemisphereLight(0xa6b9ff, 0x171326, 1.35));
+
+  const sun = new THREE.DirectionalLight(0xffd6a0, 2.1);
+  sun.position.set(layout.size * 0.5, 70, layout.size * 0.35);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -110;
+  sun.shadow.camera.right = 110;
+  sun.shadow.camera.top = 110;
+  sun.shadow.camera.bottom = -110;
+  sun.shadow.camera.far = 260;
+  scene.add(sun);
+
+  const motes = addAtmosphere(scene, layout);
+  const staticCollisionRoot = new THREE.Group();
+  staticCollisionRoot.name = 'static-map-collision';
+  const dynamicGateRoot = new THREE.Group();
+  dynamicGateRoot.name = 'dynamic-gates';
+  scene.add(staticCollisionRoot, dynamicGateRoot);
+  const placementsByPiece = new Map();
+  for (const placement of layout.placements) {
+    const entries = placementsByPiece.get(placement.pieceId) ?? [];
+    entries.push(placement);
+    placementsByPiece.set(placement.pieceId, entries);
+  }
+  const gateAnimations = [];
+
+  for (const definition of DUNGEON_PIECES) {
+    const placements = placementsByPiece.get(definition.id) ?? [];
+    if (!placements.length) continue;
+    try {
+      const asset = await loadPiece(loader, definition, onAssetProgress);
+      for (const placement of placements) {
+        const instance = { ...asset, root: prepareModel(asset.root.clone(true)) };
+        const root = placement.edge
+          ? placeGate(instance, placement, layout, dynamicGateRoot)
+          : placeFloorPiece(instance, placement, layout, staticCollisionRoot);
+        if (definition.id === 'gateDoor' || definition.id === 'gateDoorWindow') {
+          const animation = createGateAction(root, asset.animations);
+          if (animation) gateAnimations.push(animation);
+        }
+      }
+    } catch (error) {
+      console.error(`Falha ao carregar a peça estrutural ${definition.id}`, error);
+      onAssetProgress?.(definition.id, false);
+      throw new Error(`A peça estrutural ${definition.id} não pôde ser carregada.`, { cause: error });
+    }
+  }
+
+  const wallColliders = buildWallColliders(layout);
+  const cameraCollisionMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, colorWrite: false });
+  const cameraColliderMeshes = cameraColliderBoxes(wallColliders).map(({ center, size }, index) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), cameraCollisionMaterial);
+    mesh.name = `camera-wall-${index + 1}`;
+    mesh.position.set(center.x, center.y, center.z);
+    scene.add(mesh);
+    return mesh;
+  });
+  const { portal, portalRing } = addPortal(scene, layout);
   let gateOpened = false;
+
+  function staticGeometryAllows(position, requestedRadius) {
+    const floorHeight = phaseFloorHeightAt(position, layout);
+    if (floorHeight === null) return false;
+    const radius = actorCollisionRadius(requestedRadius);
+    return !circleHitsWall(
+      position,
+      radius,
+      floorHeight + ACTOR_STEP_HEIGHT,
+      floorHeight + ACTOR_CAPSULE_HEIGHT,
+      wallColliders,
+    );
+  }
+
   return {
     scene,
+    layout,
+    physicsWalls: wallColliders,
+    physicsSurfaces: buildFloorColliders(layout),
+    cameraColliderMeshes,
+    cameraWallColliders: wallColliders,
+    canOccupy(position, radius = 1.2) {
+      const collisionRadius = actorCollisionRadius(radius);
+      return phaseCanOccupy(position, radius, layout)
+        && staticGeometryAllows(position, radius)
+        && !gateBlocksPosition(position, layout, gateOpened, collisionRadius);
+    },
+    floorHeightAt(position) { return phaseFloorHeightAt(position, layout); },
     gateOpened: () => gateOpened,
     openGate() {
       if (gateOpened) return;
       gateOpened = true;
       portal.visible = true;
-      gateAction?.reset().play();
+      for (const { action } of gateAnimations) action.reset().play();
     },
     isAtExit(position) {
-      return gateOpened && Math.hypot(position.x - portal.position.x, position.z - portal.position.z) < 2.1;
+      return gateOpened
+        && Math.abs((position.y ?? layout.exit.y) - layout.exit.y) < layout.levelHeight
+        && Math.hypot(position.x - portal.position.x, position.z - portal.position.z) < 3.2;
     },
     update(delta, elapsed) {
-      gateMixer?.update(delta);
-      motes.rotation.y = elapsed * 0.015;
-      portal.rotation.y = Math.sin(elapsed * 0.7) * 0.18;
+      for (const { mixer } of gateAnimations) mixer.update(delta);
+      motes.rotation.y = elapsed * 0.01;
+      portal.rotation.y = Math.sin(elapsed * 0.7) * 0.12;
       portalRing.rotation.z = elapsed * 0.45;
     },
   };
 }
-

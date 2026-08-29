@@ -1,0 +1,128 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as THREE from 'three';
+import * as cameraModule from '../app/src/main/assets/game/js/camera-controller.js';
+
+const {
+  applyLookDelta,
+  configureThirdPersonControls,
+  createThirdPersonCamera,
+  resolveSpringArmCamera,
+} = cameraModule;
+
+function pointerEvent(type, pointerId, clientX, clientY) {
+  const event = new Event(type, { cancelable: true });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    clientX: { value: clientX },
+    clientY: { value: clientY },
+  });
+  return event;
+}
+
+test('compatibilidade CameraControls mantém colisores e sensibilidade configurados', () => {
+  const ACTION = { NONE: 0, ROTATE: 3, TOUCH_ROTATE: 9 };
+  const controls = { mouseButtons: {}, touches: {} };
+  const colliders = [{ name: 'wall' }];
+  configureThirdPersonControls(controls, { ACTION }, colliders, 1.25);
+  assert.equal(controls.mouseButtons.left, ACTION.ROTATE);
+  assert.equal(controls.touches.one, ACTION.TOUCH_ROTATE);
+  assert.equal(controls.touches.two, ACTION.NONE);
+  assert.equal(controls.colliderMeshes, colliders);
+  assert.equal(controls.azimuthRotateSpeed, 1.25);
+  assert.ok(controls.minPolarAngle < controls.maxPolarAngle);
+});
+
+test('PlayerController de câmera aplica yaw/pitch diretamente e limita o pitch', () => {
+  const first = applyLookDelta({ yaw: 0, pitch: 0 }, 100, -50, 1);
+  assert.ok(first.yaw > 0, 'arrastar para a direita deve virar a câmera para a direita');
+  assert.ok(first.pitch < 0, 'arrastar para cima deve olhar para cima');
+  const extremeDown = applyLookDelta(first, 0, 100000, 1);
+  const extremeUp = applyLookDelta(first, 0, -100000, 1);
+  assert.ok(extremeDown.pitch <= Math.PI * 55 / 180 + 1e-12);
+  assert.ok(extremeUp.pitch >= -Math.PI / 6 - 1e-12);
+});
+
+test('câmera renderizada é a única câmera e cada ponteiro mantém ownership próprio', () => {
+  const domElement = new EventTarget();
+  domElement.setPointerCapture = () => {};
+  domElement.releasePointerCapture = () => {};
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  const player = { root: { position: new THREE.Vector3(10, 0, 20) } };
+  const controller = createThirdPersonCamera({
+    THREE,
+    camera,
+    domElement,
+    player,
+    wallColliders: [],
+    sensitivity: 1,
+    windowRef: new EventTarget(),
+  });
+
+  const initial = controller.heading();
+  domElement.dispatchEvent(pointerEvent('pointerdown', 11, 100, 100));
+  domElement.dispatchEvent(pointerEvent('pointermove', 22, 180, 100));
+  assert.equal(controller.heading(), initial, 'outro dedo não pode controlar a câmera');
+  domElement.dispatchEvent(pointerEvent('pointermove', 11, 150, 100));
+  const afterOwnedMove = controller.heading();
+  assert.ok(afterOwnedMove > initial);
+
+  domElement.dispatchEvent(pointerEvent('pointerup', 22, 180, 100));
+  domElement.dispatchEvent(pointerEvent('pointermove', 11, 180, 100));
+  assert.ok(controller.heading() > afterOwnedMove, 'soltar outro dedo não deve cancelar a câmera');
+  const beforeRelease = controller.heading();
+  domElement.dispatchEvent(pointerEvent('pointerup', 11, 180, 100));
+  domElement.dispatchEvent(pointerEvent('pointermove', 11, 240, 100));
+  assert.equal(controller.heading(), beforeRelease);
+
+  const source = createThirdPersonCamera.toString();
+  assert.doesNotMatch(source, /camera\.clone\(\)/, 'não deve existir uma segunda câmera lógica');
+  controller.dispose();
+});
+
+test('follow acompanha a translação do personagem sem atraso espacial', () => {
+  const domElement = new EventTarget();
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  const player = { root: { position: new THREE.Vector3(4, 0, 8) } };
+  const controller = createThirdPersonCamera({
+    THREE, camera, domElement, player, wallColliders: [], windowRef: new EventTarget(),
+  });
+  const before = camera.position.clone().sub(player.root.position);
+  player.root.position.add(new THREE.Vector3(3, 0, -2));
+  controller.updateFollow(1 / 60);
+  const after = camera.position.clone().sub(player.root.position);
+  assert.ok(before.distanceTo(after) < 1e-10, `offset mudou ${before.distanceTo(after)}`);
+  controller.dispose();
+});
+
+test('SpringArm retrai antes da parede e não atravessa o colisor', () => {
+  const wall = { minX: -2, maxX: 2, minY: 0, maxY: 5, minZ: 3, maxZ: 3.4 };
+  const result = resolveSpringArmCamera({
+    target: { x: 0, y: 1.6, z: 0 },
+    desired: { x: 0, y: 2.8, z: 6.2 },
+    wallColliders: [wall],
+    currentDistance: 6.3,
+    delta: 1 / 60,
+  });
+  assert.equal(result.collided, true);
+  assert.ok(result.position.z < wall.minZ, `câmera atravessou a parede: z=${result.position.z}`);
+  assert.ok(result.distance < result.directDistance);
+});
+
+test('composição de tiro deixa a mira à frente e o herói abaixo à esquerda', () => {
+  assert.equal(typeof cameraModule.thirdPersonComposition, 'function');
+  const frame = cameraModule.thirdPersonComposition({ x: 10, y: 0, z: 20 }, 0, Math.PI / 18);
+  assert.ok(frame.camera.x > 10, 'a câmera no ombro direito coloca o herói à esquerda da tela');
+  assert.ok(frame.camera.z > 20, 'a câmera precisa ficar atrás do herói');
+  assert.ok(frame.aim.z < 20, 'a mira central precisa apontar à frente do herói');
+
+  const depthRatio = (20 - frame.camera.z) / (frame.aim.z - frame.camera.z);
+  const reticleYAtPlayer = frame.camera.y + (frame.aim.y - frame.camera.y) * depthRatio;
+  assert.ok(reticleYAtPlayer > 2, 'no plano do herói, a mira deve ficar acima da cabeça e não no corpo');
+});
+
+test('tamanho aparente do herói segue a proporção das referências', () => {
+  assert.equal(typeof cameraModule.estimatedCharacterScreenFraction, 'function');
+  const fraction = cameraModule.estimatedCharacterScreenFraction(2.6);
+  assert.ok(fraction >= 0.34 && fraction <= 0.42, `o herói deve ocupar 34% a 42% da tela, recebeu ${fraction}`);
+});
