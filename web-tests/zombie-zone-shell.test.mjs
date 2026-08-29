@@ -12,3 +12,17 @@ test('telas principais usam o mesmo avatar 3D e o sistema Zombie Zone', () => {
     assert.match(html, new RegExp(`id="${id}"`));
   }
 });
+
+test('HUD inicia o rifle cheio, identifica o gatilho e abre a mira por --spread', () => {
+  const html = readFileSync(new URL('../app/src/main/assets/game/index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../app/src/main/assets/game/css/game.css', import.meta.url), 'utf8');
+  const bootstrap = readFileSync(new URL('../app/src/main/assets/game/js/bootstrap.js', import.meta.url), 'utf8');
+
+  assert.match(html, /data-ammo-count>30\/30</);
+  assert.match(html, /id="attack-button"[^>]*aria-label="Atirar"/);
+  assert.match(css, /\.reticle\s*\{[^}]*--spread:\s*0px[^}]*width:\s*calc\(28px \+ var\(--spread\)\)[^}]*height:\s*calc\(28px \+ var\(--spread\)\)/s);
+  assert.match(css, /\.reticle\.fps\s*\{[^}]*border-color:\s*var\(--amber\)/s);
+  assert.match(html, /\.\/css\/game\.css\?v=rifle-1/);
+  assert.match(html, /\.\/js\/bootstrap\.js\?v=rifle-1/);
+  assert.match(bootstrap, /import\('\.\/main\.js\?v=rifle-1'\)/);
+});

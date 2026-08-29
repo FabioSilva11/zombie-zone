@@ -4,21 +4,28 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import nipplejs from 'nipplejs';
 import { AnimationController } from './animation.js';
 import { selectAssistedTarget } from './aim-assist.js';
+import { createAutomaticFire } from './automatic-fire.js?v=rifle-1';
 import { createAvatarPreview } from './avatar-preview.js?v=zombie-zone-16';
 import { createThirdPersonCamera } from './camera-controller.js?v=tps-unreal-1';
 import { CAMPAIGN } from './campaign.js?v=zombie-zone-16';
 import { mountCampaignUI } from './campaign-ui.js?v=zombie-zone-16';
 import { characterById, CHARACTERS } from './catalog.js';
 import { CombatSystem } from './combat.js?v=zombie-ai-1';
+import { createHybridAim } from './hybrid-aim.js?v=rifle-1';
 import { createExplorationState, mountMinimap, revealAround } from './minimap.js?v=campaign-3';
 import { completeMission, routeBootFailure, shouldDisposeMission } from './mission-lifecycle.js?v=campaign-3';
 import { controllerFacingFromYaw, modelYawFromDirection } from './movement-heading.js?v=zombie-zone-18';
 import { createPlayerController } from './player-controller.js?v=tps-unreal-3';
+import { createRifleEffects } from './rifle-effects.js?v=rifle-1';
+import { resolveRifleHitscan } from './rifle-hitscan.js?v=rifle-1';
+import { bindRifleInput } from './rifle-input.js?v=rifle-1';
+import { attachRifle, createRifleModel, createRifleSockets } from './rifle-model.js?v=rifle-1';
 import { createSaveStore } from './save-store.js';
 import { createScreenFlow } from './screen-flow.js';
 import { mountSelection } from './selection.js?v=zombie-zone-13';
+import { createWeaponAudio } from './weapon-audio.js?v=rifle-1';
 import { createWorld } from './world.js?v=zombie-zone-7';
-import { createWeaponState } from './weapon-state.js?v=campaign-3';
+import { createWeaponState } from './weapon-state.js?v=rifle-1';
 import { createMusicController, MUSIC_MODES } from './music-controller.js';
 
 const CHARACTER_WORLD_SCALE = 0.72;
@@ -153,6 +160,7 @@ export async function startApp(loading, diagnostics = null) {
     }));
   document.querySelector('[data-sound-enabled]').addEventListener('change', (event) => {
     setProgress({ ...progress, settings: { ...progress.settings, soundEnabled: event.target.checked } });
+    activeGame?.setSoundEnabled(event.target.checked);
     music.setEnabled(event.target.checked).then((playing) => {
       document.documentElement.dataset.musicPlaying = String(playing);
     });
@@ -202,6 +210,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const world = await createWorld(loader, (label) => {
     loadedWorldPieces += 1; loading.update(label, Math.min(59, 18 + loadedWorldPieces * 1.7));
   }, stage.mapId, renderer.capabilities.getMaxAnisotropy());
+  world.scene.add(camera);
   document.querySelector('#game-hud').dataset.mapTexture = world.textureVariant.id;
 
   loading.update('Invocando seu viajante', 61);
@@ -258,6 +267,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   let minimapFrame = 0;
   let defeated = false;
   let displayedHealth = maxHealth;
+  let cancelRifleTrigger = () => {};
   const combat = new CombatSystem({
     player, enemies, canMoveTo: (position, radius) => world.canOccupy(position, radius),
     hasLineOfSight: (from, to) => world.hasLineOfSight(from, to),
@@ -272,7 +282,13 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       objective.textContent = gateOpen ? 'Atravesse o portal aberto' : `${stage.objective} • ${enemiesRemaining} restantes`;
     },
     onGateOpen: () => world.openGate(),
-    onPlayerDefeated: () => { if (!defeated) { defeated = true; onDefeat('Os guardiões venceram'); } },
+    onPlayerDefeated: () => {
+      if (!defeated) {
+        defeated = true;
+        cancelRifleTrigger();
+        onDefeat('Os guardiões venceram');
+      }
+    },
   });
 
   const cameraController = createThirdPersonCamera({
@@ -321,30 +337,77 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const reloadButton = document.querySelector('#reload-button');
   const dodgeButton = document.querySelector('#dodge-button');
   const ammoCount = document.querySelector('[data-ammo-count]');
-  const weapon = createWeaponState(6, 1.15);
+  const hybridAim = createHybridAim();
+  const automaticFire = createAutomaticFire();
+  const weapon = createWeaponState();
+  const rifle = createRifleModel(THREE);
+  const sockets = createRifleSockets({ THREE, playerRoot: player.root, camera });
+  let rifleMode = 'tps';
+  attachRifle(rifle, sockets[rifleMode], rifleMode);
+  const effects = createRifleEffects({
+    THREE,
+    scene: world.scene,
+    recoilGroup: rifle.recoilGroup,
+    muzzle: rifle.muzzle,
+  });
+  const weaponAudio = createWeaponAudio({
+    fireUrl: './audio/rifle-fire.mp3',
+    reloadUrl: './audio/rifle-reload.mp3',
+    enabled: settings.soundEnabled,
+  });
   const paintWeapon = () => {
     ammoCount.textContent = weapon.reloading ? '...' : `${weapon.ammo}/${weapon.capacity}`;
     reloadButton.disabled = weapon.reloading || weapon.ammo === weapon.capacity;
     attackButton.disabled = weapon.reloading || weapon.ammo === 0;
   };
   paintWeapon();
-  const fire = (event) => {
-    event.preventDefault();
-    if (weapon.reloading || weapon.ammo <= 0) return;
-    // O ponteiro pode ter girado a câmera entre dois frames. Sincronize a
-    // câmera/mira antes de selecionar o alvo do disparo.
-    cameraController.updateFollow(0);
-    updateAim();
-    const result = combat.fire(selectedEnemy);
-    if (result.fired) {
-      weapon.consumeShot();
+  const performRifleShot = (spread) => {
+    const wasReloading = weapon.reloading;
+    if (!weapon.consumeShot()) return false;
+    const shot = resolveRifleHitscan({
+      THREE, camera, raycaster, wallMeshes: world.cameraColliderMeshes,
+      enemies, spread, maxRange: 45,
+    });
+    if (shot.target) {
+      const result = combat.applyRifleHit(shot.target, { headshot: shot.zone === 'head' });
+      if (result.hit) {
+        reticle.classList.add('hit');
+        window.setTimeout(() => reticle.classList.remove('hit'), 110);
+      }
     }
-    if (result.hit) { reticle.classList.add('hit'); window.setTimeout(() => reticle.classList.remove('hit'), 110); }
+    effects.pulseShot(shot.point);
+    weaponAudio.playFire();
+    if (!wasReloading && weapon.reloading) weaponAudio.playReload();
+    paintWeapon();
+    return true;
+  };
+  const input = bindRifleInput({
+    button: attackButton,
+    windowRef: window,
+    onPress: () => {
+      hybridAim.press();
+      automaticFire.press();
+      attackButton.classList.add('is-active');
+    },
+    onRelease: () => {
+      hybridAim.release();
+      automaticFire.release();
+      attackButton.classList.remove('is-active');
+      player.root.visible = true;
+    },
+  });
+  cancelRifleTrigger = () => {
+    input.cancel();
+    automaticFire.cancel();
+    hybridAim.cancel();
+    attackButton.classList.remove('is-active');
+    player.root.visible = true;
+  };
+  const reload = () => {
+    if (weapon.startReload()) weaponAudio.playReload();
     paintWeapon();
   };
-  const reload = () => { weapon.startReload(); paintWeapon(); };
   const dodge = () => { if (playerController.dodge()) dodgeButton.disabled = true; };
-  attackButton.addEventListener('pointerdown', fire);
   reloadButton.addEventListener('click', reload);
   dodgeButton.addEventListener('click', dodge);
 
@@ -403,7 +466,20 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       player.animations.update(delta); for (const enemy of enemies) enemy.animations.update(delta);
       world.update(delta, elapsed); revealAround(exploration, player.root.position, 1);
       minimapFrame = (minimapFrame + 1) % 6; if (minimapFrame === 0) minimap.paint();
+      hybridAim.update(delta);
+      cameraController.setViewBlend(hybridAim.blend);
+      const nextRifleMode = hybridAim.blend >= 0.5 ? 'fps' : 'tps';
+      if (nextRifleMode !== rifleMode) {
+        attachRifle(rifle, sockets[nextRifleMode], nextRifleMode);
+        rifleMode = nextRifleMode;
+      }
+      reticle.classList.toggle('fps', nextRifleMode === 'fps');
+      player.root.visible = !(hybridAim.blend >= 0.92
+        && (hybridAim.state === 'first-person' || hybridAim.state === 'entering-first-person'));
       cameraController.updateFollow(delta);
+      automaticFire.update(delta, { ready: hybridAim.readyToFire, fire: performRifleShot });
+      effects.update(delta);
+      reticle.style.setProperty('--spread', `${automaticFire.spread * 1000}px`);
       gameHud.dataset.cameraPosition = `${camera.position.x.toFixed(2)},${camera.position.y.toFixed(2)},${camera.position.z.toFixed(2)}`;
       const cameraAim = cameraController.aimPoint();
       gameHud.dataset.cameraAim = `${cameraAim.x.toFixed(2)},${cameraAim.y.toFixed(2)},${cameraAim.z.toFixed(2)}`;
@@ -429,6 +505,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       updateAim();
       if (!completed && world.isAtExit(player.root.position)) {
         completed = true;
+        cancelRifleTrigger();
         onVictory({ completed: true, elapsedSeconds: elapsed, healthRemaining: player.health, maxHealth, collectedCrystalIds: [...collectedCrystals] });
       }
     }
@@ -437,14 +514,29 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
 
   loading.update('A missão começou', 100); renderer.setAnimationLoop(animate);
   return {
-    setPaused(value) { paused = Boolean(value); playerController.setEnabled(!paused); cameraController.setEnabled(!paused); },
+    setPaused(value) {
+      paused = Boolean(value);
+      if (paused) {
+        input.cancel();
+        automaticFire.cancel();
+        hybridAim.cancel();
+        attackButton.classList.remove('is-active');
+        player.root.visible = true;
+      }
+      playerController.setEnabled(!paused);
+      cameraController.setEnabled(!paused);
+    },
     setSensitivity(value) { cameraController.setSensitivity(value); },
+    setSoundEnabled(value) { weaponAudio.setEnabled(value); },
     dispose() {
       if (disposed) return; disposed = true;
       diagnostics?.record('info', 'mission-dispose', { stageId: stage.id });
       detachCanvasDiagnostics?.();
-      attackButton.removeEventListener('pointerdown', fire); reloadButton.removeEventListener('click', reload); dodgeButton.removeEventListener('click', dodge);
+      input.dispose(); automaticFire.dispose(); weaponAudio.dispose(); effects.dispose(); rifle.dispose();
+      hybridAim.cancel(); attackButton.classList.remove('is-active'); player.root.visible = true;
+      reloadButton.removeEventListener('click', reload); dodgeButton.removeEventListener('click', dodge);
       minimap.dispose(); playerController.dispose(); cameraController.dispose(); crystalGeometry.dispose(); crystalMaterial.dispose();
+      world.scene.remove(camera);
       window.removeEventListener('resize', resize); renderer.setAnimationLoop(null); renderer.dispose(); root.replaceChildren();
     },
   };
