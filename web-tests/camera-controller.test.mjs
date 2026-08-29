@@ -116,6 +116,59 @@ test('blend FPS aproxima a única câmera dos olhos sem mudar ControllerYaw/Pitc
   controller.dispose();
 });
 
+test('blend parcial preserva a direção de mira para yaw e pitch não nulos', () => {
+  const domElement = new EventTarget();
+  domElement.setPointerCapture = () => {};
+  domElement.releasePointerCapture = () => {};
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  const player = { root: { position: new THREE.Vector3(4, 0, 8) } };
+  const controller = createThirdPersonCamera({
+    THREE, camera, domElement, player, wallColliders: [], windowRef: new EventTarget(),
+  });
+  domElement.dispatchEvent(pointerEvent('pointerdown', 7, 100, 100));
+  domElement.dispatchEvent(pointerEvent('pointermove', 7, 200, 150));
+  domElement.dispatchEvent(pointerEvent('pointerup', 7, 200, 150));
+  controller.setViewBlend(0.5);
+  controller.updateFollow(0);
+
+  const yaw = controller.heading();
+  const pitch = controller.pitch();
+  const expected = new THREE.Vector3(
+    Math.sin(yaw) * Math.cos(pitch),
+    -Math.sin(pitch),
+    -Math.cos(yaw) * Math.cos(pitch),
+  );
+  const aimDirection = new THREE.Vector3().subVectors(controller.aimPoint(), camera.position).normalize();
+  const renderedDirection = camera.getWorldDirection(new THREE.Vector3());
+  assert.ok(aimDirection.distanceTo(expected) < 1e-10, `mira desviou: ${aimDirection.toArray()}`);
+  assert.ok(renderedDirection.distanceTo(expected) < 1e-10, `câmera desviou: ${renderedDirection.toArray()}`);
+  assert.notEqual(yaw, 0);
+  assert.notEqual(pitch, Math.PI / 18);
+  controller.dispose();
+});
+
+test('SpringArm resolve a posição TPS antes do blend e a transição não cruza a parede', () => {
+  const domElement = new EventTarget();
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  const player = { root: { position: new THREE.Vector3(0, 0, 0) } };
+  const wall = { minX: -2, maxX: 2, minY: 0, maxY: 5, minZ: 3, maxZ: 3.4 };
+  const controller = createThirdPersonCamera({
+    THREE, camera, domElement, player, wallColliders: [wall], windowRef: new EventTarget(),
+  });
+
+  controller.setViewBlend(0);
+  const resolved = controller.updateFollow(0);
+  assert.equal(resolved.collided, true);
+  assert.ok(camera.position.distanceTo(new THREE.Vector3(resolved.position.x, resolved.position.y, resolved.position.z)) < 1e-10);
+  assert.ok(camera.position.z < wall.minZ, `TPS atravessou a parede: z=${camera.position.z}`);
+
+  controller.setViewBlend(0.5);
+  controller.updateFollow(0);
+  assert.ok(camera.position.z < wall.minZ, `transição atravessou a parede: z=${camera.position.z}`);
+  assert.equal(controller.collision().collided, true);
+  controller.dispose();
+});
+
 test('SpringArm retrai antes da parede e não atravessa o colisor', () => {
   const wall = { minX: -2, maxX: 2, minY: 0, maxY: 5, minZ: 3, maxZ: 3.4 };
   const result = resolveSpringArmCamera({
