@@ -78,6 +78,19 @@ export class CombatSystem {
     return { fired: true, hit: true, defeated, targetId: target.id ?? null };
   }
 
+  applyRifleHit(target, { bodyDamage = 18, headshot = false, headshotMultiplier = 1.75 } = {}) {
+    if (!target || target.health <= 0 || this.player.health <= 0) {
+      return { hit: false, defeated: false, targetId: target?.id ?? null, damage: 0 };
+    }
+    const damage = Math.round(bodyDamage * (this.player.powerMultiplier ?? 1) * (headshot ? headshotMultiplier : 1));
+    target.health = Math.max(0, target.health - damage);
+    if (target.health > 0) alertZombie(target.ai, this.player.root.position);
+    const defeated = target.health === 0;
+    if (defeated) target.animations.play(['die', 'idle'], { once: true, fade: 0.1 });
+    this.notify();
+    return { hit: true, defeated, targetId: target.id ?? null, damage };
+  }
+
   update(delta) {
     this.playerAttackCooldown = Math.max(0, this.playerAttackCooldown - delta);
     const playerPosition = this.player.root.position;

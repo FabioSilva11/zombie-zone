@@ -41,3 +41,14 @@ test('sobreposição de ataque aplica dano respeitando o cooldown', () => {
   combat.update(0.1);
   assert.equal(player.health, 92);
 });
+
+test('dano de rifle ignora cooldown do ataque e aplica multiplicador de cabeça', () => {
+  const { combat, enemy } = fixture();
+  combat.playerAttackCooldown = 0.5;
+  const first = combat.applyRifleHit(enemy, { bodyDamage: 20 });
+  assert.equal(first.hit, true);
+  assert.equal(enemy.health, 50);
+  const headshot = combat.applyRifleHit(enemy, { bodyDamage: 20, headshot: true, headshotMultiplier: 1.5 });
+  assert.equal(headshot.damage, 30);
+  assert.equal(enemy.health, 20);
+});
