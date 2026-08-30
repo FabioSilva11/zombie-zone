@@ -1,28 +1,54 @@
 const story = (speaker, lines) => Object.freeze({ speaker, lines: Object.freeze(lines) });
 
-const stages = [
-  ['Primeiro Alarme', 'Afaste os zumbis e libere a primeira passagem.', 150, 'mapa (1)', 'Nyra', ['As sirenes acordaram a cidade inteira.', 'Vamos limpar esta rua antes que a névoa aumente!'], ['Primeira área liberada!', 'A equipe da Zona Z já pode avançar.']],
-  ['Metrô da Névoa', 'Elimine os zumbis escondidos na estação.', 165, 'mapa (4)', 'Kael', ['O metrô está cheio de pegadas verdes.', 'Fique perto das luzes e não pare de se mover.'], ['A estação voltou a brilhar.', 'Mas a horda fugiu para os telhados.']],
-  ['Telhados Infectados', 'Suba os prédios e recupere a antena.', 180, 'mapa (7)', 'Nyra', ['A antena pode mostrar onde a horda se esconde.', 'Cuidado com as passarelas estreitas!'], ['Sinal recuperado!', 'O parque abandonado apareceu no radar.']],
-  ['Parque Assombrado', 'Abra os portões antes da próxima horda.', 195, 'mapa (10)', 'Kael', ['Os brinquedos estão ligados sem eletricidade.', 'Parece que os zumbis prepararam uma surpresa.'], ['Os portões estão abertos.', 'Encontramos a entrada do laboratório.']],
-  ['Laboratório Mutante', 'Desative os tanques que alimentam a névoa.', 210, 'mapa (14)', 'Nyra', ['É daqui que vem toda aquela fumaça verde.', 'Desligue os tanques e mantenha distância das bolhas.'], ['A névoa está desaparecendo.', 'Só falta enfrentar o centro da Zona Z.']],
-  ['Coração da Zona Z', 'Vença a última horda e salve a cidade.', 225, 'mapa (20)', 'Kael', ['Chegamos ao ponto onde a invasão começou.', 'Equipe pronta? Esta é a grande missão!'], ['A cidade está segura novamente.', 'Mas novas zonas podem surgir em breve...']],
-].map(([title, objective, targetSeconds, mapId, speaker, before, after], index) => Object.freeze({
-  id: `stage${index + 1}`,
-  number: index + 1,
-  title,
-  objective,
-  targetSeconds,
-  mapId,
-  firstClearCrystals: 40 + (index + 1) * 10,
-  storyBefore: story(speaker, before),
-  storyAfter: story(speaker, after),
-}));
+const missions = [
+  ['Primeiro Alarme', 'Afaste os zumbis e libere a primeira passagem.'],
+  ['Beco Sem Saída', 'Limpe os becos e encontre a rota de evacuação.'],
+  ['Mercado Infestado', 'Recupere os suprimentos cercados pela horda.'],
+  ['Metrô da Névoa', 'Elimine os zumbis escondidos na estação.'],
+  ['Túneis Perdidos', 'Atravesse os túneis e restabeleça a energia.'],
+  ['Estação Fantasma', 'Abra a plataforma bloqueada antes da próxima horda.'],
+  ['Telhados Infectados', 'Suba os prédios e recupere a antena.'],
+  ['Pontes do Caos', 'Proteja as passarelas que ligam os quarteirões.'],
+  ['Antena Sombria', 'Ative o sinal e localize o núcleo da invasão.'],
+  ['Parque Assombrado', 'Abra os portões antes da próxima horda.'],
+  ['Carrossel Maldito', 'Desligue as máquinas que atraem os infectados.'],
+  ['Portões do Parque', 'Defenda a saída enquanto os portões se abrem.'],
+  ['Distrito Industrial', 'Retome as fábricas dominadas pela névoa.'],
+  ['Laboratório Mutante', 'Desative os tanques que alimentam a névoa.'],
+  ['Tanques da Névoa', 'Destrua as válvulas que espalham a contaminação.'],
+  ['Câmara de Testes', 'Interrompa os experimentos e liberte a passagem.'],
+  ['Ruínas do Centro', 'Reconquiste a avenida tomada pelos mutantes.'],
+  ['Torre da Zona', 'Suba a torre e desligue o transmissor inimigo.'],
+  ['Última Barreira', 'Rompa a defesa final da horda.'],
+  ['Coração da Zona Z', 'Vença a última horda e salve a cidade.'],
+];
+
+const stages = missions.map(([title, objective], index) => {
+  const number = index + 1;
+  const speaker = number % 2 ? 'Nyra' : 'Kael';
+  const finalStage = number === missions.length;
+  return Object.freeze({
+    id: `stage${number}`,
+    number,
+    title,
+    objective,
+    targetSeconds: 140 + number * 7,
+    mapId: `mapa (${number})`,
+    collectibleTotal: 3,
+    firstClearCrystals: 40 + number * 10,
+    storyBefore: story(speaker, [`A rota para ${title} está aberta.`, objective]),
+    storyAfter: story(speaker, finalStage
+      ? ['O coração da Zona Z caiu.', 'A cidade está segura novamente!']
+      : [`${title} foi liberado.`, 'A equipe já pode avançar para a próxima área.']),
+  });
+});
 
 export const CAMPAIGN = Object.freeze({
   id: 'chapter1',
   title: 'Capítulo I • A Invasão Começa',
   stages: Object.freeze(stages),
+  totalStars: stages.length * 3,
+  totalCollectibles: stages.reduce((sum, stage) => sum + stage.collectibleTotal, 0),
 });
 
 export function stageById(id) {

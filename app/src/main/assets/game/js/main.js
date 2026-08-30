@@ -5,28 +5,29 @@ import nipplejs from 'nipplejs';
 import { AnimationController } from './animation.js';
 import { selectAssistedTarget } from './aim-assist.js';
 import { createAutomaticFire } from './automatic-fire.js?v=rifle-1';
-import { createAvatarPreview } from './avatar-preview.js?v=zombie-zone-16';
+import { createAvatarPreview } from './avatar-preview.js?v=lobby-3';
 import { createThirdPersonCamera } from './camera-controller.js?v=mobile-hud-3';
-import { CAMPAIGN } from './campaign.js?v=zombie-zone-16';
-import { mountCampaignUI } from './campaign-ui.js?v=zombie-zone-16';
-import { characterById, CHARACTERS } from './catalog.js';
+import { CAMPAIGN } from './campaign.js?v=lobby-3';
+import { mountCampaignUI } from './campaign-ui.js?v=lobby-3';
+import { characterById, CHARACTERS } from './catalog.js?v=lobby-3';
 import { CombatSystem } from './combat.js?v=zombie-ai-1';
 import { createHybridAim } from './hybrid-aim.js?v=mobile-hud-3';
 import { createExplorationState, mountMinimap, revealAround } from './minimap.js?v=campaign-3';
 import { completeMission, routeBootFailure, shouldDisposeMission } from './mission-lifecycle.js?v=campaign-3';
 import { controllerFacingFromYaw, modelYawFromDirection } from './movement-heading.js?v=zombie-zone-18';
 import { createPlayerController } from './player-controller.js?v=tps-unreal-3';
+import { purchaseAvatar } from './progression.js?v=lobby-3';
 import { createRifleEffects } from './rifle-effects.js?v=rifle-1';
 import { resolveRifleHitscan } from './rifle-hitscan.js?v=rifle-1';
 import { bindRifleInput, createRifleIntent } from './rifle-input.js?v=mobile-hud-3';
 import { attachRifle, createRifleModel, createRifleSockets } from './rifle-model.js?v=rifle-aim-1';
-import { createSaveStore } from './save-store.js';
-import { createScreenFlow } from './screen-flow.js';
-import { mountSelection } from './selection.js?v=zombie-zone-13';
+import { createSaveStore } from './save-store.js?v=lobby-3';
+import { createScreenFlow } from './screen-flow.js?v=lobby-3';
+import { mountSelection } from './selection.js?v=lobby-3';
 import { createWeaponAudio } from './weapon-audio.js?v=rifle-1';
 import { createWorld } from './world.js?v=zombie-zone-7';
 import { createWeaponState } from './weapon-state.js?v=rifle-1';
-import { createMusicController, MUSIC_MODES } from './music-controller.js';
+import { createMusicController, MUSIC_MODES } from './music-controller.js?v=lobby-3';
 
 const CHARACTER_WORLD_SCALE = 0.72;
 
@@ -80,27 +81,49 @@ export async function startApp(loading, diagnostics = null) {
     document.documentElement.dataset.musicMode = mode;
     document.documentElement.dataset.musicPlaying = String(playing);
   };
+  const syncAppAudioState = async (active) => {
+    const playing = await music.setAppActive(active);
+    document.documentElement.dataset.musicPlaying = String(playing);
+  };
+  const onVisibilityChange = () => syncAppAudioState(!document.hidden);
+  const onAppPause = () => syncAppAudioState(false);
+  const onAppResume = () => syncAppAudioState(true);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('pagehide', onAppPause);
+  window.addEventListener('pageshow', onAppResume);
+  window.addEventListener('zombie-zone-app-pause', onAppPause);
+  window.addEventListener('zombie-zone-app-resume', onAppResume);
   let activeGame = null;
   let ui = null;
   let avatarPreview = null;
+  let selection = null;
 
   const syncAvatarPreview = (state = flow.state, characterId = progress.selectedAvatar ?? 'a') => {
     if (!avatarPreview) return;
-    if (['home', 'avatar', 'preparation', 'victory'].includes(state.screen)) {
+    if (['home', 'avatar', 'victory'].includes(state.screen)) {
       avatarPreview.show(state.screen, characterId).catch((error) => console.error('Falha ao mostrar avatar 3D.', error));
     } else {
       avatarPreview.hide();
     }
   };
 
-  const setProgress = (next) => { progress = store.save(next); ui?.render(); return progress; };
-  const showAvatar = () => { flow.go('avatar'); selectionScreen.classList.remove('is-hidden'); hud.classList.add('is-hidden'); };
+  const setProgress = (next) => {
+    progress = store.save(next);
+    ui?.render();
+    return progress;
+  };
+  const showAvatar = () => {
+    selection?.refresh(progress.selectedAvatar ?? 'a');
+    flow.go('avatar');
+    selectionScreen.classList.remove('is-hidden');
+    hud.classList.add('is-hidden');
+  };
 
   const finishVictory = (stage, result) => {
     const completed = completeMission(progress, stage.id, result);
     setProgress(completed.progress);
     activeGame?.dispose(); activeGame = null; hud.classList.add('is-hidden');
-    flow.go('story', { stageId: stage.id, storyPosition: 'after', resultSummary: completed.award });
+    flow.go('victory', { stageId: stage.id, ...completed.award });
   };
   const finishDefeat = (stage, reason) => {
     activeGame?.dispose(); activeGame = null; hud.classList.add('is-hidden');
@@ -110,7 +133,8 @@ export async function startApp(loading, diagnostics = null) {
   const startMission = async (stage) => {
     activeGame?.dispose(); activeGame = null;
     flow.go('gameplay', { stageId: stage.id });
-    loading.show(); loading.update('Abrindo a missão', 8); hud.classList.add('is-hidden');
+    loading.setStory(stage.storyBefore);
+    loading.show(); loading.update('Carregando o mapa', 8); hud.classList.add('is-hidden');
     try {
       activeGame = await createGame({
         characterId: progress.selectedAvatar ?? 'a', stage, upgrades: progress.upgrades, settings: progress.settings,
@@ -128,13 +152,31 @@ export async function startApp(loading, diagnostics = null) {
     }
   };
 
-  ui = mountCampaignUI({ flow, getProgress: () => progress, setProgress, onStartMission: startMission, onSelectAvatar: showAvatar });
-  mountSelection(selectionScreen, CHARACTERS, (characterId) => {
+  ui = mountCampaignUI({
+    flow,
+    getProgress: () => progress,
+    setProgress,
+    onStartMission: startMission,
+    onSelectAvatar: showAvatar,
+    getCharacterName: (id) => characterById(id).name,
+  });
+  selection = mountSelection(selectionScreen, CHARACTERS, (characterId) => {
     setProgress({ ...progress, selectedAvatar: characterId, hasStarted: true });
     selectionScreen.classList.add('is-hidden'); flow.go('home');
   }, {
     selectedId: progress.selectedAvatar ?? 'a',
     onSelect: (characterId) => syncAvatarPreview({ screen: 'avatar' }, characterId),
+    onPurchase: (characterId) => {
+      try {
+        setProgress(purchaseAvatar(progress, characterId).progress);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    onBack: () => flow.go('home'),
+    getCrystals: () => progress.crystals,
+    getUnlockedAvatarIds: () => progress.unlockedAvatarIds,
   });
 
   let previousFlowState = flow.state;
@@ -167,7 +209,7 @@ export async function startApp(loading, diagnostics = null) {
   });
   document.querySelector('[data-restart-stage]').addEventListener('click', () => startMission(ui.activeStage()));
 
-  loading.update('Iniciando controles locais', 45);
+  loading.update('Preparando a base', 45);
   try {
     assertWebGL();
     await RAPIER.init();
@@ -175,13 +217,18 @@ export async function startApp(loading, diagnostics = null) {
       THREE,
       GLTFLoader,
       characterById,
-      hosts: Object.fromEntries(['home', 'avatar', 'preparation', 'victory'].map((screen) => [
+      hosts: Object.fromEntries(['home', 'avatar', 'victory'].map((screen) => [
         screen,
         document.querySelector(`[data-avatar-preview="${screen}"]`),
       ])),
     });
     syncAvatarPreview();
-    window.addEventListener('pagehide', () => {
+    window.addEventListener('beforeunload', () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onAppPause);
+      window.removeEventListener('pageshow', onAppResume);
+      window.removeEventListener('zombie-zone-app-pause', onAppPause);
+      window.removeEventListener('zombie-zone-app-resume', onAppResume);
       detachMusicActivation();
       music.dispose();
       avatarPreview?.dispose();
@@ -196,7 +243,8 @@ export async function startApp(loading, diagnostics = null) {
     }
     return;
   }
-  loading.update('A aventura está pronta', 100);
+  loading.update('Base pronta', 100);
+  loading.setStory(null);
   window.setTimeout(() => { loading.hide(); ui.render(); }, 240);
 }
 
@@ -207,20 +255,20 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.12, 320);
   const loader = new GLTFLoader();
   let loadedWorldPieces = 0;
-  const world = await createWorld(loader, (label) => {
-    loadedWorldPieces += 1; loading.update(label, Math.min(59, 18 + loadedWorldPieces * 1.7));
+  const world = await createWorld(loader, () => {
+    loadedWorldPieces += 1; loading.update('Montando o ambiente 3D', Math.min(59, 18 + loadedWorldPieces * 1.7));
   }, stage.mapId, renderer.capabilities.getMaxAnisotropy());
   world.scene.add(camera);
   document.querySelector('#game-hud').dataset.mapTexture = world.textureVariant.id;
 
-  loading.update('Invocando seu viajante', 61);
+  loading.update('Equipando seu herói', 61);
   const playerData = await loadCharacter(loader, characterId, world.layout.start);
   world.scene.add(playerData.root);
   const maxHealth = 100 + upgrades.vitality * 15;
   const player = { ...playerData, health: maxHealth, maxHealth, yaw: 0, speed: 4.35, powerMultiplier: 1 + upgrades.power * 0.18 };
   player.root.rotation.y = modelYawFromDirection(0, -1);
 
-  loading.update('Despertando os guardiões', 75);
+  loading.update('Posicionando a horda', 75);
   const enemyData = await Promise.all(world.layout.zombieSpawns.map((spawn) => loadCharacter(loader, spawn.kind === 'green' ? 'l' : 'o', spawn)));
   const enemies = enemyData.map((data, index) => ({
     id: `enemy-${index + 1}`,

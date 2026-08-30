@@ -5,6 +5,7 @@ import {
   applyStageResult,
   createInitialProgress,
   evaluateStage,
+  purchaseAvatar,
   purchaseUpgrade,
   upgradeCost,
 } from '../app/src/main/assets/game/js/progression.js';
@@ -52,4 +53,22 @@ test('melhorias respeitam custo, saldo e limite de cinco níveis', () => {
   }
   assert.throws(() => purchaseUpgrade(current, 'vitality'), /nível máximo/);
   assert.throws(() => purchaseUpgrade(createInitialProgress(), 'power'), /Cristais insuficientes/);
+});
+
+test('Kael começa desbloqueado e comprar uma skin desconta diamantes uma única vez', () => {
+  const initial = createInitialProgress();
+  assert.deepEqual(initial.unlockedAvatarIds, ['a']);
+  const funded = { ...initial, crystals: 500 };
+  const first = purchaseAvatar(funded, 'b');
+  assert.equal(first.spent, 150);
+  assert.equal(first.progress.crystals, 350);
+  assert.deepEqual(first.progress.unlockedAvatarIds, ['a', 'b']);
+  const repeated = purchaseAvatar(first.progress, 'b');
+  assert.equal(repeated.spent, 0);
+  assert.equal(repeated.progress.crystals, 350);
+});
+
+test('skin bloqueada não pode ser comprada sem diamantes suficientes', () => {
+  assert.throws(() => purchaseAvatar(createInitialProgress(), 'b'), /Diamantes insuficientes/);
+  assert.throws(() => purchaseAvatar(createInitialProgress(), 'desconhecida'), /Herói desconhecido/);
 });

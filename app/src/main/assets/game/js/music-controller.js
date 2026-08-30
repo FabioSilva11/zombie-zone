@@ -13,6 +13,7 @@ export function createMusicController({
   };
   let mode = MUSIC_MODES.MENU;
   let soundEnabled = Boolean(enabled);
+  let appActive = true;
   let disposed = false;
 
   for (const track of Object.values(tracks)) {
@@ -28,7 +29,7 @@ export function createMusicController({
   }
 
   function sync() {
-    if (disposed || !soundEnabled) {
+    if (disposed || !soundEnabled || !appActive) {
       pauseAll();
       return Promise.resolve(false);
     }
@@ -56,6 +57,10 @@ export function createMusicController({
       soundEnabled = Boolean(nextEnabled);
       return sync();
     },
+    setAppActive(nextActive) {
+      appActive = Boolean(nextActive);
+      return sync();
+    },
     bindUserActivation(target) {
       target.addEventListener('pointerdown', onUserActivation, { passive: true });
       target.addEventListener('keydown', onUserActivation);
@@ -64,7 +69,7 @@ export function createMusicController({
         target.removeEventListener('keydown', onUserActivation);
       };
     },
-    state() { return { mode, enabled: soundEnabled }; },
+    state() { return { mode, enabled: soundEnabled, appActive }; },
     dispose() {
       disposed = true;
       pauseAll();

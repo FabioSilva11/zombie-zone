@@ -1,5 +1,5 @@
-import { CAMPAIGN } from './campaign.js';
-import { createInitialProgress, SAVE_VERSION } from './progression.js';
+import { CAMPAIGN } from './campaign.js?v=lobby-3';
+import { createInitialProgress, SAVE_VERSION } from './progression.js?v=lobby-3';
 
 const STAGE_IDS = new Set(CAMPAIGN.stages.map((stage) => stage.id));
 const AVATAR_IDS = new Set('abcdefghijklmnopqr'.split(''));
@@ -16,6 +16,11 @@ export function normalizeProgress(source) {
   const unlocked = [...new Set(Array.isArray(source.unlockedStageIds) ? source.unlockedStageIds : [])]
     .filter((id) => STAGE_IDS.has(id));
   if (!unlocked.includes('stage1')) unlocked.unshift('stage1');
+  const selectedAvatar = AVATAR_IDS.has(source.selectedAvatar) ? source.selectedAvatar : null;
+  const unlockedAvatarIds = [...new Set(Array.isArray(source.unlockedAvatarIds) ? source.unlockedAvatarIds : [])]
+    .filter((id) => AVATAR_IDS.has(id));
+  if (!unlockedAvatarIds.includes('a')) unlockedAvatarIds.unshift('a');
+  if (selectedAvatar && !unlockedAvatarIds.includes(selectedAvatar)) unlockedAvatarIds.push(selectedAvatar);
 
   const stages = {};
   for (const [id, value] of Object.entries(source.stages ?? {})) {
@@ -26,15 +31,16 @@ export function normalizeProgress(source) {
       bestTime: Number.isFinite(Number(value.bestTime)) ? Math.max(0, Number(value.bestTime)) : null,
       bestHealthRatio: Math.min(1, Math.max(0, finiteOr(value.bestHealthRatio, 0))),
       collectedCrystalIds: [...new Set((Array.isArray(value.collectedCrystalIds) ? value.collectedCrystalIds : [])
-        .filter((idValue) => typeof idValue === 'string'))],
+        .filter((idValue) => /^stage\d+:crystal-[1-3]$/.test(idValue) && idValue.startsWith(`${id}:`)))],
     };
   }
 
   return {
     version: SAVE_VERSION,
-    selectedAvatar: AVATAR_IDS.has(source.selectedAvatar) ? source.selectedAvatar : null,
+    selectedAvatar,
     hasStarted: Boolean(source.hasStarted),
     crystals: clampInteger(source.crystals, 0, Number.MAX_SAFE_INTEGER, 0),
+    unlockedAvatarIds,
     unlockedStageIds: unlocked,
     stages,
     upgrades: {
@@ -43,6 +49,13 @@ export function normalizeProgress(source) {
     },
     viewedStoryIds: [...new Set((Array.isArray(source.viewedStoryIds) ? source.viewedStoryIds : [])
       .filter((id) => typeof id === 'string'))],
+    monetization: {
+      rewardedAdsClaimedToday: clampInteger(source.monetization?.rewardedAdsClaimedToday, 0, 5),
+      rewardedAdsDayKey: typeof source.monetization?.rewardedAdsDayKey === 'string'
+        && /^\d{4}-\d{2}-\d{2}$/.test(source.monetization.rewardedAdsDayKey)
+        ? source.monetization.rewardedAdsDayKey
+        : initial.monetization.rewardedAdsDayKey,
+    },
     settings: {
       cameraSensitivity: Math.min(2, Math.max(0.5, finiteOr(source.settings?.cameraSensitivity, 1))),
       soundEnabled: source.settings?.soundEnabled !== false,

@@ -2,6 +2,7 @@ package com.fabiosilva.ecosdeeldra
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class NavigationPolicyTest {
@@ -36,6 +37,18 @@ class NavigationPolicyTest {
             NavigationPolicy.isAllowedTopLevel(
                 "https://appassets.androidplatform.net/assets/not-game/index.html",
             ),
+        )
+    }
+
+    @Test
+    fun lifecycleBridgeDispatchesDistinctPauseAndResumeEvents() {
+        assertEquals(
+            "window.dispatchEvent(new Event('zombie-zone-app-pause'))",
+            GameLifecycleBridge.scriptFor(active = false),
+        )
+        assertEquals(
+            "window.dispatchEvent(new Event('zombie-zone-app-resume'))",
+            GameLifecycleBridge.scriptFor(active = true),
         )
     }
 }

@@ -9,6 +9,7 @@ export const CHARACTERS = Object.freeze(
   IDS.map((id, index) => Object.freeze({
     id,
     name: NAMES[index],
+    price: index === 0 ? 0 : index <= 4 ? 150 : index <= 9 ? 250 : index <= 13 ? 400 : 600,
     model: `./models/characters/character-${id}.glb`,
     texture: `./models/characters/Textures/texture-${id}.png`,
   })),
@@ -27,4 +28,3 @@ export const DUNGEON_ASSETS = Object.freeze({
 export function characterById(id) {
   return CHARACTERS.find((character) => character.id === id) ?? CHARACTERS[0];
 }
-

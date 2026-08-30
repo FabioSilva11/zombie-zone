@@ -3,12 +3,21 @@ import assert from 'node:assert/strict';
 import { createInitialProgress } from '../app/src/main/assets/game/js/progression.js';
 import { createScreenFlow } from '../app/src/main/assets/game/js/screen-flow.js';
 
-test('primeiro acesso começa no avatar e jogador recorrente começa em início', () => {
-  assert.equal(createScreenFlow(createInitialProgress()).state.screen, 'avatar');
+test('primeiro acesso e jogador recorrente começam no lobby', () => {
+  assert.equal(createScreenFlow(createInitialProgress()).state.screen, 'home');
   const returning = createInitialProgress();
   returning.selectedAvatar = 'b';
   returning.hasStarted = true;
   assert.equal(createScreenFlow(returning).state.screen, 'home');
+});
+
+test('melhorias abrem como painel do lobby sem criar uma etapa antes da missão', () => {
+  const flow = createScreenFlow(createInitialProgress());
+  flow.openOverlay('upgrades');
+  assert.equal(flow.state.screen, 'home');
+  assert.equal(flow.state.overlay, 'upgrades');
+  assert.throws(() => flow.go('preparation'), /Tela desconhecida/);
+  assert.throws(() => flow.go('story'), /Tela desconhecida/);
 });
 
 test('pausa preserva a tela de jogo e retoma sem perder contexto', () => {

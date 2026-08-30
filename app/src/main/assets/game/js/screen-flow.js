@@ -1,14 +1,14 @@
 const SCREENS = new Set([
-  'loading', 'home', 'avatar', 'chapter', 'story', 'preparation',
+  'loading', 'home', 'avatar', 'chapter',
   'gameplay', 'victory', 'defeat', 'compatibility',
 ]);
-const OVERLAYS = new Set(['pause', 'map', 'settings']);
+const OVERLAYS = new Set(['pause', 'map', 'settings', 'upgrades']);
 
 export function createScreenFlow(progress) {
   const listeners = new Set();
   const flow = {
     state: {
-      screen: progress.hasStarted && progress.selectedAvatar ? 'home' : 'avatar',
+      screen: 'home',
       overlay: null,
     },
     go(screen, payload = {}) {

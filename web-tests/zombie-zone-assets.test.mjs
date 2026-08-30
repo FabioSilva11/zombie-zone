@@ -10,6 +10,8 @@ test('fundos Zombie Zone são locais, completos e usados pelo tema', () => {
     'zombie-zone-city-bg.png',
     'zombie-zone-campaign-bg.png',
     'zombie-zone-lab-bg.png',
+    'zombie-zone-lobby-bg-v2.png',
+    'zombie-zone-zone-bg-v2.png',
   ];
   const css = readFileSync(new URL('../app/src/main/assets/game/css/game.css', import.meta.url), 'utf8');
 

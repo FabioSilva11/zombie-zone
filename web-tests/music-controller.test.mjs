@@ -46,6 +46,37 @@ test('desativar som pausa as duas trilhas e reativar retoma o estado atual', asy
   assert.equal(tracks[1].paused, false);
 });
 
+test('minimizar o aplicativo pausa tudo e voltar retoma somente a faixa atual', async () => {
+  const tracks = [];
+  const music = createMusicController({
+    menuUrl: 'menu.mp3', gameplayUrl: 'gameplay.mp3', audioFactory: (url) => {
+      const track = fakeAudio(url); tracks.push(track); return track;
+    },
+  });
+  await music.setMode(MUSIC_MODES.GAMEPLAY);
+  await music.setAppActive(false);
+  assert.equal(tracks.every((track) => track.paused), true);
+  const menuPlayCalls = tracks[0].playCalls;
+  await music.setAppActive(true);
+  assert.equal(tracks[0].paused, true);
+  assert.equal(tracks[0].playCalls, menuPlayCalls);
+  assert.equal(tracks[1].paused, false);
+  assert.equal(tracks[1].playCalls, 2);
+});
+
+test('retornar ao aplicativo não reinicia música desativada pelo jogador', async () => {
+  const tracks = [];
+  const music = createMusicController({
+    menuUrl: 'menu.mp3', gameplayUrl: 'gameplay.mp3', audioFactory: (url) => {
+      const track = fakeAudio(url); tracks.push(track); return track;
+    },
+  });
+  await music.setEnabled(false);
+  await music.setAppActive(false);
+  await music.setAppActive(true);
+  assert.equal(tracks.every((track) => track.paused), true);
+});
+
 test('as duas músicas MP3 estão empacotadas e válidas', async () => {
   for (const file of ['musica-menu-tps-ambient.mp3', 'trilha-tps-dark-loop.mp3']) {
     const url = new URL(`audio/${file}`, GAME_ROOT);

@@ -1,4 +1,4 @@
-import { createLoadingController } from './loading.js';
+import { createLoadingController } from './loading.js?v=lobby-3';
 import { installRuntimeDiagnostics } from './runtime-diagnostics.js?v=tps-unreal-1';
 
 const loadingRoot = document.querySelector('#loading-screen');
@@ -13,7 +13,7 @@ async function boot() {
     const timeout = new Promise((_, reject) => {
       window.setTimeout(() => reject(new Error('A conexão demorou mais que o esperado.')), 15000);
     });
-    const gameModule = await Promise.race([import('./main.js?v=mobile-hud-3'), timeout]);
+    const gameModule = await Promise.race([import('./main.js?v=lobby-3'), timeout]);
     await gameModule.startApp(loading, diagnostics);
   } catch (error) {
     diagnostics.capture('boot-failure', error);

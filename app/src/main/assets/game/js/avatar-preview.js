@@ -1,7 +1,6 @@
 const PREVIEW_MODES = Object.freeze({
-  home: 'idle',
+  home: 'showcase',
   avatar: 'rotate',
-  preparation: 'idle',
   victory: 'celebrate',
 });
 
@@ -37,9 +36,22 @@ function disposeModel(model) {
   });
 }
 
+export function choosePreviewClipName(names, mode) {
+  const preferences = mode === 'celebrate'
+    ? [/celebr|victory|cheer|jump|wave|emote-yes/i, /idle/i, /static/i]
+    : mode === 'showcase'
+      ? [/emote-yes/i, /wave|taunt|cheer|celebr|victory/i, /idle/i, /static/i]
+      : [/idle/i, /static/i];
+  for (const pattern of preferences) {
+    const name = names.find((candidate) => pattern.test(candidate));
+    if (name) return name;
+  }
+  return names[0] ?? null;
+}
+
 function chooseClip(clips, mode) {
-  const pattern = mode === 'celebrate' ? /celebr|victory|cheer|jump|wave/i : /idle|static/i;
-  return clips.find((clip) => pattern.test(clip.name)) ?? clips.find((clip) => /idle|static/i.test(clip.name)) ?? clips[0];
+  const name = choosePreviewClipName(clips.map((clip) => clip.name), mode);
+  return clips.find((clip) => clip.name === name);
 }
 
 export function createAvatarPreview({ THREE, GLTFLoader, characterById, hosts, windowRef = window }) {
@@ -87,6 +99,7 @@ export function createAvatarPreview({ THREE, GLTFLoader, characterById, hosts, w
     const delta = Math.min(clock.getDelta(), 0.05);
     mixer?.update(delta);
     if (model && activeMode === 'rotate') model.rotation.y += delta * 0.48;
+    else if (model && activeMode === 'showcase') model.rotation.y = -0.18 + Math.sin(clock.elapsedTime * 0.75) * 0.09;
     renderer.render(scene, camera);
     frame = windowRef.requestAnimationFrame(animate);
   };

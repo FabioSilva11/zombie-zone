@@ -52,3 +52,26 @@ test('dano de rifle ignora cooldown do ataque e aplica multiplicador de cabeça'
   assert.equal(headshot.damage, 30);
   assert.equal(enemy.health, 20);
 });
+
+test('ataque próximo acerta apenas o zumbi válido mais próximo', () => {
+  const player = { root: rootAt(0, 0), health: 100, yaw: 0, animations: animations() };
+  const nearest = {
+    id: 'enemy-nearest', root: rootAt(0, -1), health: 35, yaw: 0,
+    roamSpeed: 0.5, chaseSpeed: 1.5, attackCooldown: 0, animations: animations(),
+  };
+  const nearby = {
+    id: 'enemy-nearby', root: rootAt(0.4, -1.2), health: 35, yaw: 0,
+    roamSpeed: 0.5, chaseSpeed: 1.5, attackCooldown: 0, animations: animations(),
+  };
+  const combat = new CombatSystem({
+    player, enemies: [nearby, nearest], canMoveTo: () => true, hasLineOfSight: () => true,
+    onHudChange() {}, onGateOpen() {}, onPlayerDefeated() {},
+  });
+
+  combat.attack();
+
+  assert.equal(nearest.health, 0);
+  assert.equal(nearby.health, 35);
+  assert.equal(nearest.animations.calls.length, 1);
+  assert.equal(nearby.animations.calls.length, 0);
+});

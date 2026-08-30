@@ -4,13 +4,29 @@ import { readFileSync } from 'node:fs';
 
 test('telas principais usam o mesmo avatar 3D e o sistema Zombie Zone', () => {
   const html = readFileSync(new URL('../app/src/main/assets/game/index.html', import.meta.url), 'utf8');
-  for (const screen of ['home', 'avatar', 'preparation', 'victory']) {
+  for (const screen of ['home', 'avatar', 'victory']) {
     assert.match(html, new RegExp(`data-avatar-preview="${screen}"`));
   }
   assert.doesNotMatch(html, /data-home-avatar(?:=|\s)/);
-  for (const id of ['loading-screen', 'home-screen', 'selection-screen', 'chapter-screen', 'story-screen', 'preparation-screen', 'game-hud', 'pause-screen', 'settings-screen', 'victory-screen', 'defeat-screen', 'compatibility-screen']) {
+  for (const id of ['loading-screen', 'home-screen', 'selection-screen', 'chapter-screen', 'upgrades-screen', 'game-hud', 'pause-screen', 'settings-screen', 'victory-screen', 'defeat-screen', 'compatibility-screen']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  assert.doesNotMatch(html, /id="story-screen"/);
+  assert.doesNotMatch(html, /id="preparation-screen"/);
+});
+
+test('lobby concentra progresso, melhorias e heróis sem preparação intermediária', () => {
+  const html = readFileSync(new URL('../app/src/main/assets/game/index.html', import.meta.url), 'utf8');
+  assert.match(html, /data-home-upgrades/);
+  assert.match(html, /data-avatar-back/);
+  assert.match(html, /data-map-start/);
+  assert.match(html, /data-loading-story/);
+  assert.match(html, /data-home-current-title/);
+  assert.match(html, /data-home-current-number/);
+  assert.match(html, /id="upgrades-screen"/);
+  assert.doesNotMatch(html, /A cidade precisa de você!/);
+  assert.doesNotMatch(html, /ENTRAR NA ZONA/);
+  assert.doesNotMatch(html, />Preparação</);
 });
 
 test('HUD inicia o rifle cheio, identifica o gatilho e abre a mira por --spread', () => {
@@ -25,7 +41,8 @@ test('HUD inicia o rifle cheio, identifica o gatilho e abre a mira por --spread'
   assert.match(css, /\.aim-button[^}]*min-width:\s*48px[^}]*min-height:\s*48px/s);
   assert.match(css, /\.reticle\s*\{[^}]*--spread:\s*0px[^}]*width:\s*calc\(28px \+ var\(--spread\)\)[^}]*height:\s*calc\(28px \+ var\(--spread\)\)/s);
   assert.match(css, /\.reticle\.aimed\s*\{[^}]*border-color:\s*var\(--amber\)/s);
-  assert.match(html, /\.\/css\/game\.css\?v=mobile-hud-3/);
-  assert.match(html, /\.\/js\/bootstrap\.js\?v=mobile-hud-3/);
-  assert.match(bootstrap, /import\('\.\/main\.js\?v=mobile-hud-3'\)/);
+  assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
+  assert.match(html, /\.\/css\/game\.css\?v=lobby-3/);
+  assert.match(html, /\.\/js\/bootstrap\.js\?v=lobby-3/);
+  assert.match(bootstrap, /import\('\.\/main\.js\?v=lobby-3'\)/);
 });

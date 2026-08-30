@@ -37,19 +37,26 @@ export class CombatSystem {
     this.playerAttackCooldown = 0.62;
     this.player.animations.play(['attack-melee-right', 'attack-melee-left', 'idle'], { once: true, fade: 0.08 });
 
+    const attacker = {
+      x: this.player.root.position.x,
+      z: this.player.root.position.z,
+      yaw: this.player.yaw,
+    };
+    let targetEnemy = null;
+    let targetDistance = Infinity;
     for (const enemy of this.enemies) {
       if (enemy.health <= 0) continue;
-      const attacker = {
-        x: this.player.root.position.x,
-        z: this.player.root.position.z,
-        yaw: this.player.yaw,
-      };
       const target = { x: enemy.root.position.x, z: enemy.root.position.z };
       if (!canMeleeHit(attacker, target)) continue;
-      enemy.health = Math.max(0, enemy.health - 35);
-      if (enemy.health === 0) {
-        enemy.animations.play(['die', 'idle'], { once: true, fade: 0.1 });
+      const distance = Math.hypot(target.x - attacker.x, target.z - attacker.z);
+      if (distance < targetDistance) {
+        targetDistance = distance;
+        targetEnemy = enemy;
       }
+    }
+    if (targetEnemy) {
+      targetEnemy.health = Math.max(0, targetEnemy.health - 35);
+      if (targetEnemy.health === 0) targetEnemy.animations.play(['die', 'idle'], { once: true, fade: 0.1 });
     }
     this.notify();
     return true;
