@@ -128,27 +128,29 @@
         <div><small>OBJETIVO</small><strong data-objective>Derrote os zumbis</strong></div>
       </div>
     </div>
-    <div id="camera-zone" aria-label="Área para girar a câmera">
-      <div class="camera-hint" aria-hidden="true">
-        <span class="camera-gesture"><i></i><i></i><i></i><b>☝</b></span>
-        <strong>Arraste para<br>mover a câmera</strong>
-      </div>
+    <div id="camera-zone" aria-label="Área para girar a câmera"></div>
+    <div class="camera-hint" aria-hidden="true">
+      <span class="camera-gesture"><i></i><i></i><i></i><b>☝</b></span>
+      <strong>Arraste para<br>mover a câmera</strong>
     </div>
     <div class="reticle" data-reticle><span></span><small data-target-health></small></div>
     <div class="damage-vignette" data-damage-vignette></div>
     <div class="crystal-feedback" data-crystal-feedback>◆ <b>0</b>/3</div>
     <button id="pause-button" class="pause-button" type="button" aria-label="Pausar">Ⅱ</button>
-    <div id="joystick" class="movement-zone" aria-label="Controle de movimento">
+    <div id="joystick" class="movement-zone" data-control-id="joystick" aria-label="Controle de movimento">
       <span class="stick-arrow stick-up" aria-hidden="true">▲</span>
       <span class="stick-arrow stick-right" aria-hidden="true">▶</span>
       <span class="stick-arrow stick-down" aria-hidden="true">▼</span>
       <span class="stick-arrow stick-left" aria-hidden="true">◀</span>
     </div>
     <div class="action-cluster">
-      <button id="reload-button" class="utility-action" type="button" aria-label="Recarregar"><span data-ammo-count>30/30</span><small>RECARREGAR</small></button>
-      <button id="dodge-button" class="utility-action" type="button" aria-label="Esquivar"><span>↝</span><small>ESQUIVA</small></button>
-      <button id="aim-button" class="utility-action aim-button" type="button" aria-label="Alternar mira" aria-pressed="false"><span>⊕</span><small>MIRAR</small></button>
-      <button id="attack-button" class="attack-button" type="button" aria-label="Atirar e arrastar a câmera"><span>✦</span><small>ATIRAR</small><em>ARRASTE</em></button>
+      <button id="reload-button" class="utility-action" data-control-id="reload" type="button" aria-label="Recarregar"><span data-ammo-count>30/30</span><small>RECARREGAR</small></button>
+      <button id="dodge-button" class="utility-action" data-control-id="dodge" type="button" aria-label="Esquivar"><span>↝</span><small>ESQUIVA</small></button>
+      <button id="sprint-button" class="utility-action sprint-button" data-control-id="sprint" type="button" aria-label="Alternar corrida" aria-pressed="false"><span>»</span><small>CORRER</small></button>
+      <button id="crouch-button" class="utility-action crouch-button" data-control-id="crouch" type="button" aria-label="Alternar agachamento" aria-pressed="false"><span>⌄</span><small>AGACHAR</small></button>
+      <button id="jump-button" class="utility-action jump-button" data-control-id="jump" type="button" aria-label="Pular"><span>↑</span><small>PULAR</small></button>
+      <button id="aim-button" class="utility-action aim-button" data-control-id="aim" type="button" aria-label="Alternar mira" aria-pressed="false"><span>⊕</span><small>MIRAR</small></button>
+      <button id="attack-button" class="attack-button" data-control-id="shoot" type="button" aria-label="Atirar e arrastar a câmera"><span>✦</span><small>ATIRAR</small><em>ARRASTE</em></button>
     </div>
   </section>
 
@@ -175,11 +177,35 @@
 
   <section id="pause-screen" class="modal-screen is-hidden"><div class="pause-panel"><p class="eyebrow">JOGO PAUSADO</p><h2>Respire e volte para a ação</h2><button class="primary-button compact" data-resume-game data-primary-action type="button">Continuar</button><label>Sensibilidade da câmera<input data-camera-sensitivity type="range" min="0.5" max="2" step="0.1" value="1"></label><button data-restart-stage type="button">Reiniciar fase</button><button data-return-map type="button">Voltar ao mapa</button></div></section>
   <section id="upgrades-screen" class="modal-screen is-hidden"><div class="upgrades-panel"><header><div><p class="eyebrow">CENTRO DE TREINAMENTO</p><h2>Melhore seu herói</h2></div><div class="resource-row"><span>◆ <b data-crystals>0</b></span></div></header><div class="upgrade-list"><article class="upgrade-card"><span class="upgrade-icon">♥</span><div><h3>Vitalidade <small data-vitality-level>Nível 0/5</small></h3><p>Mais vida para resistir às hordas.</p></div><button data-upgrade="vitality" type="button">◆ <b data-vitality-cost>50</b></button></article><article class="upgrade-card"><span class="upgrade-icon power">✦</span><div><h3>Poder <small data-power-level>Nível 0/5</small></h3><p>Mais dano em cada disparo.</p></div><button data-upgrade="power" type="button">◆ <b data-power-cost>50</b></button></article></div><button class="primary-button compact" data-upgrades-close type="button">Voltar ao lobby</button></div></section>
-  <section id="settings-screen" class="modal-screen is-hidden"><div class="settings-panel"><p class="eyebrow">CONFIGURAÇÕES</p><h2>Ajuste sua jornada</h2><label>Sensibilidade da câmera<input data-camera-sensitivity type="range" min="0.5" max="2" step="0.1" value="1"></label><label class="toggle-row"><span>Som do jogo</span><input data-sound-enabled type="checkbox" checked></label><button class="primary-button compact" data-settings-close data-primary-action type="button">Salvar e voltar</button></div></section>
+  <section id="settings-screen" class="modal-screen is-hidden"><div class="settings-panel"><p class="eyebrow">CONFIGURAÇÕES</p><h2>Ajuste sua jornada</h2><label>Sensibilidade da câmera<input data-camera-sensitivity type="range" min="0.5" max="2" step="0.1" value="1"></label><label class="toggle-row"><span>Som do jogo</span><input data-sound-enabled type="checkbox" checked></label><button class="settings-control-layout" data-open-controls-editor type="button"><span>◉</span><b>PERSONALIZAR CONTROLES</b><small>Mova, redimensione ou oculte cada controle</small></button><button class="primary-button compact" data-settings-close data-primary-action type="button">Salvar e voltar</button></div></section>
+
+  <section id="controls-editor-screen" class="controls-editor-screen is-hidden" aria-label="Editor de posição dos controles">
+    <div class="controls-editor-panel">
+      <header><div><p class="eyebrow">INTERFACE PERSONALIZADA</p><h2>Personalize seus controles</h2><p>Arraste, redimensione ou oculte cada item. A configuração será salva neste aparelho.</p></div><button data-controls-cancel type="button" aria-label="Fechar editor">×</button></header>
+      <div class="controls-editor-stage" data-controls-editor-stage>
+        <div class="editor-safe-area" aria-hidden="true"></div>
+        <span class="layout-control layout-stick" data-layout-control="joystick" data-layout-label="MOVIMENTO">◉<small>MOVER</small></span>
+        <span class="layout-control" data-layout-control="reload" data-layout-label="RECARREGAR">30/30<small>RECARREGAR</small></span>
+        <span class="layout-control" data-layout-control="sprint" data-layout-label="CORRIDA">»<small>CORRER</small></span>
+        <span class="layout-control" data-layout-control="dodge" data-layout-label="ESQUIVA">↝<small>ESQUIVA</small></span>
+        <span class="layout-control" data-layout-control="crouch" data-layout-label="AGACHAR">⌄<small>AGACHAR</small></span>
+        <span class="layout-control" data-layout-control="jump" data-layout-label="PULAR">↑<small>PULAR</small></span>
+        <span class="layout-control" data-layout-control="aim" data-layout-label="MIRAR">⊕<small>MIRAR</small></span>
+        <span class="layout-control layout-shoot" data-layout-control="shoot" data-layout-label="ATIRAR">✦<small>ATIRAR</small></span>
+        <strong class="controls-editor-hint">ARRASTE E SOLTE</strong>
+      </div>
+      <div class="controls-editor-tools">
+        <strong data-control-selected>MOVIMENTO</strong>
+        <label><span>TAMANHO</span><input data-control-size type="range" min="55" max="180" step="5" value="100"><output data-control-size-output>100%</output></label>
+        <button data-control-visibility type="button" aria-pressed="false">OCULTAR CONTROLE</button>
+      </div>
+      <footer><button data-controls-reset type="button">RESTAURAR PADRÃO</button><button data-controls-cancel type="button">CANCELAR</button><button class="primary-button compact" data-controls-save type="button">SALVAR INTERFACE</button></footer>
+    </div>
+  </section>
   <section id="victory-screen" class="modal-screen result-screen is-hidden"><div class="result-panel victory-panel"><p class="eyebrow">MISSÃO CONCLUÍDA</p><h2>Zona liberada!</h2><div class="victory-avatar avatar-preview" data-avatar-preview="victory" aria-label="Avatar 3D comemorando"></div><div class="result-stars" data-result-stars>☆☆☆</div><p><strong>+<span data-result-crystals>0</span></strong> cristais conquistados</p><button class="primary-button compact" data-next-stage data-primary-action type="button">Próxima fase ›</button><button class="text-button" data-result-map type="button">Voltar ao mapa</button></div></section>
   <section id="defeat-screen" class="modal-screen result-screen is-hidden"><div class="result-panel defeat"><p class="eyebrow">A HORDA VENCEU DESTA VEZ</p><h2 data-defeat-title>Os zumbis bloquearam o caminho</h2><p>Fortaleça seu herói ou tente novamente.</p><button class="primary-button compact" data-retry-stage data-primary-action type="button">Tentar novamente</button><button data-defeat-upgrades type="button">Melhorias</button><button class="text-button" data-defeat-map type="button">Mapa</button></div></section>
   <section id="compatibility-screen" class="screen campaign-screen compatibility-screen is-hidden"><div class="compatibility-card"><span>!</span><p class="eyebrow">DISPOSITIVO INCOMPATÍVEL</p><h1>Este portal não pode abrir</h1><p data-compatibility-message>O aparelho não oferece os recursos gráficos necessários.</p><button class="primary-button compact" data-retry-app data-primary-action type="button">Tentar novamente</button></div></section>
 
-  <script type="module" src="./js/bootstrap.js?v=lobby-3"></script>
+  <script type="module" src="./js/bootstrap.js?v=free-look-2"></script>
 </body>
 </html>

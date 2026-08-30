@@ -25,18 +25,26 @@ test('rifle automático usa hitscan da câmera e permanece preso ao personagem T
   assert.doesNotMatch(main, /combat\.fire\(selectedEnemy\)/);
 });
 
-test('corpo segue sempre o ControllerYaw e não a direção do deslocamento', () => {
-  assert.match(main, /controllerFacingFromYaw\(cameraController\.heading\(\)\)/);
-  assert.match(main, /player\.root\.quaternion\.copy\(targetPlayerQuaternion\)/);
-  assert.doesNotMatch(main, /modelYawFromDirection\(moved\.x, moved\.z/);
+test('free-look mantém o corpo parado, acompanha movimento e alinha somente no combate', () => {
+  assert.match(main, /resolveFreeLookFacing\(\{/);
+  assert.match(main, /movement:\s*movementPhysics\.desired/);
+  assert.match(main, /combatActive:\s*rifleState\.aimHeld \|\| rifleState\.fireHeld/);
+  assert.match(main, /player\.root\.quaternion\.slerp\(targetPlayerQuaternion/);
+  assert.doesNotMatch(main, /player\.root\.quaternion\.copy\(targetPlayerQuaternion\)/);
 });
 
 test('câmera principal não depende mais de CameraControls', () => {
   assert.doesNotMatch(main, /import CameraControls from 'camera-controls'/);
   assert.match(main, /wallColliders: world\.cameraWallColliders/);
-  assert.match(main, /camera-controller\.js\?v=mobile-hud-3/);
+  assert.match(main, /camera-controller\.js\?v=free-look-1/);
   assert.match(main, /hybrid-aim\.js\?v=mobile-hud-3/);
   assert.match(main, /rifle-input\.js\?v=mobile-hud-3/);
+});
+
+test('rifle aparece ao mirar ou atirar e usa as animações holding-right', () => {
+  assert.match(main, /resolveRiflePresentation\(rifleIntent\.state\(\)\)/);
+  assert.match(main, /rifle\.root\.visible = riflePresentation\.visible/);
+  assert.match(main, /player\.animations\.play\(riflePresentation\.animation/);
 });
 
 test('frame atualiza mundo, blend e câmera antes do hitscan automático', () => {

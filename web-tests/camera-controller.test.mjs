@@ -116,6 +116,23 @@ test('follow acompanha a translação do personagem sem atraso espacial', () => 
   controller.dispose();
 });
 
+test('agachamento abaixa a câmera suavemente sem alterar yaw ou pitch', () => {
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  const player = { root: { position: new THREE.Vector3(4, 0, 8) } };
+  const controller = createThirdPersonCamera({
+    THREE, camera, domElement: new EventTarget(), player, wallColliders: [], windowRef: new EventTarget(),
+  });
+  const standingY = camera.position.y;
+  const heading = controller.heading();
+  const pitch = controller.pitch();
+  controller.setCrouched(true);
+  for (let frame = 0; frame < 30; frame += 1) controller.updateFollow(1 / 60);
+  assert.ok(camera.position.y < standingY - 0.35, `câmera agachada não abaixou o suficiente: ${standingY} -> ${camera.position.y}`);
+  assert.equal(controller.heading(), heading);
+  assert.equal(controller.pitch(), pitch);
+  controller.dispose();
+});
+
 test('mira aproxima a câmera sobre o ombro sem entrar em primeira pessoa', () => {
   const domElement = new EventTarget();
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);

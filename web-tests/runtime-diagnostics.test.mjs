@@ -32,3 +32,23 @@ test('diagnóstico registra amostra e detecta dessincronização do facing', () 
   assert.ok(logs.length >= 2);
   diagnostics.dispose();
 });
+
+test('diagnóstico aceita câmera livre parada e valida a direção durante movimento', () => {
+  const diagnostics = installRuntimeDiagnostics({
+    windowRef: new EventTarget(),
+    consoleRef: { log() {}, warn() {}, error() {} },
+    performanceRef: { now: () => 100 },
+    sampleIntervalMs: 10,
+  });
+  diagnostics.clear();
+  diagnostics.sampleFrame({
+    nowSeconds: 1, delta: 1 / 60, stick: { x: 0, y: 0 }, moved: { x: 0, y: 0, z: 0 },
+    position: { x: 1, y: 0, z: 2 }, playerYaw: 0.4, cameraYaw: 1.8, facingSource: 'locked',
+  });
+  diagnostics.sampleFrame({
+    nowSeconds: 2, delta: 1 / 60, stick: { x: 1, y: 0 }, moved: { x: 0.1, y: 0, z: 0 },
+    position: { x: 1.1, y: 0, z: 2 }, playerYaw: Math.PI / 2, cameraYaw: 0, facingSource: 'movement',
+  });
+  assert.deepEqual(diagnostics.errors(), []);
+  diagnostics.dispose();
+});

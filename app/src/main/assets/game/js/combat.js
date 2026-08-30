@@ -142,7 +142,7 @@ export class CombatSystem {
         if (enemy.attackCooldown <= 0) {
           enemy.attackCooldown = 1.15;
           enemy.animations.play(['attack-melee-left', 'attack-melee-right', 'idle'], { once: true, fade: 0.08 });
-          this.player.health = Math.max(0, this.player.health - 8);
+          this.player.health = Math.max(0, this.player.health - (enemy.attackDamage ?? 8));
           this.notify();
           if (this.player.health === 0) {
             this.player.animations.play(['die', 'idle'], { once: true, fade: 0.1 });

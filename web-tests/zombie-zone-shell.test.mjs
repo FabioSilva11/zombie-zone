@@ -43,6 +43,19 @@ test('HUD inicia o rifle cheio, identifica o gatilho e abre a mira por --spread'
   assert.match(css, /\.reticle\.aimed\s*\{[^}]*border-color:\s*var\(--amber\)/s);
   assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/s);
   assert.match(html, /\.\/css\/game\.css\?v=lobby-3/);
-  assert.match(html, /\.\/js\/bootstrap\.js\?v=lobby-3/);
-  assert.match(bootstrap, /import\('\.\/main\.js\?v=lobby-3'\)/);
+  assert.match(html, /\.\/js\/bootstrap\.js\?v=free-look-2/);
+  assert.match(bootstrap, /import\('\.\/main\.js\?v=free-look-2'\)/);
+});
+
+test('HUD oferece ações e editor de posição, tamanho e visibilidade', () => {
+  const html = readFileSync(new URL('../app/src/main/assets/game/index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="jump-button"/);
+  assert.match(html, /id="crouch-button"/);
+  assert.match(html, /id="sprint-button"/);
+  assert.match(html, /id="controls-editor-screen"/);
+  assert.match(html, /class="camera-hint" aria-hidden="true"/);
+  assert.doesNotMatch(html, /data-layout-control="camera"/);
+  assert.match(html, /data-layout-control="shoot"/);
+  assert.match(html, /data-control-size/);
+  assert.match(html, /data-control-visibility/);
 });

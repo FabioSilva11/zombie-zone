@@ -31,3 +31,25 @@ export function controllerFacingFromYaw(yaw = 0) {
     modelYaw: modelYawFromDirection(x, z),
   };
 }
+
+export function resolveFreeLookFacing({
+  movement,
+  cameraYaw = 0,
+  combatActive = false,
+  currentCombatYaw = 0,
+  currentModelYaw = Math.PI,
+} = {}) {
+  const x = Number(movement?.x) || 0;
+  const z = Number(movement?.z) || 0;
+  if (hasDirection(x, z)) {
+    return {
+      x,
+      z,
+      combatYaw: combatYawFromDirection(x, z, currentCombatYaw),
+      modelYaw: modelYawFromDirection(x, z, currentModelYaw),
+      source: 'movement',
+    };
+  }
+  if (combatActive) return { ...controllerFacingFromYaw(cameraYaw), source: 'camera' };
+  return { x: 0, z: 0, combatYaw: currentCombatYaw, modelYaw: currentModelYaw, source: 'locked' };
+}

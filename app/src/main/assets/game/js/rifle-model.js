@@ -1,7 +1,4 @@
-const transforms = {
-  tps: { position: [0.34, 1.52, -0.2], rotation: [0.02, Math.PI + 0.03, -0.06], scale: 1.05 },
-  fps: { position: [0.34, -0.28, -0.72], rotation: [-0.03, 0.02, -0.02], scale: 0.42 },
-};
+import { RIFLE_TRANSFORMS } from './rifle-placement.js';
 
 export function createRifleModel(THREE) {
   const materials = [
@@ -72,7 +69,7 @@ export function createRifleSockets({ THREE, playerRoot, camera }) {
 }
 
 export function attachRifle(rifle, socket, mode) {
-  const transform = transforms[mode];
+  const transform = RIFLE_TRANSFORMS[mode];
   if (!transform) throw new Error(`Unknown rifle mode: ${mode}`);
   socket.add(rifle.root);
   rifle.root.position.set(...transform.position);

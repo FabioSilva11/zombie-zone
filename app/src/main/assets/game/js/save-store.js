@@ -1,5 +1,6 @@
 import { CAMPAIGN } from './campaign.js?v=lobby-3';
 import { createInitialProgress, SAVE_VERSION } from './progression.js?v=lobby-3';
+import { normalizeControlLayout } from './control-layout.js?v=controls-2';
 
 const STAGE_IDS = new Set(CAMPAIGN.stages.map((stage) => stage.id));
 const AVATAR_IDS = new Set('abcdefghijklmnopqr'.split(''));
@@ -60,6 +61,7 @@ export function normalizeProgress(source) {
       cameraSensitivity: Math.min(2, Math.max(0.5, finiteOr(source.settings?.cameraSensitivity, 1))),
       soundEnabled: source.settings?.soundEnabled !== false,
       skipViewedStory: source.settings?.skipViewedStory !== false,
+      controlLayout: normalizeControlLayout(source.settings?.controlLayout),
     },
   };
 }

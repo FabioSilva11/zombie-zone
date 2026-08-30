@@ -17,6 +17,8 @@ const AIM_CAMERA_DISTANCE = 3.15;
 const AIM_CAMERA_HEIGHT = 2.45;
 const AIM_CAMERA_SHOULDER = 0.62;
 const AIM_PITCH_ORBIT_INFLUENCE = 0.2;
+const CROUCH_CAMERA_OFFSET = -0.42;
+const STANCE_SMOOTHNESS = 14;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -213,6 +215,8 @@ export function createThirdPersonCamera({
   let springArmDistance = null;
   let aimedSpringArmDistance = null;
   let viewBlend = 0;
+  let stanceOffset = 0;
+  let targetStanceOffset = 0;
   let collisionState = { angle: pitch, distance: CAMERA_DISTANCE, directDistance: CAMERA_DISTANCE, collided: false };
   const aimTarget = new THREE.Vector3();
 
@@ -265,10 +269,16 @@ export function createThirdPersonCamera({
   windowRef?.addEventListener('blur', onBlur);
 
   const updateFollow = (delta = 0) => {
-    const composition = thirdPersonComposition(player.root.position, yaw, pitch);
+    stanceOffset += (targetStanceOffset - stanceOffset) * cameraFollowAlpha(STANCE_SMOOTHNESS, delta);
+    const followPosition = {
+      x: player.root.position.x,
+      y: player.root.position.y + stanceOffset,
+      z: player.root.position.z,
+    };
+    const composition = thirdPersonComposition(followPosition, yaw, pitch);
     const target = {
       x: player.root.position.x,
-      y: player.root.position.y + TARGET_HEIGHT,
+      y: player.root.position.y + TARGET_HEIGHT + stanceOffset,
       z: player.root.position.z,
     };
     const resolved = resolveSpringArmCamera({
@@ -279,7 +289,7 @@ export function createThirdPersonCamera({
       delta,
     });
     springArmDistance = resolved.distance;
-    const aimedComposition = aimedThirdPersonComposition(player.root.position, yaw, pitch);
+    const aimedComposition = aimedThirdPersonComposition(followPosition, yaw, pitch);
     const aimedResolved = resolveSpringArmCamera({
       target,
       desired: aimedComposition.camera,
@@ -315,6 +325,8 @@ export function createThirdPersonCamera({
   return {
     heading() { return yaw; },
     pitch() { return pitch; },
+    setCrouched(value) { targetStanceOffset = value ? CROUCH_CAMERA_OFFSET : 0; },
+    stanceOffset() { return stanceOffset; },
     setViewBlend(value) { viewBlend = clamp(Number(value) || 0, 0, 1); },
     viewBlend() { return viewBlend; },
     aimPoint() { return { x: aimTarget.x, y: aimTarget.y, z: aimTarget.z }; },

@@ -2,6 +2,9 @@ const PLAYER_RADIUS = 0.5;
 const PLAYER_HALF_HEIGHT = 0.64;
 const CHARACTER_OFFSET = 0.03;
 const JOYSTICK_DEADZONE = 0.04;
+const JUMP_VELOCITY = 5.8;
+const JUMP_GRAVITY = 15.5;
+const SPRINT_SPEED_MULTIPLIER = 1.9;
 
 export function cameraRelativeMovement(stick, cameraYaw, speed, delta) {
   const magnitude = Math.hypot(stick.x, stick.y);
@@ -43,6 +46,11 @@ export function dodgeMovementInput(stick, active) {
   return Math.hypot(stick.x, stick.y) > JOYSTICK_DEADZONE ? { x: stick.x, y: stick.y } : { x: 0, y: 1 };
 }
 
+export function sprintMovementInput(stick, active) {
+  if (!active || Math.hypot(stick.x, stick.y) > JOYSTICK_DEADZONE) return { x: stick.x, y: stick.y };
+  return { x: 0, y: 1 };
+}
+
 export function createPlayerController({
   RAPIER,
   nipplejs,
@@ -79,7 +87,10 @@ export function createPlayerController({
   const joystickZoneWidth = Math.max(96, joystickZone.clientWidth || 0);
   const joystick = nipplejs.create({ zone: joystickZone, mode: 'static', position: { left: '50%', top: '50%' }, size: joystickZoneWidth * 0.76, color: '#8d75d6', restOpacity: 0.7 });
   const resetStick = () => { stick.x = 0; stick.y = 0; };
-  joystick.on('move', (event) => { applyNippleVector(stick, event); });
+  joystick.on('move', (event) => {
+    applyNippleVector(stick, event);
+    if (Math.hypot(stick.x, stick.y) > JOYSTICK_DEADZONE) sprinting = false;
+  });
   joystick.on('end', resetStick);
 
   // Não escute pointerup/touchend globais: em multitouch, soltar o dedo da
@@ -92,6 +103,11 @@ export function createPlayerController({
   let enabled = true;
   let dodgeRemaining = 0;
   let dodgeCooldown = 0;
+  let verticalOffset = 0;
+  let verticalVelocity = 0;
+  let airborne = false;
+  let crouched = false;
+  let sprinting = false;
   let lastMovement = { x: 0, y: 0, z: 0 };
   let lastPhysicsState = { reason: 'idle', desired: { x: 0, y: 0, z: 0 }, resolved: { x: 0, y: 0, z: 0 }, collisions: [] };
 
@@ -113,39 +129,75 @@ export function createPlayerController({
     get moved() { return { ...lastMovement }; },
     get physicsState() { return structuredClone(lastPhysicsState); },
     get dodgeReady() { return dodgeCooldown <= 0; },
+    get jumpReady() { return !airborne; },
+    get isAirborne() { return airborne; },
+    get crouched() { return crouched; },
+    get sprinting() { return sprinting; },
+    get speedMultiplier() { return crouched ? 0.52 : sprinting ? SPRINT_SPEED_MULTIPLIER : 1; },
     dodge() {
       if (!enabled || dodgeCooldown > 0) return false;
       dodgeRemaining = 0.2;
       dodgeCooldown = 1.05;
       return true;
     },
+    jump() {
+      if (!enabled || airborne) return false;
+      crouched = false;
+      verticalVelocity = JUMP_VELOCITY;
+      airborne = true;
+      return true;
+    },
+    toggleCrouch() {
+      if (!enabled || airborne) return crouched;
+      crouched = !crouched;
+      if (crouched) sprinting = false;
+      return crouched;
+    },
+    setSprinting(value) {
+      sprinting = enabled && Boolean(value);
+      if (sprinting) crouched = false;
+      return sprinting;
+    },
     setEnabled(value) {
       enabled = Boolean(value);
-      if (!enabled) resetStick();
+      if (!enabled) { resetStick(); sprinting = false; }
     },
     move(delta) {
       if (!enabled) return { x: 0, y: 0, z: 0 };
       dodgeCooldown = Math.max(0, dodgeCooldown - delta);
       dodgeRemaining = Math.max(0, dodgeRemaining - delta);
       const dodgeActive = dodgeRemaining > 0;
-      const movementInput = dodgeMovementInput(stick, dodgeActive);
-      const desired = cameraRelativeMovement(movementInput, cameraHeading(), player.speed * (dodgeActive ? 2.45 : 1), delta);
+      const movementInput = sprintMovementInput(dodgeMovementInput(stick, dodgeActive), sprinting && !dodgeActive);
+      const speedMultiplier = dodgeActive ? 2.45 : crouched ? 0.52 : sprinting ? SPRINT_SPEED_MULTIPLIER : 1;
+      const desired = cameraRelativeMovement(movementInput, cameraHeading(), player.speed * speedMultiplier, delta);
       desired.y = -Math.min(0.08, 4.905 * delta * delta);
       character.computeColliderMovement(collider, desired);
       const resolved = character.computedMovement();
       const collisions = physicsCollisions();
+      const baseY = player.root.position.y - verticalOffset;
+      const previousJumpState = { verticalOffset, verticalVelocity, airborne };
+      if (airborne) {
+        verticalVelocity -= JUMP_GRAVITY * delta;
+        verticalOffset = Math.max(0, verticalOffset + verticalVelocity * delta);
+        if (verticalOffset === 0 && verticalVelocity <= 0) {
+          verticalVelocity = 0;
+          airborne = false;
+        }
+      }
       const candidate = {
         x: player.root.position.x + resolved.x,
-        y: player.root.position.y,
+        y: baseY,
         z: player.root.position.z + resolved.z,
       };
       const floor = world.floorHeightAt(candidate);
       if (floor === null) {
+        ({ verticalOffset, verticalVelocity, airborne } = previousJumpState);
         lastPhysicsState = { reason: 'no-floor', desired: { ...desired }, resolved: { ...resolved }, collisions };
         lastMovement = { x: 0, y: 0, z: 0 }; return lastMovement;
       }
-      candidate.y = floor;
-      if (!world.canOccupy(candidate, 1.2)) {
+      candidate.y = floor + verticalOffset;
+      if (!world.canOccupy({ ...candidate, y: floor }, 1.2)) {
+        ({ verticalOffset, verticalVelocity, airborne } = previousJumpState);
         lastPhysicsState = { reason: 'world-blocked', desired: { ...desired }, resolved: { ...resolved }, collisions };
         lastMovement = { x: 0, y: 0, z: 0 }; return lastMovement;
       }

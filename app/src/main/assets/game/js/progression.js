@@ -1,5 +1,6 @@
 import { CAMPAIGN } from './campaign.js?v=lobby-3';
 import { CHARACTERS } from './catalog.js?v=lobby-3';
+import { normalizeControlLayout } from './control-layout.js?v=controls-2';
 
 export const SAVE_VERSION = 2;
 const UPGRADE_COSTS = Object.freeze([50, 90, 140, 200, 280]);
@@ -23,7 +24,7 @@ export function createInitialProgress() {
     upgrades: { vitality: 0, power: 0 },
     viewedStoryIds: [],
     monetization: { rewardedAdsClaimedToday: 0, rewardedAdsDayKey: currentDayKey() },
-    settings: { cameraSensitivity: 1, soundEnabled: true, skipViewedStory: true },
+    settings: { cameraSensitivity: 1, soundEnabled: true, skipViewedStory: true, controlLayout: normalizeControlLayout() },
   };
 }
 

@@ -216,6 +216,96 @@ h1,h2,.chosen-copy strong{font-family:"Arial Black","Trebuchet MS",system-ui,san
   padding: max(22px, env(safe-area-inset-top)) max(26px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(26px, env(safe-area-inset-left));
   font-family: "Arial Rounded MT Bold", "Trebuchet MS", ui-rounded, system-ui, sans-serif;
 }
+
+/* Editor de controles, corrida, pulo e agachamento */
+.settings-control-layout {
+  display:grid; grid-template-columns:42px 1fr; gap:2px 10px; align-items:center;
+  width:100%; padding:12px; border:1px solid rgba(168,255,62,.35); border-radius:13px;
+  color:#f4f7f7; background:rgba(168,255,62,.07); text-align:left; cursor:pointer;
+}
+.settings-control-layout span { grid-row:1/3; color:var(--hud-lime,#a8ff3e); font-size:26px; text-align:center; }
+.settings-control-layout b { font-size:11px; letter-spacing:.08em; }
+.settings-control-layout small { color:#96a2a9; font-size:9px; }
+.settings-control-layout:hover { border-color:var(--hud-lime,#a8ff3e); background:rgba(168,255,62,.12); }
+
+.jump-button,.crouch-button,.sprint-button { min-width:0; min-height:0; }
+.jump-button span,.sprint-button span { color:var(--hud-lime,#a8ff3e); font-size:clamp(22px,2vw,30px); }
+.crouch-button span { color:#ffb14a; font-size:clamp(22px,2vw,30px); }
+.jump-button { right:clamp(112px,11vw,158px); bottom:clamp(38px,3.8vw,56px); }
+.crouch-button { right:clamp(146px,14vw,196px); bottom:clamp(112px,11vw,158px); }
+.sprint-button { left:0; bottom:clamp(72px,7vw,102px); }
+.utility-action.is-active { transform:scale(.94); border-color:var(--hud-lime,#a8ff3e); background:rgba(34,62,24,.96); box-shadow:0 0 22px rgba(168,255,62,.3); }
+
+.game-hud.layout-customized .action-cluster { position:static; display:contents; width:auto; height:auto; }
+.game-hud.layout-customized [data-control-id] {
+  position:absolute; left:var(--control-x); top:var(--control-y); right:auto; bottom:auto;
+  transform:translate(-50%,-50%) scale(var(--control-scale,1)); transform-origin:center; margin:0;
+}
+.game-hud.layout-customized .attack-button.is-active,
+.game-hud.layout-customized .aim-button.is-active,
+.game-hud.layout-customized .utility-action.is-active { transform:translate(-50%,-50%) scale(var(--control-scale,1)); filter:brightness(1.16); }
+.game-hud .is-control-hidden { display:none!important; }
+
+.controls-editor-screen {
+  position:fixed; inset:0; z-index:90; display:grid; place-items:center; padding:12px;
+  background:rgba(2,7,10,.92); backdrop-filter:blur(13px); pointer-events:auto;
+}
+.controls-editor-panel {
+  width:min(1120px,96vw); max-height:96vh; display:grid; grid-template-rows:auto minmax(0,1fr) auto auto;
+  gap:10px; padding:14px; border:2px solid rgba(168,255,62,.38); border-radius:20px;
+  background:linear-gradient(145deg,#07121a,#04090d); box-shadow:0 30px 100px rgba(0,0,0,.72);
+}
+.controls-editor-panel header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
+.controls-editor-panel header h2 { margin:0 0 3px; font:1000 clamp(20px,2.5vw,34px)/1 "Arial Black",sans-serif; text-transform:uppercase; }
+.controls-editor-panel header p:not(.eyebrow) { margin:0; color:#99a5aa; font-size:11px; }
+.controls-editor-panel header button { width:38px; height:38px; border:1px solid #35444c; border-radius:10px; color:#fff; background:#101a20; font-size:26px; cursor:pointer; }
+.controls-editor-stage {
+  position:relative; width:100%; aspect-ratio:16/7; min-height:260px; max-height:64vh; overflow:hidden;
+  border:1px solid rgba(168,255,62,.32); border-radius:15px;
+  background:radial-gradient(circle at 50% 50%,rgba(41,90,57,.26),transparent 34%),linear-gradient(155deg,#101c24,#050b10 70%);
+  touch-action:none;
+}
+.controls-editor-stage::before { content:""; position:absolute; inset:0; opacity:.32; background-image:linear-gradient(rgba(168,255,62,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(168,255,62,.12) 1px,transparent 1px); background-size:5% 10%; }
+.editor-safe-area { position:absolute; inset:5%; border:1px dashed rgba(255,255,255,.16); border-radius:10px; pointer-events:none; }
+.layout-control {
+  position:absolute; z-index:2; width:58px; height:58px; transform:translate(-50%,-50%) scale(var(--editor-scale,1)); transform-origin:center; display:grid; place-content:center;
+  border:2px solid rgba(255,255,255,.42); border-radius:50%; color:#a8ff3e; background:rgba(5,14,20,.92);
+  box-shadow:0 8px 20px rgba(0,0,0,.5); text-align:center; font-size:19px; font-weight:950; cursor:grab; touch-action:none;
+}
+.layout-control small { display:block; margin-top:2px; color:#fff; font-size:6px; letter-spacing:.04em; }
+.layout-control.is-dragging { cursor:grabbing; border-color:#a8ff3e; box-shadow:0 0 0 7px rgba(168,255,62,.13),0 14px 30px #000; }
+.layout-control.is-selected { z-index:4; border-color:#a8ff3e; box-shadow:0 0 0 5px rgba(168,255,62,.16),0 12px 28px #000; }
+.layout-control.is-layout-hidden { opacity:.3; border-style:dashed; filter:grayscale(1); }
+.layout-control.is-layout-hidden::after { content:"OCULTO"; position:absolute; left:50%; top:-15px; transform:translateX(-50%); color:#ff8f9f; font-size:7px; letter-spacing:.08em; }
+.layout-stick { width:104px; height:104px; border-color:rgba(168,255,62,.55); background:radial-gradient(circle,rgba(168,255,62,.17),rgba(4,12,18,.88)); }
+.layout-shoot { width:88px; height:88px; color:#112009; background:radial-gradient(circle,#e9ff9d,#82ed28 68%); }
+.layout-shoot small { color:#112009; }
+.controls-editor-hint { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:rgba(168,255,62,.25); font-size:clamp(18px,3vw,40px); letter-spacing:.18em; pointer-events:none; }
+.controls-editor-tools { display:grid; grid-template-columns:minmax(100px,.6fr) minmax(240px,1.4fr) auto; align-items:center; gap:12px; padding:9px 11px; border:1px solid rgba(168,255,62,.22); border-radius:12px; background:rgba(10,21,27,.82); }
+.controls-editor-tools>strong { color:#a8ff3e; font-size:10px; letter-spacing:.12em; }
+.controls-editor-tools label { display:grid; grid-template-columns:auto 1fr 44px; align-items:center; gap:9px; color:#b9c4c8; font-size:8px; font-weight:900; letter-spacing:.08em; }
+.controls-editor-tools input { width:100%; accent-color:#a8ff3e; }
+.controls-editor-tools output { color:#fff; font-size:10px; text-align:right; }
+.controls-editor-tools button { min-height:34px; padding:7px 12px; border:1px solid rgba(255,143,159,.45); border-radius:9px; color:#ffd9df; background:rgba(120,24,42,.22); font-size:8px; font-weight:900; letter-spacing:.06em; cursor:pointer; }
+.controls-editor-tools button[aria-pressed="true"] { border-color:rgba(168,255,62,.48); color:#dfffaf; background:rgba(56,98,27,.28); }
+.controls-editor-panel footer { display:flex; justify-content:flex-end; gap:8px; }
+.controls-editor-panel footer button:not(.primary-button) { padding:10px 14px; border:1px solid #34434b; border-radius:9px; color:#c8d0d4; background:#0d171d; font-size:9px; font-weight:900; cursor:pointer; }
+.controls-editor-panel footer .primary-button { min-width:180px; min-height:40px; margin:0; }
+
+@media (max-width:900px),(max-height:600px) {
+  .controls-editor-panel { gap:6px; padding:8px 10px; }
+  .controls-editor-panel header h2 { font-size:18px; }
+  .controls-editor-panel header p:not(.eyebrow) { display:none; }
+  .controls-editor-stage { min-height:210px; aspect-ratio:16/6.5; }
+  .layout-control { width:48px; height:48px; font-size:15px; }
+  .layout-stick { width:82px; height:82px; }
+  .layout-shoot { width:72px; height:72px; }
+  .controls-editor-tools { grid-template-columns:90px 1fr auto; gap:7px; padding:5px 7px; }
+  .controls-editor-tools label { grid-template-columns:auto 1fr 38px; gap:5px; }
+  .controls-editor-tools button { min-height:28px; padding:5px 7px; }
+  .controls-editor-panel footer button:not(.primary-button) { padding:7px 9px; }
+  .controls-editor-panel footer .primary-button { min-height:34px; }
+}
 .hud-top { gap: clamp(14px, 2vw, 28px); }
 .hud-left { gap: clamp(12px, 1.4vw, 20px); }
 .health-card,
@@ -896,3 +986,13 @@ h1,h2,.chosen-copy strong{font-family:"Arial Black","Trebuchet MS",system-ui,san
   .chapter-screen .mission-dock-metrics b { font-size:10px; }
   .chapter-screen .mission-dock .primary-button { min-width:112px; min-height:48px; font-size:10px; }
 }
+
+/* Sobrescreve as posições legadas por ID quando o layout salvo está ativo. */
+.game-hud.layout-customized .action-cluster { position:static!important; display:contents!important; width:auto!important; height:auto!important; }
+.game-hud.layout-customized [data-control-id] {
+  position:absolute!important; left:var(--control-x)!important; top:var(--control-y)!important;
+  right:auto!important; bottom:auto!important; transform:translate(-50%,-50%) scale(var(--control-scale,1))!important; transform-origin:center!important; margin:0!important;
+}
+.game-hud.layout-customized .attack-button.is-active,
+.game-hud.layout-customized .aim-button.is-active,
+.game-hud.layout-customized .utility-action.is-active { transform:translate(-50%,-50%) scale(var(--control-scale,1))!important; filter:brightness(1.16); }

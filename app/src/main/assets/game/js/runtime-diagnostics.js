@@ -85,9 +85,11 @@ export function installRuntimeDiagnostics({
       delta,
       stick,
       moved,
+      facingMovement = moved,
       position,
       playerYaw,
       cameraYaw,
+      facingSource = 'camera',
       lookChanged = false,
       cameraCollision = null,
       physicsState = null,
@@ -104,17 +106,23 @@ export function installRuntimeDiagnostics({
         return;
       }
 
-      const facingError = angularDistance(playerYaw, cameraYaw);
-      if (facingError > 0.02) {
+      const movedMagnitude = Math.hypot(moved?.x ?? 0, moved?.z ?? 0);
+      const facingMovementMagnitude = Math.hypot(facingMovement?.x ?? 0, facingMovement?.z ?? 0);
+      const expectedYaw = facingSource === 'movement' && facingMovementMagnitude > 1e-8
+        ? Math.atan2(facingMovement.x, -facingMovement.z)
+        : facingSource === 'camera' ? cameraYaw : playerYaw;
+      const facingError = angularDistance(playerYaw, expectedYaw);
+      if (facingSource !== 'locked' && facingError > 0.02) {
         emitAnomaly('facing-desync', {
+          facingSource,
           playerYaw: rounded(playerYaw),
           cameraYaw: rounded(cameraYaw),
+          expectedYaw: rounded(expectedYaw),
           angularError: rounded(facingError),
         });
       }
 
       const stickMagnitude = Math.hypot(stick?.x ?? 0, stick?.y ?? 0);
-      const movedMagnitude = Math.hypot(moved?.x ?? 0, moved?.z ?? 0);
       if (!lookChanged && stickMagnitude <= 0.04 && nowMs - lastSampleAt < sampleIntervalMs * 4) return;
       if (nowMs - lastSampleAt < sampleIntervalMs) return;
       lastSampleAt = nowMs;
@@ -122,9 +130,11 @@ export function installRuntimeDiagnostics({
         delta: rounded(delta),
         stick: { x: rounded(stick?.x ?? 0), y: rounded(stick?.y ?? 0), magnitude: rounded(stickMagnitude) },
         moved: { x: rounded(moved?.x ?? 0), y: rounded(moved?.y ?? 0), z: rounded(moved?.z ?? 0), magnitude: rounded(movedMagnitude) },
+        facingMovement: { x: rounded(facingMovement?.x ?? 0), z: rounded(facingMovement?.z ?? 0), magnitude: rounded(facingMovementMagnitude) },
         position: { x: rounded(position.x), y: rounded(position.y), z: rounded(position.z) },
         playerYaw: rounded(playerYaw),
         cameraYaw: rounded(cameraYaw),
+        facingSource,
         angularError: rounded(facingError),
         blocked: stickMagnitude > 0.2 && movedMagnitude < 1e-6,
         cameraCollision: cameraCollision ? {

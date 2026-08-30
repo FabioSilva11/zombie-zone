@@ -6,21 +6,24 @@ import { AnimationController } from './animation.js';
 import { selectAssistedTarget } from './aim-assist.js';
 import { createAutomaticFire } from './automatic-fire.js?v=rifle-1';
 import { createAvatarPreview } from './avatar-preview.js?v=lobby-3';
-import { createThirdPersonCamera } from './camera-controller.js?v=mobile-hud-3';
+import { createThirdPersonCamera } from './camera-controller.js?v=free-look-1';
 import { CAMPAIGN } from './campaign.js?v=lobby-3';
 import { mountCampaignUI } from './campaign-ui.js?v=lobby-3';
 import { characterById, CHARACTERS } from './catalog.js?v=lobby-3';
 import { CombatSystem } from './combat.js?v=zombie-ai-1';
+import { applyControlLayout, mountControlLayoutEditor } from './control-layout.js?v=controls-2';
+import { createZombieSpawnPlan, difficultyForStage } from './difficulty.js?v=difficulty-1';
 import { createHybridAim } from './hybrid-aim.js?v=mobile-hud-3';
 import { createExplorationState, mountMinimap, revealAround } from './minimap.js?v=campaign-3';
 import { completeMission, routeBootFailure, shouldDisposeMission } from './mission-lifecycle.js?v=campaign-3';
-import { controllerFacingFromYaw, modelYawFromDirection } from './movement-heading.js?v=zombie-zone-18';
-import { createPlayerController } from './player-controller.js?v=tps-unreal-3';
+import { frameIndependentSmoothing, modelYawFromDirection, resolveFreeLookFacing } from './movement-heading.js?v=free-look-2';
+import { createPlayerController } from './player-controller.js?v=mobile-actions-2';
 import { purchaseAvatar } from './progression.js?v=lobby-3';
 import { createRifleEffects } from './rifle-effects.js?v=rifle-1';
 import { resolveRifleHitscan } from './rifle-hitscan.js?v=rifle-1';
 import { bindRifleInput, createRifleIntent } from './rifle-input.js?v=mobile-hud-3';
 import { attachRifle, createRifleModel, createRifleSockets } from './rifle-model.js?v=rifle-aim-1';
+import { resolveRiflePresentation } from './rifle-presentation.js?v=holding-right-1';
 import { createSaveStore } from './save-store.js?v=lobby-3';
 import { createScreenFlow } from './screen-flow.js?v=lobby-3';
 import { mountSelection } from './selection.js?v=lobby-3';
@@ -97,6 +100,7 @@ export async function startApp(loading, diagnostics = null) {
   let ui = null;
   let avatarPreview = null;
   let selection = null;
+  let controlsEditor = null;
 
   const syncAvatarPreview = (state = flow.state, characterId = progress.selectedAvatar ?? 'a') => {
     if (!avatarPreview) return;
@@ -207,6 +211,16 @@ export async function startApp(loading, diagnostics = null) {
       document.documentElement.dataset.musicPlaying = String(playing);
     });
   });
+  controlsEditor = mountControlLayoutEditor({
+    root: document.querySelector('#controls-editor-screen'),
+    onSave: (controlLayout) => {
+      setProgress({ ...progress, settings: { ...progress.settings, controlLayout } });
+      activeGame?.setControlLayout(controlLayout);
+    },
+  });
+  document.querySelector('[data-open-controls-editor]').addEventListener('click', () => {
+    controlsEditor.open(progress.settings.controlLayout);
+  });
   document.querySelector('[data-restart-stage]').addEventListener('click', () => startMission(ui.activeStage()));
 
   loading.update('Preparando a base', 45);
@@ -258,26 +272,32 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const world = await createWorld(loader, () => {
     loadedWorldPieces += 1; loading.update('Montando o ambiente 3D', Math.min(59, 18 + loadedWorldPieces * 1.7));
   }, stage.mapId, renderer.capabilities.getMaxAnisotropy());
+  const difficulty = difficultyForStage(stage.number, upgrades);
+  const zombieSpawns = createZombieSpawnPlan(world.layout, difficulty.zombieCount);
   world.scene.add(camera);
   document.querySelector('#game-hud').dataset.mapTexture = world.textureVariant.id;
+  document.querySelector('#game-hud').dataset.skybox = world.skyboxVariant.id;
+  document.querySelector('#game-hud').dataset.difficulty = String(stage.number);
 
   loading.update('Equipando seu herói', 61);
   const playerData = await loadCharacter(loader, characterId, world.layout.start);
   world.scene.add(playerData.root);
-  const maxHealth = 100 + upgrades.vitality * 15;
+  const maxHealth = difficulty.playerHealth;
   const player = { ...playerData, health: maxHealth, maxHealth, yaw: 0, speed: 4.35, powerMultiplier: 1 + upgrades.power * 0.18 };
-  player.root.rotation.y = modelYawFromDirection(0, -1);
+  let playerModelYaw = modelYawFromDirection(0, -1);
+  player.root.rotation.y = playerModelYaw;
 
   loading.update('Posicionando a horda', 75);
-  const enemyData = await Promise.all(world.layout.zombieSpawns.map((spawn) => loadCharacter(loader, spawn.kind === 'green' ? 'l' : 'o', spawn)));
+  const enemyData = await Promise.all(zombieSpawns.map((spawn) => loadCharacter(loader, spawn.kind === 'green' ? 'l' : 'o', spawn)));
   const enemies = enemyData.map((data, index) => ({
     id: `enemy-${index + 1}`,
     ...data,
-    health: 70,
-    maxHealth: 70,
+    health: difficulty.zombieHealth + (index % 3) * 5,
+    maxHealth: difficulty.zombieHealth + (index % 3) * 5,
     yaw: Math.PI,
-    roamSpeed: 0.58 + index * 0.025,
-    chaseSpeed: 1.35 + index * 0.055,
+    roamSpeed: (0.58 + (index % 6) * 0.025) * difficulty.zombieSpeedMultiplier,
+    chaseSpeed: (1.35 + (index % 6) * 0.055) * difficulty.zombieSpeedMultiplier,
+    attackDamage: difficulty.zombieDamage,
     attackCooldown: 0.5 + index * 0.3,
   }));
   for (const enemy of enemies) world.scene.add(enemy.root);
@@ -285,7 +305,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const collectedCrystals = new Set(collectedCrystalIds);
   const crystalGeometry = new THREE.OctahedronGeometry(0.34, 0);
   const crystalMaterial = new THREE.MeshStandardMaterial({ color: 0x71f2de, emissive: 0x287f83, emissiveIntensity: 2.2 });
-  const crystalPickups = world.layout.zombieSpawns.slice(0, 3).map((spawn, index) => {
+  const crystalPickups = zombieSpawns.slice(0, 3).map((spawn, index) => {
     const id = `${stage.id}:crystal-${index + 1}`;
     const mesh = new THREE.Mesh(crystalGeometry, crystalMaterial);
     mesh.position.set(spawn.x, spawn.y + 1.05, spawn.z);
@@ -296,6 +316,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
 
   const healthFill = document.querySelector('[data-health-fill]');
   const gameHud = document.querySelector('#game-hud');
+  applyControlLayout(gameHud, settings.controlLayout);
   const objective = document.querySelector('[data-objective]');
   const reticle = document.querySelector('[data-reticle]');
   const targetHealth = document.querySelector('[data-target-health]');
@@ -303,7 +324,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const crystalFeedback = document.querySelector('[data-crystal-feedback] b');
   crystalFeedback.textContent = String(collectedCrystals.size);
   document.querySelector('[data-player-name]').textContent = player.definition.name;
-  healthFill.style.width = '100%'; objective.textContent = stage.objective;
+  healthFill.style.width = '100%'; objective.textContent = `${stage.objective} • ${enemies.length} restantes`;
 
   const exploration = createExplorationState(world.layout);
   const minimap = mountMinimap({
@@ -385,13 +406,19 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const aimButton = document.querySelector('#aim-button');
   const reloadButton = document.querySelector('#reload-button');
   const dodgeButton = document.querySelector('#dodge-button');
+  const jumpButton = document.querySelector('#jump-button');
+  const crouchButton = document.querySelector('#crouch-button');
+  const sprintButton = document.querySelector('#sprint-button');
+  const sprintLabel = sprintButton.querySelector('small');
+  let sprintUiState = false;
   const ammoCount = document.querySelector('[data-ammo-count]');
   const hybridAim = createHybridAim();
   const automaticFire = createAutomaticFire();
-  const weapon = createWeaponState();
+  const weapon = createWeaponState(difficulty.magazineCapacity);
   const rifle = createRifleModel(THREE);
   const sockets = createRifleSockets({ THREE, playerRoot: player.root, camera });
   attachRifle(rifle, sockets.tps, 'tps');
+  rifle.root.visible = false;
   const effects = createRifleEffects({
     THREE,
     scene: world.scene,
@@ -412,6 +439,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const performRifleShot = (spread) => {
     const wasReloading = weapon.reloading;
     if (!weapon.consumeShot()) return false;
+    rifle.root.visible = true;
     const shot = resolveRifleHitscan({
       THREE, camera, raycaster, wallMeshes: world.cameraColliderMeshes,
       enemies, spread, maxRange: 45,
@@ -436,11 +464,13 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
         hybridAim.release();
         player.root.visible = true;
       }
+      rifle.root.visible = resolveRiflePresentation(rifleIntent.state()).visible;
     },
     onFireChange: (held) => {
       if (held) automaticFire.press();
       else automaticFire.release();
       attackButton.classList.toggle('is-active', held);
+      rifle.root.visible = resolveRiflePresentation(rifleIntent.state()).visible;
     },
   });
   const input = bindRifleInput({
@@ -471,14 +501,37 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
     aimButton.classList.remove('is-active');
     aimButton.setAttribute('aria-pressed', 'false');
     player.root.visible = true;
+    rifle.root.visible = false;
   };
   const reload = () => {
     if (weapon.startReload()) weaponAudio.playReload();
     paintWeapon();
   };
   const dodge = () => { if (playerController.dodge()) dodgeButton.disabled = true; };
+  const jump = () => { if (playerController.jump()) jumpButton.disabled = true; };
+  const syncSprintButton = (active) => {
+    if (sprintUiState === active) return;
+    sprintUiState = active;
+    sprintButton.classList.toggle('is-active', active);
+    sprintButton.setAttribute('aria-pressed', String(active));
+    sprintLabel.textContent = active ? 'PARAR' : 'CORRER';
+  };
+  const toggleCrouch = () => {
+    const active = playerController.toggleCrouch();
+    crouchButton.classList.toggle('is-active', active);
+    crouchButton.setAttribute('aria-pressed', String(active));
+    if (active) syncSprintButton(false);
+  };
+  const toggleSprint = () => {
+    const active = playerController.setSprinting(!playerController.sprinting);
+    syncSprintButton(active);
+    if (active) { crouchButton.classList.remove('is-active'); crouchButton.setAttribute('aria-pressed', 'false'); }
+  };
   reloadButton.addEventListener('click', reload);
   dodgeButton.addEventListener('click', dodge);
+  jumpButton.addEventListener('click', jump);
+  crouchButton.addEventListener('click', toggleCrouch);
+  sprintButton.addEventListener('click', toggleSprint);
 
   let disposed = false; let completed = false; let paused = false;
   const playerTurnAxis = new THREE.Vector3(0, 1, 0);
@@ -499,19 +552,42 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       // no mesmo frame, sem o atraso de uma atualização.
       const lookChanged = cameraController.updateInput(delta);
       const moved = playerController.move(delta);
+      const movementPhysics = playerController.physicsState;
+      syncSprintButton(playerController.sprinting);
       gameHud.dataset.playerPosition = `${player.root.position.x.toFixed(2)},${player.root.position.y.toFixed(2)},${player.root.position.z.toFixed(2)}`;
+      gameHud.dataset.sprinting = String(playerController.sprinting);
+      gameHud.dataset.speedMultiplier = playerController.speedMultiplier.toFixed(2);
       const isMoving = Math.hypot(moved.x, moved.z) > 0.0001;
-      // bUseControllerRotationYaw do TPS: o corpo acompanha a mira em todos os
-      // frames. O joystick continua camera-relative, portanto esquerda/direita
-      // viram strafe e para baixo vira recuo, sem o heroi abandonar a mira.
-      const controllerFacing = controllerFacingFromYaw(cameraController.heading());
-      player.yaw = controllerFacing.combatYaw;
-      targetPlayerQuaternion.setFromAxisAngle(playerTurnAxis, controllerFacing.modelYaw);
-      player.root.quaternion.copy(targetPlayerQuaternion);
+      // Free-look mobile: arrastar a câmera não gira o herói parado. Em
+      // exploração, o corpo acompanha a direção real do deslocamento; ao
+      // mirar/atirar, ele volta a alinhar com a câmera como no vídeo de referência.
+      const rifleState = rifleIntent.state();
+      const riflePresentation = resolveRiflePresentation(rifleState);
+      const facing = resolveFreeLookFacing({
+        movement: movementPhysics.desired,
+        cameraYaw: cameraController.heading(),
+        combatActive: rifleState.aimHeld || rifleState.fireHeld,
+        currentCombatYaw: player.yaw,
+        currentModelYaw: playerModelYaw,
+      });
+      if (facing.source !== 'locked') {
+        player.yaw = facing.combatYaw;
+        playerModelYaw = facing.modelYaw;
+        targetPlayerQuaternion.setFromAxisAngle(playerTurnAxis, playerModelYaw);
+        player.root.quaternion.slerp(targetPlayerQuaternion, frameIndependentSmoothing(18, delta));
+      }
       gameHud.dataset.playerYaw = player.yaw.toFixed(3);
       gameHud.dataset.cameraYaw = cameraController.heading().toFixed(3);
-      if (isMoving && combat.playerAttackCooldown <= 0.25) {
-        player.animations.play(['walk', 'sprint', 'idle']);
+      gameHud.dataset.facingSource = facing.source;
+      rifle.root.visible = riflePresentation.visible;
+      if (riflePresentation.animation) {
+        player.animations.play(riflePresentation.animation, { fade: 0.08 });
+      } else if (playerController.isAirborne) {
+        player.animations.play(['jump', 'idle'], { fade: 0.08 });
+      } else if (playerController.crouched) {
+        player.animations.play(['crouch', 'sit', 'idle'], { fade: 0.1 });
+      } else if (isMoving && combat.playerAttackCooldown <= 0.25) {
+        player.animations.play(playerController.sprinting ? ['sprint', 'walk', 'idle'] : ['walk', 'sprint', 'idle']);
       } else if (combat.playerAttackCooldown <= 0.25) {
         player.animations.play(['idle', 'static']);
       }
@@ -519,6 +595,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       gameHud.dataset.enemyStates = enemies.map((enemy) => enemy.state ?? 'idle').join(',');
       weapon.update(delta); paintWeapon();
       dodgeButton.disabled = !playerController.dodgeReady;
+      jumpButton.disabled = !playerController.jumpReady;
       for (const pickup of crystalPickups) {
         if (pickup.collected) continue;
         pickup.mesh.rotation.y += delta * 2.2;
@@ -537,6 +614,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       minimapFrame = (minimapFrame + 1) % 6; if (minimapFrame === 0) minimap.paint();
       hybridAim.update(delta);
       cameraController.setViewBlend(hybridAim.blend);
+      cameraController.setCrouched(playerController.crouched);
       reticle.classList.toggle('aimed', hybridAim.blend >= 0.5);
       player.root.visible = true;
       cameraController.updateFollow(delta);
@@ -558,12 +636,14 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
         delta,
         stick: playerController.movement,
         moved,
+        facingMovement: movementPhysics.desired,
         position: player.root.position,
         playerYaw: player.yaw,
         cameraYaw: cameraController.heading(),
+        facingSource: facing.source,
         lookChanged,
         cameraCollision,
-        physicsState: playerController.physicsState,
+        physicsState: movementPhysics,
       });
       updateAim();
       if (!completed && world.isAtExit(player.root.position)) {
@@ -581,10 +661,12 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       paused = Boolean(value);
       if (paused) cancelRifleTrigger();
       playerController.setEnabled(!paused);
+      if (paused) syncSprintButton(false);
       cameraController.setEnabled(!paused);
     },
     setSensitivity(value) { cameraController.setSensitivity(value); },
     setSoundEnabled(value) { weaponAudio.setEnabled(value); },
+    setControlLayout(value) { applyControlLayout(gameHud, value); },
     dispose() {
       if (disposed) return; disposed = true;
       diagnostics?.record('info', 'mission-dispose', { stageId: stage.id });
@@ -593,6 +675,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       automaticFire.dispose(); weaponAudio.dispose(); effects.dispose(); rifle.dispose();
       hybridAim.cancel(); attackButton.classList.remove('is-active'); aimButton.classList.remove('is-active'); player.root.visible = true;
       reloadButton.removeEventListener('click', reload); dodgeButton.removeEventListener('click', dodge);
+      jumpButton.removeEventListener('click', jump); crouchButton.removeEventListener('click', toggleCrouch); sprintButton.removeEventListener('click', toggleSprint);
       minimap.dispose(); playerController.dispose(); cameraController.dispose(); crystalGeometry.dispose(); crystalMaterial.dispose();
       world.scene.remove(camera);
       window.removeEventListener('resize', resize); renderer.setAnimationLoop(null); renderer.dispose(); root.replaceChildren();

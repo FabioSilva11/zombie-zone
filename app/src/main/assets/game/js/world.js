@@ -5,6 +5,7 @@ import { buildFloorColliders, buildWallColliders, cameraColliderBoxes, circleHit
 import { canOccupy as phaseCanOccupy, floorHeightAt as phaseFloorHeightAt } from './phase-layout.js';
 import { gateBlocksPosition, gateWorldTransform } from './world-navigation.js';
 import { applyDungeonTexture, configureDungeonTexture, dungeonTextureForMap } from './map-appearance.js';
+import { configureSkyboxTexture, skyboxForMap } from './skybox.js?v=skyboxes-1';
 
 const ACTOR_CAPSULE_HEIGHT = 1.78;
 const ACTOR_CAPSULE_RADIUS = 0.5;
@@ -126,7 +127,16 @@ export async function createWorld(loader, onAssetProgress, mapSelection, maxAnis
   scene.add(sun);
 
   const textureVariant = dungeonTextureForMap(layout.sourceFile);
+  const skyboxVariant = skyboxForMap(mapSelection);
   const textureLoader = new THREE.TextureLoader();
+  let skyboxTexture = null;
+  try {
+    skyboxTexture = configureSkyboxTexture(await textureLoader.loadAsync(skyboxVariant.url), THREE);
+    scene.background = skyboxTexture;
+    scene.fog.color.setHex(skyboxVariant.fog);
+  } catch (error) {
+    console.warn(`Falha ao carregar o céu ${skyboxVariant.file}; usando fundo de segurança.`, error);
+  }
   let dungeonTexture;
   try {
     dungeonTexture = configureDungeonTexture(
@@ -204,6 +214,7 @@ export async function createWorld(loader, onAssetProgress, mapSelection, maxAnis
     scene,
     layout,
     textureVariant,
+    skyboxVariant,
     physicsWalls: wallColliders,
     physicsSurfaces: buildFloorColliders(layout),
     cameraColliderMeshes,

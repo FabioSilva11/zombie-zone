@@ -5,7 +5,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { buildFloorColliders, buildWallColliders } from '../app/src/main/assets/game/js/map-collision.js';
 import { prepareBundledMap } from '../app/src/main/assets/game/js/map-library.js';
 import { floorHeightAt } from '../app/src/main/assets/game/js/phase-layout.js';
-import { applyNippleVector, cameraRelativeMovement, createPlayerController, dodgeMovementInput, wallToCuboid } from '../app/src/main/assets/game/js/player-controller.js';
+import { applyNippleVector, cameraRelativeMovement, createPlayerController, dodgeMovementInput, sprintMovementInput, wallToCuboid } from '../app/src/main/assets/game/js/player-controller.js';
 
 test('zona externa não colide com o DOM interno criado pelo NippleJS', () => {
   const html = readFileSync(new URL('../app/src/main/assets/game/index.html', import.meta.url), 'utf8');
@@ -189,5 +189,51 @@ test('personagem consegue recuar depois de encostar na saída da sala inicial', 
   moveHandler({ data: { vector: { x: 0, y: -1 } } });
   for (let frame = 0; frame < 60; frame += 1) controller.move(1 / 60);
   assert.ok(position.z < blockedZ - 1, `personagem não conseguiu recuar: ${blockedZ} -> ${position.z}; ${JSON.stringify(controller.physicsState)}`);
+  controller.dispose();
+});
+
+test('corrida automática avança sem analógico e preserva a direção quando ele é usado', () => {
+  assert.deepEqual(sprintMovementInput({ x: 0, y: 0 }, true), { x: 0, y: 1 });
+  assert.deepEqual(sprintMovementInput({ x: -0.4, y: 0.7 }, true), { x: -0.4, y: 0.7 });
+  assert.deepEqual(sprintMovementInput({ x: 0, y: 0 }, false), { x: 0, y: 0 });
+});
+
+test('pulo, agachamento e corrida mantêm estados compatíveis', () => {
+  let moveHandler;
+  const descriptor = { setTranslation() { return this; }, setRotation() { return this; } };
+  const character = {
+    setSlideEnabled() {}, enableAutostep() {}, enableSnapToGround() {},
+    computeColliderMovement(value, desired) { this.desired = desired; }, computedMovement() { return this.desired; }, free() {},
+  };
+  const RAPIER = {
+    World: class { createCollider() { return {}; } createRigidBody() { return { setNextKinematicTranslation() {} }; } createCharacterController() { return character; } step() {} free() {} },
+    ColliderDesc: { cuboid: () => descriptor, capsule: () => descriptor }, RigidBodyDesc: { kinematicPositionBased: () => descriptor },
+  };
+  const position = { x: 10, y: 0, z: 10, set(x, y, z) { this.x = x; this.y = y; this.z = z; } };
+  const controller = createPlayerController({
+    RAPIER, nipplejs: { create: () => ({ on(name, handler) { if (name === 'move') moveHandler = handler; }, destroy() {} }) }, joystickZone: { clientWidth: 132 },
+    world: { physicsWalls: [], physicsSurfaces: [], canOccupy: () => true, floorHeightAt: () => 0 },
+    player: { speed: 4, root: { position } }, cameraHeading: () => 0,
+    windowRef: new EventTarget(), documentRef: new EventTarget(),
+  });
+  assert.equal(controller.toggleCrouch(), true);
+  assert.equal(controller.crouched, true);
+  assert.equal(controller.setSprinting(true), true);
+  assert.equal(controller.crouched, false, 'correr deve cancelar agachamento');
+  const beforeSprint = position.z;
+  controller.move(0.1);
+  assert.ok(position.z < beforeSprint - 0.7, 'corrida automática deve avançar mesmo sem mover o analógico');
+  assert.equal(controller.speedMultiplier, 1.9);
+  moveHandler({ data: { vector: { x: 0.4, y: 0.6 } } });
+  assert.equal(controller.sprinting, false, 'mexer no joystick deve cancelar a corrida automática');
+  assert.equal(controller.speedMultiplier, 1);
+  assert.equal(controller.jump(), true);
+  assert.equal(controller.jump(), false, 'não pode pular novamente no ar');
+  controller.move(0.1);
+  assert.ok(position.y > 0);
+  assert.equal(controller.isAirborne, true);
+  for (let frame = 0; frame < 120; frame += 1) controller.move(1 / 60);
+  assert.equal(controller.isAirborne, false);
+  assert.equal(position.y, 0);
   controller.dispose();
 });

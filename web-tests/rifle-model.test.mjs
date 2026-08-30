@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { attachRifle, createRifleModel, createRifleSockets } from '../app/src/main/assets/game/js/rifle-model.js';
+import { RIFLE_TRANSFORMS } from '../app/src/main/assets/game/js/rifle-placement.js';
 
 test('rifle procedural possui grupos nomeados, meshes e materiais explícitos', () => {
   const rifle = createRifleModel(THREE);
@@ -22,9 +23,9 @@ test('attachRifle reanexa a única árvore entre os sockets TPS e FPS', () => {
   const sockets = createRifleSockets({ THREE, playerRoot: player, camera });
   attachRifle(rifle, sockets.tps, 'tps');
   assert.equal(sockets.tps.children[0], rifle.root);
-  assert.deepEqual(rifle.root.position.toArray(), [0.34, 1.52, -0.2]);
-  assert.deepEqual(rifle.root.rotation.toArray(), [0.02, Math.PI + 0.03, -0.06, 'XYZ']);
-  assert.deepEqual(rifle.root.scale.toArray(), [1.05, 1.05, 1.05]);
+  assert.deepEqual(rifle.root.position.toArray(), [...RIFLE_TRANSFORMS.tps.position]);
+  assert.deepEqual(rifle.root.rotation.toArray(), [...RIFLE_TRANSFORMS.tps.rotation, 'XYZ']);
+  assert.deepEqual(rifle.root.scale.toArray(), [RIFLE_TRANSFORMS.tps.scale, RIFLE_TRANSFORMS.tps.scale, RIFLE_TRANSFORMS.tps.scale]);
   player.rotation.y = 0.7;
   player.updateMatrixWorld(true);
   const muzzleForward = new THREE.Vector3(0, 0, -1).transformDirection(rifle.muzzle.matrixWorld);
@@ -39,9 +40,9 @@ test('attachRifle reanexa a única árvore entre os sockets TPS e FPS', () => {
   assert.equal(sockets.tps.children.length, 0);
   assert.equal(sockets.fps.children[0], rifle.root);
   assert.equal(rifle.root.parent, sockets.fps);
-  assert.deepEqual(rifle.root.position.toArray(), [0.34, -0.28, -0.72]);
-  assert.deepEqual(rifle.root.rotation.toArray(), [-0.03, 0.02, -0.02, 'XYZ']);
-  assert.deepEqual(rifle.root.scale.toArray(), [0.42, 0.42, 0.42]);
+  assert.deepEqual(rifle.root.position.toArray(), [...RIFLE_TRANSFORMS.fps.position]);
+  assert.deepEqual(rifle.root.rotation.toArray(), [...RIFLE_TRANSFORMS.fps.rotation, 'XYZ']);
+  assert.deepEqual(rifle.root.scale.toArray(), [RIFLE_TRANSFORMS.fps.scale, RIFLE_TRANSFORMS.fps.scale, RIFLE_TRANSFORMS.fps.scale]);
   assert.notDeepEqual(rifle.root.position.toArray(), tpsTransform.position);
   assert.notDeepEqual(rifle.root.rotation.toArray(), tpsTransform.rotation);
   assert.notDeepEqual(rifle.root.scale.toArray(), tpsTransform.scale);
