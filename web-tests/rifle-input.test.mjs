@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 
 import { bindRifleInput, createRifleIntent } from '../app/src/main/assets/game/js/rifle-input.js';
 
-function pointerEvent(type, pointerId = 7) {
+function pointerEvent(type, pointerId = 7, clientX = 0, clientY = 0) {
   const event = new Event(type, { cancelable: true });
   Object.defineProperty(event, 'pointerId', { value: pointerId });
+  Object.defineProperty(event, 'clientX', { value: clientX });
+  Object.defineProperty(event, 'clientY', { value: clientY });
   return event;
 }
 
@@ -15,6 +17,7 @@ function createHarness() {
   const captured = [];
   const released = [];
   const calls = [];
+  const moves = [];
   button.setPointerCapture = (pointerId) => captured.push(pointerId);
   button.releasePointerCapture = (pointerId) => released.push(pointerId);
   const input = bindRifleInput({
@@ -22,8 +25,9 @@ function createHarness() {
     windowRef,
     onPress: () => calls.push('press'),
     onRelease: () => calls.push('release'),
+    onMove: (deltaX, deltaY) => moves.push([deltaX, deltaY]),
   });
-  return { button, windowRef, captured, released, calls, input };
+  return { button, windowRef, captured, released, calls, moves, input };
 }
 
 test('pointerdown captura um único ponteiro e chama press exatamente uma vez', () => {
@@ -45,6 +49,19 @@ test('pointerup do ponteiro ativo chama release uma vez', () => {
 
   assert.deepEqual(released, [7]);
   assert.deepEqual(calls, ['press', 'release']);
+  input.dispose();
+});
+
+test('arrastar o mesmo ponteiro do disparo produz deltas contínuos de câmera', () => {
+  const { button, moves, input } = createHarness();
+  button.dispatchEvent(pointerEvent('pointerdown', 7, 100, 120));
+  button.dispatchEvent(pointerEvent('pointermove', 8, 180, 180));
+  button.dispatchEvent(pointerEvent('pointermove', 7, 114, 128));
+  button.dispatchEvent(pointerEvent('pointermove', 7, 125, 121));
+  button.dispatchEvent(pointerEvent('pointerup', 7, 125, 121));
+  button.dispatchEvent(pointerEvent('pointermove', 7, 150, 150));
+
+  assert.deepEqual(moves, [[14, 8], [11, -7]]);
   input.dispose();
 });
 
@@ -89,6 +106,17 @@ test('MIRAR mantém FPS quando ATIRAR é solto e não mantém disparo', () => {
 
   assert.deepEqual(aimChanges, [true, false]);
   assert.deepEqual(fireChanges, [true, false]);
+});
+
+test('MIRAR alterna entre FPS persistente e TPS a cada toque', () => {
+  const aimChanges = [];
+  const intent = createRifleIntent({ onAimChange: (held) => aimChanges.push(held) });
+
+  intent.toggleAim();
+  assert.deepEqual(intent.state(), { aimHeld: true, fireHeld: false, aiming: true });
+  intent.toggleAim();
+  assert.deepEqual(intent.state(), { aimHeld: false, fireHeld: false, aiming: false });
+  assert.deepEqual(aimChanges, [true, false]);
 });
 
 test('ATIRAR mantém FPS e disparo quando MIRAR é solto', () => {

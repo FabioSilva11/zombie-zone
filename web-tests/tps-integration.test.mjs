@@ -13,11 +13,12 @@ test('loop TPS consome controller yaw antes do movimento e segue o personagem de
   assert.ok(follow > move, 'SpringArm precisa seguir a posição já resolvida pelo movimento');
 });
 
-test('rifle híbrido automático usa hitscan da câmera e substitui o disparo assistido antigo', () => {
+test('rifle automático usa hitscan da câmera e permanece preso ao personagem TPS', () => {
   assert.match(main, /createHybridAim\(/);
   assert.match(main, /createAutomaticFire\(/);
   assert.match(main, /resolveRifleHitscan\(/);
-  assert.match(main, /attachRifle\(rifle, sockets\[nextRifleMode\], nextRifleMode\)/);
+  assert.match(main, /attachRifle\(rifle, sockets\.tps, 'tps'\)/);
+  assert.doesNotMatch(main, /sockets\.fps|nextRifleMode/);
   assert.match(main, /automaticFire\.update\(delta/);
   assert.match(main, /hybridAim\.readyToFire/);
   assert.match(main, /input\.dispose\(\)/);
@@ -33,6 +34,9 @@ test('corpo segue sempre o ControllerYaw e não a direção do deslocamento', ()
 test('câmera principal não depende mais de CameraControls', () => {
   assert.doesNotMatch(main, /import CameraControls from 'camera-controls'/);
   assert.match(main, /wallColliders: world\.cameraWallColliders/);
+  assert.match(main, /camera-controller\.js\?v=mobile-hud-3/);
+  assert.match(main, /hybrid-aim\.js\?v=mobile-hud-3/);
+  assert.match(main, /rifle-input\.js\?v=mobile-hud-3/);
 });
 
 test('frame atualiza mundo, blend e câmera antes do hitscan automático', () => {
@@ -48,10 +52,11 @@ test('frame atualiza mundo, blend e câmera antes do hitscan automático', () =>
   assert.ok(automatic > follow && render > automatic);
 });
 
-test('missão mantém uma câmera e um rifle e restaura o herói em todo cancelamento', () => {
+test('missão mantém uma câmera, um rifle e o herói visível durante toda a mira', () => {
   assert.equal(main.match(/new THREE\.PerspectiveCamera\(/g)?.length, 1);
   assert.equal(main.match(/createRifleModel\(THREE\)/g)?.length, 1);
-  assert.match(main, /hybridAim\.blend >= 0\.92/);
+  assert.match(main, /player\.root\.visible = true/);
+  assert.doesNotMatch(main, /player\.root\.visible = !/);
   assert.match(main, /const aimInput = bindRifleInput\(/);
   assert.match(main, /button: aimButton/);
   assert.match(main, /createRifleIntent\(/);

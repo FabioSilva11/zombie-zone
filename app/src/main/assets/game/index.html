@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>Zombie Zone</title>
   <link rel="icon" href="./images/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./css/game.css?v=rifle-aim-1">
+  <link rel="stylesheet" href="./css/game.css?v=mobile-hud-3">
   <script type="importmap">
   {
     "imports": {
@@ -102,17 +102,27 @@
         <div><small>OBJETIVO</small><strong data-objective>Derrote os zumbis</strong></div>
       </div>
     </div>
-    <div id="camera-zone" aria-label="Área para girar a câmera"></div>
+    <div id="camera-zone" aria-label="Área para girar a câmera">
+      <div class="camera-hint" aria-hidden="true">
+        <span class="camera-gesture"><i></i><i></i><i></i><b>☝</b></span>
+        <strong>Arraste para<br>mover a câmera</strong>
+      </div>
+    </div>
     <div class="reticle" data-reticle><span></span><small data-target-health></small></div>
     <div class="damage-vignette" data-damage-vignette></div>
     <div class="crystal-feedback" data-crystal-feedback>◆ <b>0</b>/3</div>
     <button id="pause-button" class="pause-button" type="button" aria-label="Pausar">Ⅱ</button>
-    <div id="joystick" class="movement-zone" aria-label="Controle de movimento"></div>
+    <div id="joystick" class="movement-zone" aria-label="Controle de movimento">
+      <span class="stick-arrow stick-up" aria-hidden="true">▲</span>
+      <span class="stick-arrow stick-right" aria-hidden="true">▶</span>
+      <span class="stick-arrow stick-down" aria-hidden="true">▼</span>
+      <span class="stick-arrow stick-left" aria-hidden="true">◀</span>
+    </div>
     <div class="action-cluster">
       <button id="reload-button" class="utility-action" type="button" aria-label="Recarregar"><span data-ammo-count>30/30</span><small>RECARREGAR</small></button>
       <button id="dodge-button" class="utility-action" type="button" aria-label="Esquivar"><span>↝</span><small>ESQUIVA</small></button>
-      <button id="aim-button" class="utility-action aim-button" type="button" aria-label="Mirar"><span>⊕</span><small>MIRAR</small></button>
-      <button id="attack-button" class="attack-button" type="button" aria-label="Atirar"><span>✦</span><small>ATIRAR</small></button>
+      <button id="aim-button" class="utility-action aim-button" type="button" aria-label="Alternar mira" aria-pressed="false"><span>⊕</span><small>MIRAR</small></button>
+      <button id="attack-button" class="attack-button" type="button" aria-label="Atirar e arrastar a câmera"><span>✦</span><small>ATIRAR</small><em>ARRASTE</em></button>
     </div>
   </section>
 
@@ -143,6 +153,6 @@
   <section id="defeat-screen" class="modal-screen result-screen is-hidden"><div class="result-panel defeat"><p class="eyebrow">A HORDA VENCEU DESTA VEZ</p><h2 data-defeat-title>Os zumbis bloquearam o caminho</h2><p>Fortaleça seu herói ou tente novamente.</p><button class="primary-button compact" data-retry-stage data-primary-action type="button">Tentar novamente</button><button data-defeat-preparation type="button">Preparação</button><button class="text-button" data-defeat-map type="button">Mapa</button></div></section>
   <section id="compatibility-screen" class="screen campaign-screen compatibility-screen is-hidden"><div class="compatibility-card"><span>!</span><p class="eyebrow">DISPOSITIVO INCOMPATÍVEL</p><h1>Este portal não pode abrir</h1><p data-compatibility-message>O aparelho não oferece os recursos gráficos necessários.</p><button class="primary-button compact" data-retry-app data-primary-action type="button">Tentar novamente</button></div></section>
 
-  <script type="module" src="./js/bootstrap.js?v=rifle-aim-1"></script>
+  <script type="module" src="./js/bootstrap.js?v=mobile-hud-3"></script>
 </body>
 </html>

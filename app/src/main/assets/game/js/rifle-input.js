@@ -35,6 +35,7 @@ export function createRifleIntent({ onAimChange = () => {}, onFireChange = () =>
   return {
     pressAim() { setAimHeld(true); },
     releaseAim() { setAimHeld(false); },
+    toggleAim() { setAimHeld(!aimHeld); },
     pressFire() { setFireHeld(true); },
     releaseFire() { setFireHeld(false); },
     cancel,
@@ -47,8 +48,16 @@ export function createRifleIntent({ onAimChange = () => {}, onFireChange = () =>
   };
 }
 
-export function bindRifleInput({ button, windowRef = window, onPress, onRelease }) {
+export function bindRifleInput({
+  button,
+  windowRef = window,
+  onPress,
+  onRelease,
+  onMove = () => {},
+}) {
   let activePointerId = null;
+  let lastPointerX = 0;
+  let lastPointerY = 0;
   let disposed = false;
 
   const release = (event = null) => {
@@ -64,8 +73,21 @@ export function bindRifleInput({ button, windowRef = window, onPress, onRelease 
   const onPointerDown = (event) => {
     if (disposed || activePointerId !== null) return;
     activePointerId = event.pointerId;
+    lastPointerX = Number(event.clientX) || 0;
+    lastPointerY = Number(event.clientY) || 0;
     try { button.setPointerCapture?.(activePointerId); } catch {}
     onPress();
+    event.preventDefault?.();
+  };
+  const onPointerMove = (event) => {
+    if (disposed || activePointerId === null || event.pointerId !== activePointerId) return;
+    const x = Number.isFinite(event.clientX) ? event.clientX : lastPointerX;
+    const y = Number.isFinite(event.clientY) ? event.clientY : lastPointerY;
+    const deltaX = x - lastPointerX;
+    const deltaY = y - lastPointerY;
+    lastPointerX = x;
+    lastPointerY = y;
+    if (deltaX || deltaY) onMove(deltaX, deltaY, event);
     event.preventDefault?.();
   };
   const onPointerUp = (event) => release(event);
@@ -74,6 +96,7 @@ export function bindRifleInput({ button, windowRef = window, onPress, onRelease 
   const onBlur = () => release();
 
   button.addEventListener('pointerdown', onPointerDown);
+  button.addEventListener('pointermove', onPointerMove);
   button.addEventListener('pointerup', onPointerUp);
   button.addEventListener('pointercancel', onPointerCancel);
   button.addEventListener('lostpointercapture', onLostPointerCapture);
@@ -85,6 +108,7 @@ export function bindRifleInput({ button, windowRef = window, onPress, onRelease 
       if (disposed) return;
       disposed = true;
       button.removeEventListener('pointerdown', onPointerDown);
+      button.removeEventListener('pointermove', onPointerMove);
       button.removeEventListener('pointerup', onPointerUp);
       button.removeEventListener('pointercancel', onPointerCancel);
       button.removeEventListener('lostpointercapture', onLostPointerCapture);

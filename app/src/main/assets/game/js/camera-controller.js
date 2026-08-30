@@ -13,6 +13,10 @@ const CAMERA_COLLISION_RADIUS = 0.34;
 const CAMERA_COLLISION_MIN_DISTANCE = 0.08;
 const CAMERA_RELEASE_SMOOTHNESS = 16;
 const LOOK_RADIANS_PER_PIXEL = 0.0042;
+const AIM_CAMERA_DISTANCE = 3.15;
+const AIM_CAMERA_HEIGHT = 2.45;
+const AIM_CAMERA_SHOULDER = 0.62;
+const AIM_PITCH_ORBIT_INFLUENCE = 0.2;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -124,6 +128,16 @@ export function firstPersonComposition(
   };
 }
 
+export function aimedThirdPersonComposition(position, yaw, pitch) {
+  return thirdPersonComposition(position, yaw, pitch, {
+    distance: AIM_CAMERA_DISTANCE,
+    height: AIM_CAMERA_HEIGHT,
+    shoulder: AIM_CAMERA_SHOULDER,
+    aimDistance: CAMERA_AIM_DISTANCE,
+    pitchOrbitInfluence: AIM_PITCH_ORBIT_INFLUENCE,
+  });
+}
+
 export function estimatedCharacterScreenFraction(characterHeight, distance = CAMERA_DISTANCE, verticalFov = Math.PI / 3) {
   return 2 * Math.atan(Math.max(0, characterHeight) / (2 * Math.max(0.01, distance))) / verticalFov;
 }
@@ -197,9 +211,24 @@ export function createThirdPersonCamera({
   let lastPointerX = 0;
   let lastPointerY = 0;
   let springArmDistance = null;
+  let aimedSpringArmDistance = null;
   let viewBlend = 0;
   let collisionState = { angle: pitch, distance: CAMERA_DISTANCE, directDistance: CAMERA_DISTANCE, collided: false };
   const aimTarget = new THREE.Vector3();
+
+  const rotateByPixels = (deltaX, deltaY) => {
+    if (!enabled) return false;
+    const next = applyLookDelta(
+      { yaw, pitch },
+      Number(deltaX) || 0,
+      Number(deltaY) || 0,
+      lookSensitivity,
+    );
+    yaw = next.yaw;
+    pitch = next.pitch;
+    lookChanged = true;
+    return true;
+  };
 
   const pointerIdOf = (event) => event.pointerId ?? 1;
   const releasePointer = (event) => {
@@ -220,12 +249,9 @@ export function createThirdPersonCamera({
     if (!enabled || activePointerId === null || pointerIdOf(event) !== activePointerId) return;
     const x = event.clientX ?? lastPointerX;
     const y = event.clientY ?? lastPointerY;
-    const next = applyLookDelta({ yaw, pitch }, x - lastPointerX, y - lastPointerY, lookSensitivity);
-    yaw = next.yaw;
-    pitch = next.pitch;
+    rotateByPixels(x - lastPointerX, y - lastPointerY);
     lastPointerX = x;
     lastPointerY = y;
-    lookChanged = true;
     event.preventDefault?.();
   };
   const onContextMenu = (event) => event.preventDefault?.();
@@ -253,17 +279,21 @@ export function createThirdPersonCamera({
       delta,
     });
     springArmDistance = resolved.distance;
-    const first = firstPersonComposition(player.root.position, yaw, pitch);
+    const aimedComposition = aimedThirdPersonComposition(player.root.position, yaw, pitch);
+    const aimedResolved = resolveSpringArmCamera({
+      target,
+      desired: aimedComposition.camera,
+      wallColliders,
+      currentDistance: aimedSpringArmDistance,
+      delta,
+    });
+    aimedSpringArmDistance = aimedResolved.distance;
     camera.position.set(
-      resolved.position.x + (first.camera.x - resolved.position.x) * viewBlend,
-      resolved.position.y + (first.camera.y - resolved.position.y) * viewBlend,
-      resolved.position.z + (first.camera.z - resolved.position.z) * viewBlend,
+      resolved.position.x + (aimedResolved.position.x - resolved.position.x) * viewBlend,
+      resolved.position.y + (aimedResolved.position.y - resolved.position.y) * viewBlend,
+      resolved.position.z + (aimedResolved.position.z - resolved.position.z) * viewBlend,
     );
-    const blendedForward = {
-      x: composition.forward.x + (first.forward.x - composition.forward.x) * viewBlend,
-      y: composition.forward.y + (first.forward.y - composition.forward.y) * viewBlend,
-      z: composition.forward.z + (first.forward.z - composition.forward.z) * viewBlend,
-    };
+    const blendedForward = composition.forward;
     const forwardLength = Math.hypot(blendedForward.x, blendedForward.y, blendedForward.z) || 1;
     aimTarget.set(
       camera.position.x + blendedForward.x / forwardLength * CAMERA_AIM_DISTANCE,
@@ -273,9 +303,9 @@ export function createThirdPersonCamera({
     camera.lookAt(aimTarget);
     collisionState = {
       angle: pitch,
-      distance: resolved.distance,
-      directDistance: resolved.directDistance,
-      collided: resolved.collided,
+      distance: resolved.distance + (aimedResolved.distance - resolved.distance) * viewBlend,
+      directDistance: resolved.directDistance + (aimedResolved.directDistance - resolved.directDistance) * viewBlend,
+      collided: resolved.collided || aimedResolved.collided,
     };
     return resolved;
   };
@@ -294,6 +324,7 @@ export function createThirdPersonCamera({
       if (!enabled) releasePointer();
     },
     setSensitivity(value) { lookSensitivity = Math.max(0, Number(value) || 0); },
+    rotateByPixels,
     updateInput() {
       const changed = lookChanged;
       lookChanged = false;

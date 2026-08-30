@@ -6,19 +6,19 @@ import { AnimationController } from './animation.js';
 import { selectAssistedTarget } from './aim-assist.js';
 import { createAutomaticFire } from './automatic-fire.js?v=rifle-1';
 import { createAvatarPreview } from './avatar-preview.js?v=zombie-zone-16';
-import { createThirdPersonCamera } from './camera-controller.js?v=tps-unreal-1';
+import { createThirdPersonCamera } from './camera-controller.js?v=mobile-hud-3';
 import { CAMPAIGN } from './campaign.js?v=zombie-zone-16';
 import { mountCampaignUI } from './campaign-ui.js?v=zombie-zone-16';
 import { characterById, CHARACTERS } from './catalog.js';
 import { CombatSystem } from './combat.js?v=zombie-ai-1';
-import { createHybridAim } from './hybrid-aim.js?v=rifle-1';
+import { createHybridAim } from './hybrid-aim.js?v=mobile-hud-3';
 import { createExplorationState, mountMinimap, revealAround } from './minimap.js?v=campaign-3';
 import { completeMission, routeBootFailure, shouldDisposeMission } from './mission-lifecycle.js?v=campaign-3';
 import { controllerFacingFromYaw, modelYawFromDirection } from './movement-heading.js?v=zombie-zone-18';
 import { createPlayerController } from './player-controller.js?v=tps-unreal-3';
 import { createRifleEffects } from './rifle-effects.js?v=rifle-1';
 import { resolveRifleHitscan } from './rifle-hitscan.js?v=rifle-1';
-import { bindRifleInput, createRifleIntent } from './rifle-input.js?v=rifle-aim-1';
+import { bindRifleInput, createRifleIntent } from './rifle-input.js?v=mobile-hud-3';
 import { attachRifle, createRifleModel, createRifleSockets } from './rifle-model.js?v=rifle-aim-1';
 import { createSaveStore } from './save-store.js';
 import { createScreenFlow } from './screen-flow.js';
@@ -343,8 +343,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
   const weapon = createWeaponState();
   const rifle = createRifleModel(THREE);
   const sockets = createRifleSockets({ THREE, playerRoot: player.root, camera });
-  let rifleMode = 'tps';
-  attachRifle(rifle, sockets[rifleMode], rifleMode);
+  attachRifle(rifle, sockets.tps, 'tps');
   const effects = createRifleEffects({
     THREE,
     scene: world.scene,
@@ -401,18 +400,18 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
     windowRef: window,
     onPress: () => rifleIntent.pressFire(),
     onRelease: () => rifleIntent.releaseFire(),
+    onMove: (deltaX, deltaY) => cameraController.rotateByPixels(deltaX, deltaY),
   });
   const aimInput = bindRifleInput({
     button: aimButton,
     windowRef: window,
     onPress: () => {
-      aimButton.classList.add('is-active');
-      rifleIntent.pressAim();
+      rifleIntent.toggleAim();
+      const active = rifleIntent.state().aimHeld;
+      aimButton.classList.toggle('is-active', active);
+      aimButton.setAttribute('aria-pressed', String(active));
     },
-    onRelease: () => {
-      aimButton.classList.remove('is-active');
-      rifleIntent.releaseAim();
-    },
+    onRelease: () => {},
   });
   cancelRifleTrigger = () => {
     input.cancel();
@@ -422,6 +421,7 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
     hybridAim.cancel();
     attackButton.classList.remove('is-active');
     aimButton.classList.remove('is-active');
+    aimButton.setAttribute('aria-pressed', 'false');
     player.root.visible = true;
   };
   const reload = () => {
@@ -489,14 +489,8 @@ async function createGame({ characterId, stage, upgrades, settings, collectedCry
       minimapFrame = (minimapFrame + 1) % 6; if (minimapFrame === 0) minimap.paint();
       hybridAim.update(delta);
       cameraController.setViewBlend(hybridAim.blend);
-      const nextRifleMode = hybridAim.blend >= 0.5 ? 'fps' : 'tps';
-      if (nextRifleMode !== rifleMode) {
-        attachRifle(rifle, sockets[nextRifleMode], nextRifleMode);
-        rifleMode = nextRifleMode;
-      }
-      reticle.classList.toggle('fps', nextRifleMode === 'fps');
-      player.root.visible = !(hybridAim.blend >= 0.92
-        && (hybridAim.state === 'first-person' || hybridAim.state === 'entering-first-person'));
+      reticle.classList.toggle('aimed', hybridAim.blend >= 0.5);
+      player.root.visible = true;
       cameraController.updateFollow(delta);
       automaticFire.update(delta, { ready: hybridAim.readyToFire, fire: performRifleShot });
       effects.update(delta);
