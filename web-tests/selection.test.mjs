@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createSelectionModel,
+  heroPresentation,
   selectionAction,
   selectCharacter,
 } from '../app/src/main/assets/game/js/selection.js';
@@ -16,6 +17,11 @@ test('selection model marks exactly the requested character', () => {
   assert.equal(model.cards.length, 2);
   assert.deepEqual(model.cards.map((card) => card.selected), [false, true]);
   assert.equal(model.selected.name, 'Mira');
+});
+
+test('apresentação visual fornece função e barras válidas para cada herói', () => {
+  const brann = heroPresentation({ id: 'c', name: 'Brann' }, 2);
+  assert.deepEqual(brann, { role: 'ASSALTO', health: 5, speed: 2 });
 });
 
 test('unknown selection safely falls back to the first character', () => {

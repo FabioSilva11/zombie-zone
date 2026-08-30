@@ -51,6 +51,11 @@ object GameLifecycleBridge {
     }
 }
 
+object AdDisplayPolicy {
+    fun shouldEnterImmersiveMode(hasWindowFocus: Boolean, rewardedAdShowing: Boolean): Boolean =
+        hasWindowFocus && !rewardedAdShowing
+}
+
 class MainActivity : ComponentActivity() {
     private lateinit var gameView: WebView
     private lateinit var assetLoader: WebViewAssetLoader
@@ -210,7 +215,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) enterImmersiveMode()
+        if (AdDisplayPolicy.shouldEnterImmersiveMode(hasFocus, isRewardedAdShowing)) {
+            enterImmersiveMode()
+        } else if (isRewardedAdShowing) {
+            exitImmersiveMode()
+        }
     }
 
     override fun onResume() {

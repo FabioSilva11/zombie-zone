@@ -110,7 +110,9 @@ export class CombatSystem {
         playerPosition,
         hasLineOfSight: this.hasLineOfSight(enemy.root.position, playerPosition),
         canOccupy: this.canMoveTo,
+        movementBlocked: enemy.roamMovementBlocked === true,
       }, delta);
+      enemy.roamMovementBlocked = false;
       enemy.state = action.state;
       if (action.state === ZOMBIE_STATES.DEAD) {
         if (action.shouldHide) enemy.root.visible = false;
@@ -137,7 +139,10 @@ export class CombatSystem {
           enemy.animations.play(action.state === ZOMBIE_STATES.CHASE
             ? ['sprint', 'walk', 'idle']
             : ['walk', 'idle']);
-        } else enemy.animations.play(['idle', 'static']);
+        } else {
+          if (action.state === ZOMBIE_STATES.ROAM) enemy.roamMovementBlocked = true;
+          enemy.animations.play(['idle', 'static']);
+        }
       } else if (action.state === ZOMBIE_STATES.ATTACK) {
         if (enemy.attackCooldown <= 0) {
           enemy.attackCooldown = 1.15;

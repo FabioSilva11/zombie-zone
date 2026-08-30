@@ -88,19 +88,30 @@
 
   <section id="selection-screen" class="screen selection-screen is-hidden">
     <div class="selection-header">
-      <button class="back-button selection-back" data-avatar-back type="button">‹ Voltar</button>
+      <button class="back-button selection-back" data-avatar-back type="button">‹ VOLTAR</button>
       <div class="selection-title">
         <p class="eyebrow">ESCOLHA SEU HERÓI</p>
-        <h1>Heróis da Zona Z</h1>
+        <h1>HERÓIS DA ZONA <em>Z</em></h1>
         <p class="subtitle">Desbloqueie novos combatentes usando diamantes.</p>
       </div>
       <div class="selection-resources"><span>◆ <b data-crystals>0</b></span><span class="selection-seal" data-owned-heroes>1/18</span></div>
     </div>
-    <div class="selection-content"><div class="selection-preview avatar-preview" data-avatar-preview="avatar" aria-label="Prévia 3D do avatar"></div><div class="character-grid" data-character-grid></div></div>
+    <div class="selection-content">
+      <article class="selection-hero-panel">
+        <div class="selection-preview avatar-preview" data-avatar-preview="avatar" aria-label="Prévia 3D do avatar"></div>
+        <span class="selection-platform" aria-hidden="true"></span>
+      </article>
+      <section class="selection-roster-panel" aria-label="Lista de heróis">
+        <div class="selection-roster-heading"><small>ESQUADRÃO DA ZONA</small><b>TOQUE PARA VISUALIZAR</b></div>
+        <div class="character-grid" data-character-grid></div>
+      </section>
+    </div>
     <footer class="selection-footer">
       <div class="chosen-copy">
-        <span>Herói em destaque</span>
-        <strong data-selected-name>Kael</strong>
+        <div class="selection-identity"><strong data-selected-name>Kael</strong><span data-selected-status>LIBERADO</span></div>
+        <div class="selection-role"><small>FUNÇÃO</small><b data-selected-role>BATEDOR</b></div>
+        <div class="selection-stat"><small>VIDA</small><span data-selected-health></span></div>
+        <div class="selection-stat"><small>VELOCIDADE</small><span data-selected-speed></span></div>
       </div>
       <button class="primary-button" data-play-button type="button">
         <span>USAR HERÓI</span><b aria-hidden="true">›</b>

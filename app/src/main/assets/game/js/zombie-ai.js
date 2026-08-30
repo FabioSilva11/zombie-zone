@@ -8,8 +8,9 @@ export const ZOMBIE_STATES = Object.freeze({
 
 export const DEFAULT_ZOMBIE_AI_CONFIG = Object.freeze({
   canRoam: true,
-  roamRadius: 5.5,
-  roamDelay: 2.2,
+  roamRadius: 11,
+  roamMinDistance: 4.5,
+  roamDelay: 0.9,
   roamSpeed: 0.62,
   chaseSpeed: 1.45,
   sightRadius: 11,
@@ -34,14 +35,15 @@ function distance2D(left, right) {
   return Math.hypot(right.x - left.x, right.z - left.z);
 }
 
-function chooseRoamTarget(brain, canOccupy) {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+function chooseRoamTarget(brain, position, canOccupy) {
+  for (let attempt = 0; attempt < 14; attempt += 1) {
     const angle = brain.random() * Math.PI * 2;
-    const radius = Math.sqrt(brain.random()) * brain.config.roamRadius;
+    const radiusRange = Math.max(0, brain.config.roamRadius - brain.config.roamMinDistance);
+    const radius = brain.config.roamMinDistance + Math.sqrt(brain.random()) * radiusRange;
     const candidate = {
-      x: brain.roamOrigin.x + Math.cos(angle) * radius,
-      y: brain.roamOrigin.y,
-      z: brain.roamOrigin.z + Math.sin(angle) * radius,
+      x: position.x + Math.cos(angle) * radius,
+      y: position.y,
+      z: position.z + Math.sin(angle) * radius,
     };
     if (canOccupy(candidate, 0.9)) return candidate;
   }
@@ -149,9 +151,16 @@ export function updateZombieBrain(brain, observation, delta) {
     return actionFor(brain);
   }
 
-  if (brain.roamTarget && distance2D(position, brain.roamTarget) <= 0.45) {
+  if (observation.movementBlocked && brain.roamTarget) {
+    brain.roamOrigin = point(position);
     brain.roamTarget = null;
-    brain.roamWait = brain.config.roamDelay;
+    brain.roamWait = Math.min(0.25, brain.config.roamDelay);
+  }
+
+  if (brain.roamTarget && distance2D(position, brain.roamTarget) <= 0.45) {
+    brain.roamOrigin = point(position);
+    brain.roamTarget = null;
+    brain.roamWait = brain.config.roamDelay * (0.55 + brain.random() * 0.45);
     transition(brain, ZOMBIE_STATES.IDLE);
   }
 
@@ -161,7 +170,7 @@ export function updateZombieBrain(brain, observation, delta) {
     return actionFor(brain);
   }
 
-  if (!brain.roamTarget) brain.roamTarget = chooseRoamTarget(brain, canOccupy);
+  if (!brain.roamTarget) brain.roamTarget = chooseRoamTarget(brain, position, canOccupy);
   if (brain.roamTarget) transition(brain, ZOMBIE_STATES.ROAM);
   else {
     brain.roamWait = Math.min(0.8, brain.config.roamDelay);

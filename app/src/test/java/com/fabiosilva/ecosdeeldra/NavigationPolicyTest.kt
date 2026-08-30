@@ -51,4 +51,11 @@ class NavigationPolicyTest {
             GameLifecycleBridge.scriptFor(active = true),
         )
     }
+
+    @Test
+    fun rewardedAdKeepsGoogleFullscreenActivityOutOfGameImmersiveMode() {
+        assertFalse(AdDisplayPolicy.shouldEnterImmersiveMode(hasWindowFocus = true, rewardedAdShowing = true))
+        assertFalse(AdDisplayPolicy.shouldEnterImmersiveMode(hasWindowFocus = false, rewardedAdShowing = false))
+        assertTrue(AdDisplayPolicy.shouldEnterImmersiveMode(hasWindowFocus = true, rewardedAdShowing = false))
+    }
 }

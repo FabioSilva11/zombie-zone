@@ -10,7 +10,7 @@ import {
 
 const position = (x, z, y = 0) => ({ x, y, z });
 
-test('zumbi patrulha dentro do raio de origem quando não percebe o jogador', () => {
+test('zumbi escolhe um destino exploratório quando não percebe o jogador', () => {
   const brain = createZombieBrain({ id: 'z1', position: position(4, 7), random: () => 0.25 });
   const action = updateZombieBrain(brain, {
     health: 70,
@@ -21,6 +21,39 @@ test('zumbi patrulha dentro do raio de origem quando não percebe o jogador', ()
   }, 0.05);
   assert.equal(action.state, ZOMBIE_STATES.ROAM);
   assert.ok(Math.hypot(action.target.x - 4, action.target.z - 7) <= brain.config.roamRadius);
+  assert.ok(Math.hypot(action.target.x - 4, action.target.z - 7) >= brain.config.roamMinDistance);
+});
+
+test('destinos sucessivos avançam a exploração em vez de prender o zumbi ao nascimento', () => {
+  const randomValues = [0, 1, 0, 1];
+  const brain = createZombieBrain({
+    id: 'explorer', position: position(0, 0),
+    config: { roamRadius: 10, roamMinDistance: 10, roamDelay: 0 },
+    random: () => randomValues.shift() ?? 0,
+  });
+  let action = updateZombieBrain(brain, {
+    health: 70, position: position(0, 0), playerPosition: position(100, 100),
+    hasLineOfSight: false, canOccupy: () => true,
+  }, 0.05);
+  assert.deepEqual(action.target, position(10, 0));
+  action = updateZombieBrain(brain, {
+    health: 70, position: position(10, 0), playerPosition: position(100, 100),
+    hasLineOfSight: false, canOccupy: () => true,
+  }, 0.05);
+  assert.equal(brain.roamOrigin.x, 10);
+  assert.ok(action.target.x > 10, 'o próximo destino deve partir da posição alcançada');
+});
+
+test('zumbi abandona destino bloqueado e escolhe uma nova rota', () => {
+  const brain = createZombieBrain({ id: 'blocked', position: position(2, 2), random: () => 0 });
+  brain.roamTarget = position(9, 2);
+  brain.state = ZOMBIE_STATES.ROAM;
+  const action = updateZombieBrain(brain, {
+    health: 70, position: position(2, 2), playerPosition: position(100, 100),
+    hasLineOfSight: false, canOccupy: () => true, movementBlocked: true,
+  }, 0.05);
+  assert.equal(action.state, ZOMBIE_STATES.IDLE);
+  assert.equal(action.target, null);
 });
 
 test('visão alterna entre perseguição e ataque usando o raio de dano', () => {

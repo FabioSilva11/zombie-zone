@@ -24,6 +24,26 @@ export function selectionAction(model, crystals) {
   return { kind: 'purchase', label: `DESBLOQUEAR ◆ ${model.selected.price}`, disabled: !canAfford };
 }
 
+const HERO_ROLES = Object.freeze([
+  'BATEDOR', 'PRECISÃO', 'ASSALTO', 'SUPORTE', 'GUARDIÃO', 'TÁTICA',
+]);
+
+export function heroPresentation(character, index = 0) {
+  return Object.freeze({
+    role: HERO_ROLES[index % HERO_ROLES.length],
+    health: 3 + (index % 3),
+    speed: 4 - (index % 3),
+  });
+}
+
+function renderStatBars(host, value) {
+  host.replaceChildren(...Array.from({ length: 5 }, (_, index) => {
+    const bar = document.createElement('i');
+    if (index < value) bar.className = 'is-active';
+    return bar;
+  }));
+}
+
 export function mountSelection(root, characters, onPlay, {
   selectedId,
   onSelect,
@@ -35,11 +55,22 @@ export function mountSelection(root, characters, onPlay, {
   let model = createSelectionModel(characters, selectedId, getUnlockedAvatarIds());
   const grid = root.querySelector('[data-character-grid]');
   const heroName = root.querySelector('[data-selected-name]');
+  const heroStatus = root.querySelector('[data-selected-status]');
+  const heroRole = root.querySelector('[data-selected-role]');
+  const heroHealth = root.querySelector('[data-selected-health]');
+  const heroSpeed = root.querySelector('[data-selected-speed]');
   const playButton = root.querySelector('[data-play-button]');
   const playLabel = playButton.querySelector('span');
 
   const render = () => {
     heroName.textContent = model.selected.name;
+    const selectedIndex = model.cards.findIndex((character) => character.id === model.selected.id);
+    const presentation = heroPresentation(model.selected, selectedIndex);
+    heroStatus.textContent = model.selected.owned ? 'LIBERADO' : 'BLOQUEADO';
+    heroStatus.classList.toggle('is-locked', !model.selected.owned);
+    heroRole.textContent = presentation.role;
+    renderStatBars(heroHealth, presentation.health);
+    renderStatBars(heroSpeed, presentation.speed);
     const action = selectionAction(model, getCrystals());
     playLabel.textContent = action.label;
     playButton.disabled = action.disabled;
@@ -52,7 +83,7 @@ export function mountSelection(root, characters, onPlay, {
       button.setAttribute('aria-label', `${character.owned ? 'Escolher' : 'Visualizar skin bloqueada'} ${character.name}`);
       button.innerHTML = `
         <img src="./images/characters/character-${character.id}.png" alt="" draggable="false">
-        <span>${character.name}</span><small>${character.owned ? 'LIBERADO' : `◆ ${character.price}`}</small>
+        <span class="character-name">${character.name}</span><small>${character.owned ? 'LIBERADO' : `◆ ${character.price}`}</small>
       `;
       button.addEventListener('click', () => {
         model = selectCharacter(model, character.id);
