@@ -35,6 +35,7 @@ const LABELS = {
 const canvas = document.querySelector('#map-canvas');
 const context = canvas.getContext('2d');
 const palette = document.querySelector('#piece-palette');
+const generationPieces = document.querySelector('#generation-pieces');
 const toastElement = document.querySelector('#toast');
 const preview = createMapPreview(document.querySelector('#map-3d'), (message) => {
   document.querySelector('#preview-status').textContent = message;
@@ -76,6 +77,7 @@ let future = [];
 let toastTimer = 0;
 let palettePointerDrag = null;
 let lastPaletteDragEnded = 0;
+let generationAllowedPieceIds = new Set(DUNGEON_PIECES.map((piece) => piece.id));
 
 function selectOnly(id) {
   selectedIds = id ? new Set([id]) : new Set();
@@ -548,7 +550,7 @@ function renderValidation() {
   const box = document.querySelector('#validation-box');
   if (validation.valid) {
     box.className = 'validation good';
-    box.innerHTML = `<strong>Mapa válido</strong><br>${validation.pieceCount} de até ${editorMap.maxElements ?? 24} peças, usando ${editorMap.maxLevels ?? 2} andar${(editorMap.maxLevels ?? 2) > 1 ? 'es' : ''}, sem sobreposição.`;
+    box.innerHTML = `<strong>Mapa válido</strong><br>${validation.pieceCount} de uma meta de ${editorMap.maxElements ?? 24} peças, usando ${editorMap.maxLevels ?? 2} andar${(editorMap.maxLevels ?? 2) > 1 ? 'es' : ''}, sem sobreposição.`;
   } else {
     box.className = 'validation';
     const problem = validation.errors[0]?.message ?? `Ainda faltam ${validation.missingPieceIds.length} modelos estruturais.`;
@@ -610,6 +612,16 @@ function refresh() {
   renderValidation();
   renderPalette(document.querySelector('#piece-search').value);
   draw();
+}
+
+function renderGenerationPieces() {
+  generationPieces.replaceChildren(...DUNGEON_PIECES.map((piece) => {
+    const label = document.createElement('label');
+    label.className = 'generation-piece';
+    label.title = LABELS[piece.id];
+    label.innerHTML = `<input type="checkbox" value="${piece.id}"${generationAllowedPieceIds.has(piece.id) ? ' checked' : ''}><span>${LABELS[piece.id]}</span>`;
+    return label;
+  }));
 }
 
 function addAt(pieceId, point) {
@@ -846,6 +858,9 @@ document.querySelector('.camera-3d-controls').addEventListener('click', (event) 
   if (action === 'reset') preview.resetCamera();
 });
 document.querySelector('#piece-search').addEventListener('input', (event) => renderPalette(event.target.value));
+generationPieces.addEventListener('change', () => {
+  generationAllowedPieceIds = new Set([...generationPieces.querySelectorAll('input:checked')].map((input) => input.value));
+});
 document.querySelector('#zoom').addEventListener('input', (event) => {
   const size = `${event.target.value}px`;
   document.querySelector('#canvas-wrap').style.width = size;
@@ -878,14 +893,22 @@ document.querySelector('#new-map').addEventListener('click', () => {
 });
 document.querySelector('#generate-map').addEventListener('click', () => {
   const maxElementsInput = document.querySelector('#max-elements');
-  const maxElements = Math.max(1, Math.min(200, Math.round(Number(maxElementsInput.value) || 24)));
+  const maxElements = Math.max(1, Math.min(500, Math.round(Number(maxElementsInput.value) || 24)));
   const maxLevels = Number(document.querySelector('#max-levels').value) === 1 ? 1 : 2;
   maxElementsInput.value = String(maxElements);
-  const generated = generateEditorMap(Date.now(), { maxElements, maxLevels });
-  activeLevel = 0;
-  commit(generated, null, null);
-  document.querySelector('#save-state').textContent = 'Mapa aleatório gerado';
-  toast(`${generated.placements.length} peças geradas em até ${maxLevels} andar${maxLevels > 1 ? 'es' : ''}`);
+  try {
+    const generated = generateEditorMap(Date.now(), {
+      maxElements,
+      maxLevels,
+      allowedPieceIds: [...generationAllowedPieceIds],
+    });
+    activeLevel = 0;
+    commit(generated, null, null);
+    document.querySelector('#save-state').textContent = 'Mapa aleatório gerado';
+    toast(`${generated.placements.length}/${maxElements} peças geradas em até ${maxLevels} andar${maxLevels > 1 ? 'es' : ''}`);
+  } catch (error) {
+    toast(error.message, true);
+  }
 });
 document.querySelector('#save-local').addEventListener('click', () => {
   localStorage.setItem(STORAGE_KEY, serializeEditorMap(editorMap));
@@ -1004,5 +1027,6 @@ try {
 
 document.querySelector('#max-elements').value = String(editorMap.maxElements ?? 24);
 document.querySelector('#max-levels').value = String(editorMap.maxLevels ?? 2);
+renderGenerationPieces();
 loadMapLibrary();
 refresh();

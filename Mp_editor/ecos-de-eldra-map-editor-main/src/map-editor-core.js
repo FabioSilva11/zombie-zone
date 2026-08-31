@@ -3,7 +3,7 @@ import { collisionTemplateByPieceId } from './dungeon-collision-catalog.js';
 import { generateDungeon, placementBounds, socketWorldPosition } from './dungeon-generator.js';
 
 const OPPOSITE = Object.freeze({ N: 'S', S: 'N', E: 'W', W: 'E' });
-const GENERATED_PIECE_LIMIT = 200;
+const GENERATED_PIECE_LIMIT = 500;
 const MIN_COLLIDER_SIZE = 0.05;
 
 function seededRandom(seed) {
@@ -50,7 +50,13 @@ export function generateEditorMap(seed = Date.now(), options = {}) {
   const generated = generateDungeon(seed);
   const maxElements = Math.max(1, Math.min(GENERATED_PIECE_LIMIT, Math.round(Number(options.maxElements) || 24)));
   const maxLevels = Number(options.maxLevels) === 1 ? 1 : 2;
+  const knownPieceIds = new Set(DUNGEON_PIECES.map((piece) => piece.id));
+  const allowedPieceIds = Array.isArray(options.allowedPieceIds)
+    ? new Set(options.allowedPieceIds.filter((id) => knownPieceIds.has(id)))
+    : knownPieceIds;
+  if (!allowedPieceIds.size) throw new Error('Selecione ao menos um bloco para gerar o mapa.');
   const allowed = generated.placements.filter((placement) => {
+    if (!allowedPieceIds.has(placement.pieceId)) return false;
     if (maxLevels === 2) return true;
     if (placement.pieceId === 'stairs' || placement.pieceId === 'stairsWide') return false;
     return placement.level === 0;
@@ -66,45 +72,29 @@ export function generateEditorMap(seed = Date.now(), options = {}) {
   }));
   const random = seededRandom(Number(seed) + 0x51f15e);
   const repeatableIds = new Set([
-    'corridor', 'corridorCorner',
-    'corridorWide', 'corridorWideCorner',
+    'corridor', 'corridorCorner', 'corridorIntersection', 'corridorJunction',
+    'corridorWide', 'corridorWideCorner', 'corridorWideIntersection', 'corridorWideJunction',
     'corridorTransition',
   ]);
-  const repeatable = DUNGEON_PIECES.filter((piece) => repeatableIds.has(piece.id));
+  const repeatable = DUNGEON_PIECES.filter((piece) => repeatableIds.has(piece.id) && allowedPieceIds.has(piece.id));
   while (map.placements.length < maxElements) {
-    const openSockets = connectionAnalysis(map).openSockets.filter((socket) => socket.level >= 0 && socket.level < maxLevels);
+    const openSockets = openSocketsForGeneration(map).filter((socket) => socket.level >= 0 && socket.level < maxLevels);
     if (!openSockets.length) break;
-    const closurePoints = new Set(openSockets.map((socket) => `${socket.x}:${socket.z}:${socket.level}:${socket.width}`));
-    if (map.placements.length + closurePoints.size >= maxElements) break;
-    const options = [];
-    for (const target of openSockets) {
-      for (const definition of repeatable) {
-        for (let rotation = 0; rotation < 4; rotation += 1) {
-          const rotated = rotatePiece(definition, rotation);
-          for (const socket of rotated.sockets) {
-            if (socket.state === 'blocked' || socket.width !== target.width || socket.side !== OPPOSITE[target.side]) continue;
-            const level = target.level - socket.levelDelta;
-            if (level < 0 || level >= maxLevels) continue;
-            const origin = originAtSocket(rotated, socket, target);
-            const candidate = normalizedCandidate(map, { pieceId: definition.id, ...origin, level, rotation });
-            if (placementErrors(map, candidate).length) continue;
-            options.push(candidate);
-          }
-        }
-      }
-    }
+    const options = generationOptions(map, openSockets, repeatable, maxLevels, random);
     if (!options.length) break;
     const candidate = options[Math.floor(random() * options.length)];
     map = { ...map, nextId: map.nextId + 1, placements: [...map.placements, candidate] };
   }
   const closures = new Map();
-  for (const socket of connectionAnalysis(map).openSockets.filter((entry) => entry.level >= 0 && entry.level < maxLevels)) {
+  for (const socket of openSocketsForGeneration(map).filter((entry) => entry.level >= 0 && entry.level < maxLevels)) {
     closures.set(`${socket.x}:${socket.z}:${socket.level}:${socket.width}`, socket);
   }
   for (const socket of closures.values()) {
-    const endDefinition = pieceById(socket.width === 'wide' ? 'corridorWideEnd' : 'corridorEnd');
+    if (map.placements.length >= maxElements) break;
+    const endPieceId = socket.width === 'wide' ? 'corridorWideEnd' : 'corridorEnd';
+    const endDefinition = allowedPieceIds.has(endPieceId) ? pieceById(endPieceId) : null;
     let cap = null;
-    for (let rotation = 0; rotation < 4 && !cap; rotation += 1) {
+    for (let rotation = 0; endDefinition && rotation < 4 && !cap; rotation += 1) {
       const rotated = rotatePiece(endDefinition, rotation);
       const endSocket = rotated.sockets[0];
       if (endSocket.width !== socket.width || endSocket.side !== OPPOSITE[socket.side]) continue;
@@ -112,7 +102,7 @@ export function generateEditorMap(seed = Date.now(), options = {}) {
       const candidate = normalizedCandidate(map, { pieceId: endDefinition.id, ...origin, level: socket.level, rotation, role: 'generated-closure' });
       if (!placementErrors(map, candidate).length) cap = candidate;
     }
-    if (!cap) {
+    if (!cap && allowedPieceIds.has('gateMetalBars')) {
       cap = normalizedCandidate(map, {
         pieceId: 'gateMetalBars',
         x: socket.x,
@@ -123,10 +113,38 @@ export function generateEditorMap(seed = Date.now(), options = {}) {
         role: 'generated-closure',
       });
     }
-    map = { ...map, nextId: map.nextId + 1, placements: [...map.placements, cap] };
+    if (cap) map = { ...map, nextId: map.nextId + 1, placements: [...map.placements, cap] };
   }
   map.name = `Mapa aleatório ${generated.seed} • ${map.placements.length} peças • ${maxLevels} andar${maxLevels > 1 ? 'es' : ''}`;
   return regenerateEditorColliders(map);
+}
+
+function generationOptions(map, openSockets, repeatable, maxLevels, random) {
+  const options = [];
+  const inspectTarget = (target) => {
+    for (const definition of repeatable) {
+      if (options.length >= 16) return;
+      for (let rotation = 0; rotation < 4; rotation += 1) {
+        if (options.length >= 16) return;
+        const rotated = rotatePiece(definition, rotation);
+        for (const socket of rotated.sockets) {
+          if (socket.state === 'blocked' || socket.width !== target.width || socket.side !== OPPOSITE[target.side]) continue;
+          const level = target.level - socket.levelDelta;
+          if (level < 0 || level >= maxLevels) continue;
+          const origin = originAtSocket(rotated, socket, target);
+          const candidate = normalizedCandidate(map, { pieceId: definition.id, ...origin, level, rotation });
+          if (placementErrors(map, candidate).length) continue;
+          options.push(candidate);
+        }
+      }
+    }
+  };
+  const sampleSize = Math.min(openSockets.length, 16);
+  for (let sample = 0; sample < sampleSize; sample += 1) {
+    inspectTarget(openSockets[Math.floor(random() * openSockets.length)]);
+    if (options.length) return options;
+  }
+  return options;
 }
 
 function occupiedLevels(placement) {
@@ -395,6 +413,26 @@ export function duplicateEditorPiece(map, id) {
   if (!current) return { ok: false, map, error: { code: 'missing-placement', message: 'Peça não encontrada.' } };
   const definition = rotatePiece(pieceById(current.pieceId), current.rotation);
   return addEditorPiece(map, { ...current, x: current.x + definition.footprint.width + 0.5 });
+}
+
+function openSocketsForGeneration(map) {
+  const edgeClosures = new Set(map.placements.filter((placement) => placement.edge)
+    .map((placement) => `${placement.x}:${placement.z}:${placement.level}:${placement.socketWidth ?? 'narrow'}`));
+  const groups = new Map();
+  for (const placement of map.placements.filter((entry) => !entry.edge)) {
+    const rotated = rotatePiece(pieceById(placement.pieceId), placement.rotation);
+    rotated.sockets.forEach((socket, socketIndex) => {
+      if (socket.state === 'blocked') return;
+      const record = { ...socketWorldPosition(placement, socket), side: socket.side, width: socket.width, placementId: placement.id, socketIndex };
+      const key = `${record.x}:${record.z}:${record.level}:${record.width}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(record);
+    });
+  }
+  return [...groups.entries()].flatMap(([key, records]) => records.filter((record) => {
+    if (edgeClosures.has(key)) return false;
+    return !records.some((other) => other.placementId !== record.placementId && other.side === OPPOSITE[record.side]);
+  }));
 }
 
 function connectionAnalysis(map) {

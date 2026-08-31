@@ -7,10 +7,13 @@
   "scripts": {
     "dev": "node server.mjs",
     "start": "node server.mjs",
+    "build": "vite build && node scripts/create-sites-worker.mjs",
     "test": "node --test test/*.test.mjs",
     "generate:collisions": "node scripts/generate-collision-templates.mjs"
   },
   "devDependencies": {
-    "serve": "^14.2.4"
+    "@openai/sites-vite-plugin": "^0.2.0",
+    "serve": "^14.2.4",
+    "vite": "^8.0.13"
   }
 }

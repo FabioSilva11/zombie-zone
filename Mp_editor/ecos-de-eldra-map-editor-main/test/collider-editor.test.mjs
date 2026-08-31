@@ -7,7 +7,9 @@ import {
   removeEditorCollider,
   serializeEditorMap,
   updateEditorCollider,
+  generateEditorMap,
 } from '../src/map-editor-core.js';
+import { DUNGEON_PIECES } from '../src/dungeon-catalog.js';
 
 const source = {
   version: 1,
@@ -47,4 +49,18 @@ test('serialização preserva colisores personalizados', () => {
   const restored = parseEditorMap(serializeEditorMap(original));
   assert.deepEqual(restored.colliders, original.colliders);
   assert.equal(restored.collisionMode, 'custom');
+});
+
+test('geração respeita os blocos selecionados', () => {
+  const allowedPieceIds = DUNGEON_PIECES.map((piece) => piece.id).filter((id) => id !== 'stairsWide');
+  const map = generateEditorMap(13579, { maxElements: 40, maxLevels: 2, allowedPieceIds });
+  assert.ok(map.placements.every((placement) => allowedPieceIds.includes(placement.pieceId)));
+  assert.equal(map.placements.some((placement) => placement.pieceId === 'stairsWide'), false);
+});
+
+test('geração usa a quantidade pedida como meta sem ultrapassá-la', () => {
+  const target = 100;
+  const map = generateEditorMap(410810572, { maxElements: target, maxLevels: 1 });
+  assert.equal(map.placements.length, target);
+  assert.equal(map.maxElements, target);
 });
