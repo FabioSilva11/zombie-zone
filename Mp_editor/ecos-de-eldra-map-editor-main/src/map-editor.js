@@ -36,6 +36,9 @@ const canvas = document.querySelector('#map-canvas');
 const context = canvas.getContext('2d');
 const palette = document.querySelector('#piece-palette');
 const generationPieces = document.querySelector('#generation-pieces');
+const generateMapButton = document.querySelector('#generate-map');
+const generationLoading = document.querySelector('#generation-loading');
+const generationLoadingMessage = document.querySelector('#generation-loading-message');
 const toastElement = document.querySelector('#toast');
 const preview = createMapPreview(document.querySelector('#map-3d'), (message) => {
   document.querySelector('#preview-status').textContent = message;
@@ -78,6 +81,21 @@ let toastTimer = 0;
 let palettePointerDrag = null;
 let lastPaletteDragEnded = 0;
 let generationAllowedPieceIds = new Set(DUNGEON_PIECES.map((piece) => piece.id));
+let isGeneratingMap = false;
+
+function setMapGenerationLoading(active, message = 'Preparando blocos e calculando encaixes…') {
+  isGeneratingMap = active;
+  generationLoading.hidden = !active;
+  generationLoading.setAttribute('aria-busy', String(active));
+  document.body.classList.toggle('generating', active);
+  generateMapButton.disabled = active;
+  generateMapButton.textContent = active ? 'Gerando…' : 'Gerar mapa';
+  generationLoadingMessage.textContent = message;
+}
+
+function waitForMapGenerationPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 16)));
+}
 
 function selectOnly(id) {
   selectedIds = id ? new Set([id]) : new Set();
@@ -891,11 +909,14 @@ document.querySelector('#new-map').addEventListener('click', () => {
   commit(createEditorMap('Meu mapa modular'), null, null);
   toast('Novo mapa vazio criado');
 });
-document.querySelector('#generate-map').addEventListener('click', () => {
+generateMapButton.addEventListener('click', async () => {
+  if (isGeneratingMap) return;
   const maxElementsInput = document.querySelector('#max-elements');
   const maxElements = Math.max(1, Math.min(500, Math.round(Number(maxElementsInput.value) || 24)));
   const maxLevels = Number(document.querySelector('#max-levels').value) === 1 ? 1 : 2;
   maxElementsInput.value = String(maxElements);
+  setMapGenerationLoading(true, `Gerando até ${maxElements} peças em ${maxLevels} andar${maxLevels > 1 ? 'es' : ''}…`);
+  await waitForMapGenerationPaint();
   try {
     const generated = generateEditorMap(Date.now(), {
       maxElements,
@@ -908,6 +929,8 @@ document.querySelector('#generate-map').addEventListener('click', () => {
     toast(`${generated.placements.length}/${maxElements} peças geradas em até ${maxLevels} andar${maxLevels > 1 ? 'es' : ''}`);
   } catch (error) {
     toast(error.message, true);
+  } finally {
+    setMapGenerationLoading(false);
   }
 });
 document.querySelector('#save-local').addEventListener('click', () => {

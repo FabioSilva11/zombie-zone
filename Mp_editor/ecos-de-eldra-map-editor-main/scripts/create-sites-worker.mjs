@@ -6,6 +6,10 @@ await writeFile(
   new URL('../dist/server/index.js', import.meta.url),
   `export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === '/api/maps') {
+      return Response.json([]);
+    }
     return env.ASSETS.fetch(request);
   },
 };

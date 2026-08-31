@@ -140,6 +140,18 @@
     .toast { position: fixed; left: 50%; bottom: 22px; z-index: 20; transform: translate(-50%, 20px); padding: 11px 16px; border: 1px solid #43506a; border-radius: 11px; background: #171c2c; color: var(--text); box-shadow: 0 12px 45px #0008; opacity: 0; pointer-events: none; transition: .2s ease; font-size: 12px; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
     .toast.error { border-color: #7b3e4c; color: #ffb0bc; }
+    .generation-loading { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgba(5, 7, 14, .68); backdrop-filter: blur(5px); }
+    .generation-loading[hidden] { display: none; }
+    .generation-loading-card { width: min(360px, 100%); padding: 22px; border: 1px solid rgba(99,230,209,.48); border-radius: 16px; background: #121727; box-shadow: 0 24px 80px rgba(0,0,0,.48); }
+    .generation-loading-title { display: flex; align-items: center; gap: 10px; color: #d8fff8; font: 700 18px/1 Rajdhani, sans-serif; letter-spacing: .04em; text-transform: uppercase; }
+    .generation-spinner { width: 19px; height: 19px; flex: 0 0 auto; border: 2px solid rgba(99,230,209,.25); border-top-color: var(--cyan); border-radius: 50%; animation: generation-spin .8s linear infinite; }
+    .generation-loading-card p { margin: 11px 0 15px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .generation-progress { height: 7px; overflow: hidden; border: 1px solid #323a52; border-radius: 999px; background: #0b0e18; }
+    .generation-progress::before { content: ''; display: block; width: 42%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #4eb8f1, var(--cyan), #b995f4); animation: generation-progress 1.05s ease-in-out infinite; }
+    body.generating { cursor: progress; }
+    body.generating .app { pointer-events: none; user-select: none; }
+    @keyframes generation-spin { to { transform: rotate(360deg); } }
+    @keyframes generation-progress { from { transform: translateX(-115%); } to { transform: translateX(255%); } }
     input[type="file"] { display: none; }
     @media (max-width: 1100px) {
       body { overflow: auto; }
@@ -265,6 +277,13 @@
       </aside>
     </section>
   </main>
+  <div id="generation-loading" class="generation-loading" role="status" aria-live="assertive" aria-busy="true" hidden>
+    <div class="generation-loading-card">
+      <div class="generation-loading-title"><span class="generation-spinner" aria-hidden="true"></span>Gerando mapa</div>
+      <p id="generation-loading-message">Preparando blocos e calculando encaixes…</p>
+      <div class="generation-progress" role="progressbar" aria-label="Geração do mapa em andamento"></div>
+    </div>
+  </div>
   <div id="toast" class="toast" role="status"></div>
   <script type="module" src="./src/map-editor.js"></script>
 </body>
