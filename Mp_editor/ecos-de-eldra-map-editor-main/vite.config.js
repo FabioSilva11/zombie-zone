@@ -7,10 +7,10 @@ function copyDungeonAssets() {
   return {
     name: 'copy-dungeon-assets',
     async closeBundle() {
-      const destination = resolve('dist/client/assets');
+      const destination = resolve('dist/client/assets/models');
       await rm(destination, { recursive: true, force: true });
       await mkdir(destination, { recursive: true });
-      await cp(resolve('assets'), destination, { recursive: true });
+      await cp(resolve('assets/models'), destination, { recursive: true });
     },
   };
 }
