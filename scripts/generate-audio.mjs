@@ -96,16 +96,53 @@ function click(data, rate, at, freq, gain = 1) {
   }
 }
 
+// Raspão metálico (pente deslizando, ferrolho correndo).
+function scrape(data, rate, at, length, from, to, gain) {
+  const start = Math.floor(at * rate), n = Math.floor(length * rate);
+  let phase = 0;
+  for (let i = 0; i < n && start + i < data.length; i++) {
+    const t = i / rate, k = t / length;
+    phase += (from + (to - from) * k) / rate;
+    const amp = Math.sin(Math.PI * k) * gain;
+    data[start + i] += (noise() * 0.55 + osc.saw(phase) * 0.25) * amp;
+  }
+}
+
+// Batida grave (pente encaixando na arma).
+function thunk(data, rate, at, freq, gain) {
+  const start = Math.floor(at * rate);
+  for (let i = 0; i < rate * 0.12 && start + i < data.length; i++) {
+    const t = i / rate;
+    data[start + i] += (Math.sin(TAU * freq * t) * 0.9 + noise() * 0.5) * env(t, 0.0008, 0.03) * gain;
+  }
+}
+
+// Recarga do fuzil: trava solta, pente sai raspando, pente novo entra e bate no lugar.
 function reload() {
-  const b = buffer(1.15); const { rate, data } = b;
-  click(data, rate, 0.02, 2200, 0.7);
-  click(data, rate, 0.08, 1400, 0.5);
-  click(data, rate, 0.55, 1800, 0.9);
-  click(data, rate, 0.6, 900, 0.6);
-  click(data, rate, 0.92, 2600, 1.0);
-  click(data, rate, 0.98, 1200, 0.8);
-  highpass(data, rate, 300);
-  return finish(b, 0.8);
+  const b = buffer(1.05); const { rate, data } = b;
+  click(data, rate, 0.02, 2400, 0.8);
+  scrape(data, rate, 0.05, 0.16, 1400, 900, 0.45);
+  thunk(data, rate, 0.24, 160, 0.5);
+  scrape(data, rate, 0.52, 0.12, 900, 1500, 0.4);
+  thunk(data, rate, 0.66, 210, 1.0);
+  click(data, rate, 0.67, 2900, 1.0);
+  click(data, rate, 0.74, 1300, 0.5);
+  highpass(data, rate, 140);
+  return finish(b, 0.9);
+}
+
+// Ferrolho: puxado para trás e solto — o "clac-clac" de arma carregada.
+function rack() {
+  const b = buffer(0.5); const { rate, data } = b;
+  click(data, rate, 0.0, 2000, 0.7);
+  scrape(data, rate, 0.01, 0.1, 1800, 1100, 0.6);
+  thunk(data, rate, 0.11, 240, 0.7);
+  click(data, rate, 0.115, 3400, 0.9);
+  scrape(data, rate, 0.19, 0.06, 1200, 2200, 0.5);
+  thunk(data, rate, 0.25, 300, 1.0);
+  click(data, rate, 0.252, 4200, 1.0);
+  highpass(data, rate, 160);
+  return finish(b, 0.9);
 }
 
 function hit() {
@@ -435,3 +472,4 @@ writeWav('sfx_scream', scream());
 writeWav('sfx_rock', rockThud());
 writeWav('sfx_chest', arpeggio([79, 83, 86, 91, 95, 98], 0.05, 0.22, 'square', 0.9, 0.42));
 writeWav('sfx_spit', spit());
+writeWav('sfx_rack', rack());

@@ -83,6 +83,8 @@ class SaveStore(context: Context) {
             put("leftHanded", s.leftHanded)
             put("playerName", s.playerName)
             put("cinematic", s.cinematic)
+            put("hudLayout", s.hudLayout)
+            put("hudOpacity", s.hudOpacity.toDouble())
         })
     }
 
@@ -163,6 +165,8 @@ class SaveStore(context: Context) {
             t.leftHanded = s.optBoolean("leftHanded", false)
             t.playerName = s.optString("playerName", "")
             t.cinematic = s.optBoolean("cinematic", false)
+            t.hudLayout = s.optString("hudLayout", "")
+            t.hudOpacity = s.optDouble("hudOpacity", 0.85).toFloat().coerceIn(0.3f, 1f)
         }
         return p
     }

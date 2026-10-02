@@ -234,6 +234,43 @@ void Game::requestSupply() {
     ++input_.supplyRequests;
 }
 
+void Game::toggleCrouch() {
+    std::lock_guard<std::mutex> lock(inputMutex_);
+    ++input_.crouchToggles;
+}
+
+void Game::toggleSprint() {
+    std::lock_guard<std::mutex> lock(inputMutex_);
+    ++input_.sprintToggles;
+}
+
+void Game::pressMelee() {
+    std::lock_guard<std::mutex> lock(inputMutex_);
+    ++input_.melees;
+}
+
+void Game::pressGrenade() {
+    std::lock_guard<std::mutex> lock(inputMutex_);
+    ++input_.grenades;
+}
+
+void Game::swapShoulder() {
+    std::lock_guard<std::mutex> lock(inputMutex_);
+    ++input_.shoulderSwaps;
+}
+
+// Copia a entrada do quadro e zera os toques de uso único (o pedido de suprimentos só é zerado
+// quando consumido pela missão, para sobreviver à pausa do anúncio).
+void Game::consumeInput(InputState& in) {
+    std::lock_guard<std::mutex> lock(inputMutex_);
+    in = input_;
+    input_.lookX = input_.lookY = 0;
+    input_.jumps = input_.reloads = 0;
+    input_.previewRotate = 0;
+    input_.supplyRequests = 0;
+    input_.crouchToggles = input_.sprintToggles = input_.melees = input_.grenades = input_.shoulderSwaps = 0;
+}
+
 // ----------------------------------------------------------------------------- quadro
 
 void Game::frame(double now) {
@@ -257,6 +294,7 @@ void Game::frame(double now) {
             std::lock_guard<std::mutex> lock(inputMutex_);
             input_.lookX = input_.lookY = 0;
             input_.jumps = input_.reloads = 0;
+            input_.crouchToggles = input_.sprintToggles = input_.melees = input_.grenades = input_.shoulderSwaps = 0;
         }
     }
     if (!world_.streaming()) world_.rebuildDirty(6);
@@ -272,14 +310,7 @@ void Game::frame(double now) {
 
 void Game::updateLobby(float dt) {
     InputState in;
-    {
-        std::lock_guard<std::mutex> lock(inputMutex_);
-        in = input_;
-        input_.previewRotate = 0;
-        input_.lookX = input_.lookY = 0;
-        input_.jumps = input_.reloads = 0;
-        input_.supplyRequests = 0;
-    }
+    consumeInput(in);
     previewYaw_ += in.previewRotate * 0.012f;
     if (lobbyScreen_ == 0) previewYaw_ = lerpAngle(previewYaw_, 0.0f, damp(1.5f, dt));
     if (playerAsset_) {
@@ -313,14 +344,7 @@ void Game::updateLobby(float dt) {
 
 void Game::updateMission(float dt) {
     InputState in;
-    {
-        std::lock_guard<std::mutex> lock(inputMutex_);
-        in = input_;
-        input_.lookX = input_.lookY = 0;
-        input_.jumps = input_.reloads = 0;
-        input_.previewRotate = 0;
-        input_.supplyRequests = 0;
-    }
+    consumeInput(in);
     aimToggle_ = in.aim;
     if (!victory_) missionTime_ += dt;
 
@@ -423,23 +447,40 @@ void Game::updateCamera(float dt, const InputState& in) {
         camPitch_ += (targetPitch - camPitch_) * pull * 0.35f;
     }
     camPitch_ = clampf(camPitch_, -1.15f, 1.0f);
+    for (int i = 0; i < in.shoulderSwaps; ++i) shoulder_ = -shoulder_;
+    shoulderBlend_ = lerpf(shoulderBlend_, shoulder_, damp(9.0f, dt));
     aimBlend_ = lerpf(aimBlend_, (aimToggle_ && !dead_) ? 1.0f : 0.0f, damp(12.0f, dt));
     recoil_ = lerpf(recoil_, 0.0f, damp(10.0f, dt));
     shake_ = std::max(0.0f, shake_ - dt * 1.8f);
-    fov_ = lerpf(1.0f, 0.68f, aimBlend_);
-    float wantDistance = dead_ ? 5.5f : lerpf(4.9f, 2.4f, aimBlend_);
+    // Ao correr o campo de visão abre um pouco (sensação de velocidade).
+    sprintFov_ = lerpf(sprintFov_, sprinting_ ? 0.07f : 0.0f, damp(4.0f, dt));
+    fov_ = lerpf(1.0f, 0.68f, aimBlend_) + sprintFov_;
+    float wantDistance = dead_ ? 5.5f : lerpf(lerpf(4.9f, 4.3f, crouchBlend_), 2.4f, aimBlend_);
     float shoulder = lerpf(1.0f, 0.78f, aimBlend_);
     float pitch = camPitch_ + recoil_;
     float shakeAmp = shake_ * shake_ * 0.12f;
     float yaw = camYaw_ + std::sin(time_ * 47.0f) * shakeAmp * 0.6f;
     pitch += std::sin(time_ * 39.0f + 1.3f) * shakeAmp * 0.5f;
 
-    Vec3 body = player_.position + Vec3(0, visualStep_, 0);
-    Vec3 head = body + Vec3(0, 1.72f, 0);
-    Vec3 right = rightFromYaw(camYaw_);
+    // O pivô segue o jogador com um atraso mínimo: degraus, pulos e trancos ficam suaves.
+    float horizontal = lengthXZ(player_.velocity);
+    if (player_.onGround && horizontal > 0.5f && !dead_) bobPhase_ += dt * horizontal * 1.7f;
+    float bob = std::sin(bobPhase_ * 2.0f) * (sprinting_ ? 0.045f : 0.02f) * clampf(horizontal / 4.0f, 0.0f, 1.0f) * (1.0f - aimBlend_);
+    Vec3 target = player_.position + Vec3(0, visualStep_ + lerpf(1.72f, 1.2f, crouchBlend_) + bob, 0);
+    if (!camPivotInit_ || length(target - camPivot_) > 4.0f) {
+        camPivot_ = target;
+        camPivotInit_ = true;
+    }
+    camPivot_.x = lerpf(camPivot_.x, target.x, damp(20.0f, dt));
+    camPivot_.z = lerpf(camPivot_.z, target.z, damp(20.0f, dt));
+    camPivot_.y = lerpf(camPivot_.y, target.y, damp(13.0f, dt));
+    Vec3 head = camPivot_;
+    // Ombro da câmera (direito/esquerdo) com transição suave pelo centro.
+    Vec3 right = rightFromYaw(camYaw_) * (shoulderBlend_ >= 0 ? 1.0f : -1.0f);
+    float side = shoulder * std::fabs(shoulderBlend_);
     RayHit hit;
-    if (world_.raycast(head, right, shoulder + 0.25f, hit)) shoulder = std::max(0.0f, hit.distance - 0.25f);
-    Vec3 pivot = head + right * shoulder;
+    if (world_.raycast(head, right, side + 0.25f, hit)) side = std::max(0.0f, hit.distance - 0.25f);
+    Vec3 pivot = head + right * side;
     Vec3 f = cameraDirection(yaw, pitch);
     float allowed = wantDistance;
     if (world_.raycast(pivot, -f, wantDistance + 0.3f, hit)) allowed = std::max(0.3f, hit.distance - 0.3f);
@@ -452,33 +493,79 @@ void Game::updateCamera(float dt, const InputState& in) {
     proj_ = Mat4::perspective(fov_, aspect, 0.08f, 260.0f);
 }
 
+bool Game::canStand() const {
+    const float hw = player_.halfWidth - 1e-3f;
+    Vec3 mn = player_.position + Vec3(-hw, 0.05f, -hw);
+    Vec3 mx = player_.position + Vec3(hw, 1.75f - 1e-3f, hw);
+    return !world_.boxCollides(mn, mx);
+}
+
 void Game::updatePlayer(float dt, const InputState& in) {
     invulnerable_ = std::max(0.0f, invulnerable_ - dt);
     damageFlash_ = std::max(0.0f, damageFlash_ - dt * 1.8f);
     damageDirTimer_ = std::max(0.0f, damageDirTimer_ - dt);
+
+    // Agachar e correr são alternados pelos botões.
+    for (int i = 0; i < in.crouchToggles && !dead_; ++i) {
+        if (crouching_) {
+            if (canStand()) crouching_ = false;
+        } else if (!player_.inWater) {
+            crouching_ = true;
+            sprintLock_ = false;
+        }
+    }
+    for (int i = 0; i < in.sprintToggles && !dead_; ++i) {
+        sprintLock_ = !sprintLock_;
+        if (sprintLock_ && crouching_ && canStand()) crouching_ = false;
+    }
+    if (crouching_ && player_.inWater && canStand()) crouching_ = false;
+    player_.height = crouching_ ? 1.2f : 1.75f;
+    crouchBlend_ = lerpf(crouchBlend_, crouching_ ? 1.0f : 0.0f, damp(12.0f, dt));
+
     float mx = dead_ || victory_ ? 0 : in.moveX, my = dead_ || victory_ ? 0 : in.moveY;
     float mag = std::min(1.0f, std::sqrt(mx * mx + my * my));
-    sprinting_ = mag > 0.9f && aimBlend_ < 0.3f && !in.fire && !firingNow_ && slowed_ <= 0;
-    float speed = kPlayerSpeed * (sprinting_ ? 1.45f : 1.0f) * lerpf(1.0f, 0.6f, aimBlend_) * (player_.inWater ? 0.6f : 1.0f) * (slowed_ > 0 ? 0.55f : 1.0f);
+    // Curva do analógico: precisão em toques leves, velocidade total no fim do curso.
+    float response = mag > 1e-3f ? std::pow(mag, 1.25f) : 0.0f;
+    if (mag < 0.1f) sprintLock_ = false;
+    bool wantSprint = mag > 0.9f || (sprintLock_ && mag > 0.35f);
+    sprinting_ = wantSprint && !crouching_ && aimBlend_ < 0.3f && !in.fire && !firingNow_ && slowed_ <= 0 && meleeTime_ < 0;
+    if (sprinting_ && sprintLock_) response = 1.0f;
+    float speed = kPlayerSpeed * (sprinting_ ? 1.45f : 1.0f) * (crouching_ ? 0.5f : 1.0f) * lerpf(1.0f, 0.6f, aimBlend_) *
+                  (player_.inWater ? 0.6f : 1.0f) * (slowed_ > 0 ? 0.55f : 1.0f);
     Vec3 fwd = forwardFromYaw(camYaw_), right = rightFromYaw(camYaw_);
     Vec3 wish = right * mx + fwd * my;
-    if (lengthXZ(wish) > 1e-3f) wish = normalize(wish) * (mag * speed);
+    if (lengthXZ(wish) > 1e-3f) wish = normalize(wish) * (response * speed);
     // Mar aberto: uma corrente suave leva o jogador de volta à ilha.
     if (island_ && player_.inWater) {
         Vec3 toCenter(kIslandCenter - player_.position.x, 0, kIslandCenter - player_.position.z);
         float d = lengthXZ(toCenter);
         if (d > kIslandRadius + 380.0f) wish += normalize(toCenter) * clampf((d - kIslandRadius - 380.0f) * 0.05f, 0.0f, 3.5f);
     }
-    float accel = player_.onGround || player_.inWater ? 16.0f : 5.0f;
+    // Aceleração: arranca suave, freia firme, vira rápido; pouco controle no ar.
+    Vec3 hv(player_.velocity.x, 0, player_.velocity.z);
+    float accel;
+    if (!player_.onGround && !player_.inWater) accel = 3.5f;
+    else if (lengthXZ(wish) < 0.1f) accel = 14.0f;
+    else if (dot(hv, wish) < 0) accel = 18.0f;
+    else accel = lengthXZ(wish) > lengthXZ(hv) ? 10.0f : 12.0f;
     player_.velocity.x = lerpf(player_.velocity.x, wish.x, damp(accel, dt));
     player_.velocity.z = lerpf(player_.velocity.z, wish.z, damp(accel, dt));
 
-    if (in.jumps > 0 && !dead_) {
-        if (player_.onGround && !player_.inWater) {
-            player_.velocity.y = kJumpVelocity;
-            emitSound(SND_JUMP, player_.position, 0.5f);
+    // Pulo tolerante: vale logo depois de sair da beirada e se apertado um pouco antes de pousar.
+    coyote_ = player_.onGround ? 0.12f : std::max(0.0f, coyote_ - dt);
+    jumpBuffer_ = in.jumps > 0 ? 0.15f : std::max(0.0f, jumpBuffer_ - dt);
+    if (jumpBuffer_ > 0 && !dead_ && !victory_) {
+        if (crouching_) {
+            if (canStand()) crouching_ = false;  // pular levanta
+            jumpBuffer_ = 0;
         } else if (player_.inWater) {
             player_.velocity.y = 5.0f;
+            jumpBuffer_ = 0;
+        } else if (coyote_ > 0 && player_.velocity.y <= 1.0f) {
+            player_.velocity.y = kJumpVelocity;
+            coyote_ = 0;
+            jumpBuffer_ = 0;
+            emitSound(SND_JUMP, player_.position, 0.5f);
         }
     }
     if (player_.inWater) {
@@ -486,7 +573,9 @@ void Game::updatePlayer(float dt, const InputState& in) {
         if (world_.isWaterAt(player_.position + Vec3(0, 1.3f, 0))) player_.velocity.y += 17.0f * dt;
         player_.velocity.y = clampf(player_.velocity.y, -3.0f, 5.0f);
     } else {
-        player_.velocity.y = std::max(-40.0f, player_.velocity.y - kGravity * dt);
+        // Queda um pouco mais pesada que a subida: pulo mais firme, sem "flutuar".
+        float g = player_.velocity.y < 0 ? kGravity * 1.2f : kGravity;
+        player_.velocity.y = std::max(-40.0f, player_.velocity.y - g * dt);
     }
     Vec3 before = player_.position;
     moveBody(world_, player_, player_.velocity * dt, kStepHeight);
@@ -498,6 +587,7 @@ void Game::updatePlayer(float dt, const InputState& in) {
     if (player_.position.y < 1.0f) {
         player_.position = layout_.start;
         player_.velocity = {};
+        camPivotInit_ = false;
     }
     if (!dead_) distance_ += distXZ(before, player_.position);
 
@@ -505,26 +595,34 @@ void Game::updatePlayer(float dt, const InputState& in) {
     if (player_.onGround && horizontal > 1.0f && !player_.inWater) {
         stepTimer_ -= dt * horizontal / 4.2f;
         if (stepTimer_ <= 0) {
-            stepTimer_ = 0.42f;
-            emitSound(SND_STEP, player_.position, 0.35f);
+            stepTimer_ = crouching_ ? 0.6f : 0.42f;
+            emitSound(SND_STEP, player_.position, crouching_ ? 0.18f : 0.35f);
         }
     }
-    bool combat = aimBlend_ > 0.3f || in.fire || firingNow_;
+    bool combat = aimBlend_ > 0.3f || in.fire || firingNow_ || meleeTime_ >= 0;
     if (combat) playerYaw_ = camYaw_;
     else if (horizontal > 0.6f) playerYaw_ = yawFromDirection(player_.velocity.x, player_.velocity.z);
-    playerModelYaw_ = lerpAngle(playerModelYaw_, playerYaw_, damp(combat ? 22.0f : 12.0f, dt));
+    float prevYaw = playerModelYaw_;
+    playerModelYaw_ = lerpAngle(playerModelYaw_, playerYaw_, damp(combat ? 22.0f : 13.0f, dt));
+    // Inclina o corpo para dentro das curvas.
+    float turnRate = wrapAngle(playerModelYaw_ - prevYaw) / std::max(dt, 1e-3f);
+    float lean = clampf(turnRate * horizontal * 0.012f, -0.16f, 0.16f) * (crouching_ ? 0.3f : 1.0f);
+    leanRoll_ = lerpf(leanRoll_, player_.onGround ? lean : 0.0f, damp(8.0f, dt));
 
     if (playerAsset_) {
         const CharacterModel& m = playerAsset_->model;
         if (dead_) {
             int die = m.clipIndex("die");
             if (playerAnim_.clip() != die) playerAnim_.play(die, false, 0.1f);
+        } else if (crouching_) {
+            if (horizontal > 0.4f) playerAnim_.play(m.clipIndex("walk"), true, 0.18f, std::max(0.5f, horizontal / 2.2f));
+            else playerAnim_.play(m.clipIndex("idle"), true, 0.22f);
         } else if (horizontal > 5.4f) {
-            playerAnim_.play(m.clipIndex("sprint"), true, 0.15f, horizontal / 6.0f);
+            playerAnim_.play(m.clipIndex("sprint"), true, 0.18f, horizontal / 6.0f);
         } else if (horizontal > 0.5f) {
-            playerAnim_.play(m.clipIndex("walk"), true, 0.15f, std::max(0.6f, horizontal / 3.6f));
+            playerAnim_.play(m.clipIndex("walk"), true, 0.18f, std::max(0.6f, horizontal / 3.6f));
         } else {
-            playerAnim_.play(m.clipIndex("idle"), true, 0.2f);
+            playerAnim_.play(m.clipIndex("idle"), true, 0.22f);
         }
         playerAnim_.update(dt);
     }
@@ -538,17 +636,43 @@ void Game::updateWeapon(float dt, const InputState& in) {
     comboTimer_ = std::max(0.0f, comboTimer_ - dt);
     if (comboTimer_ <= 0) combo_ = 0;
 
-    if (in.reloads > 0 && ammo_ < config_.magazine && reloadTimer_ <= 0) {
+    emptyClick_ = std::max(0.0f, emptyClick_ - dt);
+    auto startReload = [&]() {
         reloadTimer_ = reloadDuration_;
-        emitSound(SND_RELOAD, player_.position, 0.8f);
-    }
+        rackPlayed_ = false;
+        emitSound(SND_RELOAD, player_.position, 0.9f);  // pente saindo e entrando
+    };
+    if (in.reloads > 0 && ammo_ < config_.magazine && reloadTimer_ <= 0 && meleeTime_ < 0) startReload();
     if (reloadTimer_ > 0) {
         reloadTimer_ -= dt;
+        if (!rackPlayed_ && reloadTimer_ <= reloadDuration_ * 0.3f) {
+            rackPlayed_ = true;
+            emitSound(SND_RACK, player_.position, 0.9f);  // ferrolho puxado: arma carregada
+        }
         if (reloadTimer_ <= 0) {
             reloadTimer_ = 0;
             ammo_ = config_.magazine;
         }
     }
+
+    // Faca (corpo a corpo) e granada.
+    meleeCooldown_ = std::max(0.0f, meleeCooldown_ - dt);
+    grenadeCooldown_ = std::max(0.0f, grenadeCooldown_ - dt);
+    if (meleeTime_ >= 0) {
+        meleeTime_ += dt;
+        if (!meleeDone_ && meleeTime_ >= 0.13f) {
+            meleeDone_ = true;
+            meleeHit();
+        }
+        if (meleeTime_ > 0.38f) meleeTime_ = -1;
+    }
+    if (in.melees > 0 && meleeCooldown_ <= 0 && mode_ == Mode::Mission) {
+        meleeTime_ = 0;
+        meleeDone_ = false;
+        meleeCooldown_ = 0.55f;
+        emitSound(SND_KNIFE, player_.position, 0.6f);
+    }
+    if (in.grenades > 0 && grenades_ > 0 && grenadeCooldown_ <= 0 && mode_ == Mode::Mission) throwGrenade();
 
     // Alvo da mira assistida: zumbi vivo mais próximo do centro da tela.
     assistTarget_ = -1;
@@ -590,17 +714,72 @@ void Game::updateWeapon(float dt, const InputState& in) {
         autoTrigger = assistAngle_ < 0.035f && distXZ(z.body.position, player_.position) < 42.0f;
     }
     bool trigger = in.fire || autoTrigger;
-    if (trigger && ammo_ == 0 && reloadTimer_ <= 0) {
-        reloadTimer_ = reloadDuration_;
-        emitSound(SND_RELOAD, player_.position, 0.8f);
+    if (trigger && ammo_ == 0 && reloadTimer_ <= 0 && meleeTime_ < 0) {
+        if (emptyClick_ <= 0) {
+            emitSound(SND_EMPTY, player_.position, 0.8f);  // clique de arma vazia
+            emptyClick_ = 0.35f;
+        }
+        startReload();
     }
-    firingNow_ = trigger && ammo_ > 0 && reloadTimer_ <= 0;
+    firingNow_ = trigger && ammo_ > 0 && reloadTimer_ <= 0 && meleeTime_ < 0;
     int fired = 0;
     while (firingNow_ && fireCooldown_ <= 0 && fired < 3 && ammo_ > 0) {
         fireShot();
         fireCooldown_ += kFireInterval;
         ++fired;
     }
+}
+
+void Game::meleeHit() {
+    Vec3 fwd = forwardFromYaw(camYaw_);
+    float power = config_.power * config_.boostDamage * (damageBoost_ > 0 ? 1.5f : 1.0f);
+    bool any = false;
+    for (Zombie& z : zombies_) {
+        if (z.state == ZState::Dead) continue;
+        Vec3 d = z.body.position - player_.position;
+        float dist = lengthXZ(d);
+        if (dist > 2.4f + 0.3f * z.scale || std::fabs(d.y) > 1.8f) continue;
+        Vec3 dir = dist > 0.05f ? Vec3(d.x, 0, d.z) / dist : fwd;
+        if (dot(dir, fwd) < 0.3f && dist > 0.9f) continue;
+        z.stun = std::max(z.stun, 0.45f);
+        z.action = ZAction::None;
+        z.body.velocity += dir * 5.0f + Vec3(0, 2.0f, 0);
+        damageZombie(z, 55.0f * power, false, dir, z.body.position + Vec3(0, zombieHeight(z) * 0.6f, 0));
+        any = true;
+    }
+    Vec3 chest = player_.position + Vec3(0, 1.2f, 0);
+    for (size_t i = 0; i < nests_.size(); ++i) {
+        if (nests_[i].destroyed || length(nests_[i].core - chest) > 2.8f) continue;
+        damageNest(static_cast<int>(i), 40.0f * power, nests_[i].core);
+        any = true;
+    }
+    if (any) {
+        hitMark_ = 0.18f;
+        headshotMark_ = false;
+        shake_ = std::max(shake_, 0.2f);
+    }
+}
+
+void Game::throwGrenade() {
+    --grenades_;
+    grenadeCooldown_ = 0.8f;
+    Vec3 hand = player_.position + Vec3(0, 1.6f - 0.45f * crouchBlend_, 0) + rightFromYaw(camYaw_) * 0.35f;
+    Vec3 target = camPos_ + camForward_ * 38.0f;
+    RayHit wh;
+    if (world_.raycast(camPos_, camForward_, 38.0f, wh)) target = camPos_ + camForward_ * wh.distance;
+    float t = clampf(distXZ(hand, target) / 17.0f, 0.35f, 1.5f);
+    Projectile p;
+    p.kind = ProjectileKind::Grenade;
+    p.pos = hand;
+    p.target = target;
+    p.gravity = 22.0f;
+    p.life = 3.0f;
+    Vec3 d = target - hand;
+    p.vel = {d.x / t, (d.y + 0.5f * p.gravity * t * t) / t, d.z / t};
+    p.damage = 200.0f * config_.power * config_.boostDamage;
+    projectiles_.push_back(p);
+    playerYaw_ = camYaw_;
+    emitSound(SND_THROW, hand, 0.8f);
 }
 
 void Game::fireShot() {
@@ -827,6 +1006,7 @@ void Game::updatePickups(float dt) {
                 ammo_ = config_.magazine;
                 reloadTimer_ = 0;
                 damageBoost_ = 45.0f;
+                grenades_ = std::max(grenades_, 3);
                 burning_ = bleeding_ = poisoned_ = slowed_ = 0;
                 labels_.push_back({p.position, static_cast<int>(std::lround(heal)), 3, 0.9f});
                 emit(EV_SUPPLY, 1);
@@ -915,14 +1095,14 @@ void Game::updateEffects(float dt) {
 
 // ----------------------------------------------------------------------------- cena
 
-void Game::addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float scale, const Pose& pose, const Vec3& tint, float flash, const Vec3& scaleXYZ) {
+void Game::addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float scale, const Pose& pose, const Vec3& tint, float flash, const Vec3& scaleXYZ, float roll) {
     if (!asset) return;
     if (scene_.characterCount >= scene_.characters.size()) scene_.characters.emplace_back();
     CharacterDraw& draw = scene_.characters[scene_.characterCount++];
     draw.asset = asset;
     float s = scale * 1.8f / std::max(0.1f, asset->model.bindHeight());
-    draw.world = Mat4::translation(pos) * Mat4::rotationY(modelRotationFromYaw(yaw)) * Mat4::scale({s * scaleXYZ.x, s * scaleXYZ.y, s * scaleXYZ.z}) *
-                 Mat4::translation({0, -asset->model.bindMinY(), 0});
+    draw.world = Mat4::translation(pos) * Mat4::rotationY(modelRotationFromYaw(yaw)) * Mat4::rotationZ(roll) *
+                 Mat4::scale({s * scaleXYZ.x, s * scaleXYZ.y, s * scaleXYZ.z}) * Mat4::translation({0, -asset->model.bindMinY(), 0});
     asset->model.globals(pose, draw.nodes);
     draw.tint = tint;
     draw.flash = flash;
@@ -930,10 +1110,38 @@ void Game::addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float
     draw.alpha = 1.0f;
 }
 
+void Game::poseCrouch(Pose& pose, const CharacterModel& m, float blend, float moving) {
+    if (blend <= 0.01f) return;
+    // Joelho no chão: uma perna à frente, outra atrás, tronco levemente inclinado.
+    int legL = m.nodeIndex("leg-left"), legR = m.nodeIndex("leg-right"), torso = m.nodeIndex("torso");
+    float step = std::sin(time_ * 7.0f) * 0.25f * moving;
+    if (legL >= 0) pose.r[legL] = slerp(pose.r[legL], Quat::axisAngle({1, 0, 0}, -0.95f + step), blend);
+    if (legR >= 0) pose.r[legR] = slerp(pose.r[legR], Quat::axisAngle({1, 0, 0}, 0.8f - step), blend);
+    if (torso >= 0) pose.r[torso] = slerp(pose.r[torso], pose.r[torso] * Quat::axisAngle({1, 0, 0}, 0.12f), blend);
+}
+
 void Game::posePlayer(Pose& pose, bool armed) {
-    if (!playerAsset_ || !armed || dead_) return;
+    if (!playerAsset_ || dead_) return;
+    const CharacterModel& m = playerAsset_->model;
     bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
-    poseArmed(pose, playerAsset_->model, playing ? camPitch_ : -0.3f, playing);
+    if (playing) poseCrouch(pose, m, crouchBlend_, clampf(lengthXZ(player_.velocity) / 2.0f, 0.0f, 1.0f));
+    if (!armed) return;
+    float pitch = playing ? camPitch_ : -0.3f;
+    poseArmed(pose, m, pitch, playing);
+    if (!playing) return;
+    int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left");
+    if (reloadTimer_ > 0) {
+        // Recarga: a arma desce e gira, a mão esquerda vai ao pente e volta.
+        float k = 1.0f - reloadTimer_ / std::max(0.01f, reloadDuration_);
+        float dip = std::sin(k * kPi);
+        if (armR >= 0) pose.r[armR] = Quat::axisAngle({0, 0, 1}, -0.35f * dip) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - pitch * 0.85f + 0.75f * dip);
+        if (armL >= 0) pose.r[armL] = Quat::axisAngle({0, 1, 0}, -0.3f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.25f - 0.5f * std::sin(k * kTwoPi));
+    }
+    if (meleeTime_ >= 0 && armR >= 0) {
+        // Golpe de faca: o braço sobe e corta para a frente.
+        float k = clampf(meleeTime_ / 0.3f, 0.0f, 1.0f);
+        pose.r[armR] = Quat::axisAngle({0, 1, 0}, 0.5f - 1.1f * k) * Quat::axisAngle({1, 0, 0}, lerpf(-kPi * 1.0f, -kPi * 0.3f, k));
+    }
 }
 
 void Game::poseArmed(Pose& pose, const CharacterModel& m, float pitch, bool moveHead) {
@@ -1033,14 +1241,31 @@ void Game::buildScene() {
         playerAnim_.evaluate(playerAsset_->model, scratchPose_);
         bool armed = mode_ == Mode::Mission || mode_ == Mode::Pvp || lobbyScreen_ == 0;
         posePlayer(scratchPose_, armed);
-        Vec3 pos = player_.position + Vec3(0, visualStep_, 0);
+        bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
+        Vec3 pos = player_.position + Vec3(0, visualStep_ - (playing ? 0.22f * crouchBlend_ : 0.0f), 0);
         float yaw = mode_ == Mode::Lobby ? kPi + previewYaw_ : playerModelYaw_;
         float flash = invulnerable_ > 0 && damageFlash_ > 0.6f ? 0.45f : 0.0f;
-        addCharacter(playerAsset_, pos, yaw, 1.0f, scratchPose_, {1, 1, 1}, flash);
+        addCharacter(playerAsset_, pos, yaw, 1.0f, scratchPose_, {1, 1, 1}, flash, Vec3(1, 1, 1), playing ? leanRoll_ : 0.0f);
         CharacterDraw& draw = scene_.characters[scene_.characterCount - 1];
-        s.shadows.push_back({pos, 0.55f, 0.32f});
+        s.shadows.push_back({player_.position, 0.55f, 0.32f});
         int armR = playerAsset_->model.nodeIndex("arm-right");
-        if (armed && armR >= 0 && !dead_) addRifle(draw, armR, &muzzlePos_);
+        if (armed && armR >= 0 && !dead_) {
+            if (meleeTime_ >= 0) {
+                // Durante o golpe a mão direita segura a faca.
+                Mat4 hand = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -0.85f, 0.05f}) * Mat4::rotationX(kPi * 0.5f);
+                BoxDraw grip;
+                grip.world = hand * Mat4::translation({0, 0, 0.08f}) * Mat4::scale({0.09f, 0.09f, 0.24f});
+                grip.color = {0.3f, 0.2f, 0.12f, 1};
+                s.boxes.push_back(grip);
+                BoxDraw blade;
+                blade.world = hand * Mat4::translation({0, 0.02f, 0.42f}) * Mat4::scale({0.03f, 0.13f, 0.46f});
+                blade.color = {0.85f, 0.88f, 0.92f, 1};
+                blade.emissive = 0.2f;
+                s.boxes.push_back(blade);
+            } else {
+                addRifle(draw, armR, &muzzlePos_);
+            }
+        }
     }
 
     // Jogadores remotos (PvP).
@@ -1050,9 +1275,11 @@ void Game::buildScene() {
             if (!r.present || !r.asset || !net_.player(i).active) continue;
             if (length(r.renderPos - camPos_) > s.drawDistance) continue;
             r.anim.evaluate(r.asset->model, scratchPose_);
+            bool crouched = r.alive && (r.flags & NF_CROUCH);
+            if (crouched) poseCrouch(scratchPose_, r.asset->model, 1.0f, clampf(r.speed / 2.0f, 0.0f, 1.0f));
             if (r.alive) poseArmed(scratchPose_, r.asset->model, r.renderPitch, true);
             float flash = net_.player(i).invulnerable > 0 && std::fmod(time_, 0.3f) < 0.15f ? 0.25f : 0.0f;
-            addCharacter(r.asset, r.renderPos, r.renderYaw, 1.0f, scratchPose_, {1, 1, 1}, flash);
+            addCharacter(r.asset, r.renderPos - Vec3(0, crouched ? 0.22f : 0.0f, 0), r.renderYaw, 1.0f, scratchPose_, {1, 1, 1}, flash);
             CharacterDraw& draw = scene_.characters[scene_.characterCount - 1];
             int armR = r.asset->model.nodeIndex("arm-right");
             if (r.alive && armR >= 0) {
@@ -1212,6 +1439,12 @@ void Game::buildScene() {
                 s.particles.push_back({p.pos - normalize(p.vel) * 0.3f, {0.4f, 0.8f, 0.2f, 0.6f}, 0.4f, true});
                 s.decals.push_back({p.target, 2.0f, {0.5f, 1.0f, 0.2f, 0.8f}, 1});
                 break;
+            case ProjectileKind::Grenade:
+                b.world = Mat4::translation(p.pos) * Mat4::rotationX(p.spin) * Mat4::rotationZ(p.spin * 0.6f) * Mat4::scale({0.22f, 0.26f, 0.22f});
+                b.color = {0.28f, 0.34f, 0.18f, 1};
+                s.boxes.push_back(b);
+                s.decals.push_back({p.target, 5.0f, {1.0f, 0.85f, 0.3f, 0.55f}, 1});
+                break;
             case ProjectileKind::Knife: {
                 Vec3 d = normalize(p.vel);
                 float yaw = std::atan2(d.x, d.z);
@@ -1293,6 +1526,15 @@ void Game::resetPlayerState(const Vec3& position, float yaw, float health, int m
     distance_ = 0;
     chestsOpened_ = chestDiamonds_ = 0;
     seenKinds_ = 0;
+    crouching_ = sprintLock_ = false;
+    crouchBlend_ = leanRoll_ = sprintFov_ = 0;
+    player_.height = 1.75f;
+    meleeTime_ = -1;
+    meleeCooldown_ = grenadeCooldown_ = emptyClick_ = 0;
+    coyote_ = jumpBuffer_ = 0;
+    camPivotInit_ = false;
+    rackPlayed_ = true;
+    grenades_ = 3;
     pickups_.clear();
     particles_.clear();
     labels_.clear();
@@ -1352,6 +1594,7 @@ void Game::startPvp(const PvpConfig& c) {
     Vec3 spawn = layout_.spawnPoints.empty() ? layout_.start : layout_.spawnPoints[static_cast<size_t>(c.localId) % layout_.spawnPoints.size()];
     Vec3 toCenter = Vec3(world_.width() * 0.5f, 0, world_.depth() * 0.5f) - spawn;
     resetPlayerState(spawn, yawFromDirection(toCenter.x, toCenter.z), 100, 30);
+    grenades_ = 0;  // PvP: sem granadas
     invulnerable_ = 2.0f;
     playerAsset_ = character(config_.skin);
     playerAnim_ = Animator();
@@ -1394,14 +1637,7 @@ void Game::startPvp(const PvpConfig& c) {
 
 void Game::updatePvp(float dt) {
     InputState in;
-    {
-        std::lock_guard<std::mutex> lock(inputMutex_);
-        in = input_;
-        input_.lookX = input_.lookY = 0;
-        input_.jumps = input_.reloads = 0;
-        input_.previewRotate = 0;
-        input_.supplyRequests = 0;
-    }
+    consumeInput(in);
     aimToggle_ = in.aim;
     missionTime_ += dt;
 
@@ -1420,6 +1656,8 @@ void Game::updatePvp(float dt) {
             Vec3 spawn = layout_.spawnPoints.empty() ? layout_.start : layout_.spawnPoints[me.spawnIndex % layout_.spawnPoints.size()];
             player_.position = spawn;
             player_.velocity = {};
+            camPivotInit_ = false;
+            crouching_ = false;
             dead_ = false;
             invulnerable_ = 2.0f;
             ammo_ = config_.magazine;
@@ -1456,6 +1694,7 @@ void Game::updatePvp(float dt) {
     if (firingNow_) flags |= NF_FIRING;
     if (aimBlend_ > 0.5f) flags |= NF_AIM;
     if (player_.inWater) flags |= NF_WATER;
+    if (crouching_) flags |= NF_CROUCH;
     net_.setLocalState(player_.position, playerModelYaw_, camPitch_, flags, horizontal);
 
     netEvents_.clear();
@@ -1616,6 +1855,11 @@ void Game::publishHud() {
     h[H_FPS] = fps_;
     h[H_CRYSTAL_TOTAL] = static_cast<float>(nests_.empty() ? config_.crystalTotal : static_cast<int>(nests_.size()));
     h[H_COMBO] = static_cast<float>(combo_);
+    h[H_CROUCH] = crouching_ ? 1.0f : 0.0f;
+    h[H_SHOULDER] = shoulder_;
+    h[H_SPRINT_LOCK] = sprintLock_ ? 1.0f : 0.0f;
+    h[H_GRENADES] = mode_ == Mode::Mission ? static_cast<float>(grenades_) : -1.0f;
+    h[H_MELEE] = mode_ == Mode::Mission ? meleeCooldown_ / 0.55f : -1.0f;
 
     // Inimigos para o minimapa: os mais próximos primeiro.
     static std::vector<std::pair<float, const Zombie*>> near;

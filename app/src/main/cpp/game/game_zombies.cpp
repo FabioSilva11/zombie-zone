@@ -249,8 +249,9 @@ void Game::updateZombie(Zombie& z, size_t index, float dt) {
         z.perceptionTimer = 0.25f + static_cast<float>(index % 5) * 0.02f;
         float sight = theme_.sky.night > 0.5f ? 14.0f : 21.0f;
         if (isRanged(z.kind)) sight += 6.0f;
+        if (crouching_) sight *= 0.6f;  // agachado: furtivo
         z.canSee = dist < sight + 10.0f && world_.lineOfSight(pos + Vec3(0, 1.5f * z.scale, 0), player_.position + Vec3(0, 1.5f, 0));
-        if (!z.alerted && !dead_ && ((z.canSee && dist < sight) || dist < 6.5f)) {
+        if (!z.alerted && !dead_ && ((z.canSee && dist < sight) || dist < (crouching_ ? 3.5f : 6.5f))) {
             z.alerted = true;
             z.lostSight = 0;
             emitSound(SND_GROAN, pos, 0.8f);
@@ -577,6 +578,7 @@ void Game::throwProjectile(Zombie& z, ProjectileKind kind) {
         case ProjectileKind::Molotov: p.damage = z.damage * 0.6f; break;
         case ProjectileKind::Acid: p.damage = z.damage * 0.6f; break;
         case ProjectileKind::Knife: p.damage = z.damage * 0.9f; break;
+        case ProjectileKind::Grenade: p.damage = z.damage; break;  // zumbis não usam granadas
     }
     projectiles_.push_back(p);
     emitSound(kind == ProjectileKind::Acid ? SND_SPIT : SND_THROW, hand, 0.8f);
@@ -590,7 +592,7 @@ void Game::updateProjectiles(float dt) {
         p.vel.y -= p.gravity * dt;
         Vec3 to = from + p.vel * dt;
         bool hitPlayer = false;
-        if (!dead_) {
+        if (!dead_ && p.kind != ProjectileKind::Grenade) {
             for (int s = 1; s <= 3; ++s) {
                 Vec3 q = lerp(from, to, s / 3.0f);
                 if (q.y > player_.position.y - 0.1f && q.y < player_.position.y + 1.85f && distXZ(q, player_.position) < 0.55f) {
@@ -609,6 +611,16 @@ void Game::updateProjectiles(float dt) {
             to = from + normalize(seg) * std::max(0.0f, wh.distance - 0.05f);
         }
         bool water = !hitPlayer && world_.isWaterAt(to);
+        bool hitZombie = false;
+        if (p.kind == ProjectileKind::Grenade) {
+            for (const Zombie& z : zombies_) {
+                if (z.state == ZState::Dead) continue;
+                if (length(z.body.position + Vec3(0, 0.9f * z.scale, 0) - to) < 0.8f * z.scale + 0.3f) {
+                    hitZombie = true;
+                    break;
+                }
+            }
+        }
         p.pos = to;
         if (p.kind == ProjectileKind::Acid && rng_.chance(dt * 30.0f) && particles_.size() < 820) {
             FxParticle t;
@@ -620,8 +632,8 @@ void Game::updateProjectiles(float dt) {
             t.additive = true;
             particles_.push_back(t);
         }
-        if (hitPlayer || hitWorld || water || p.life <= 0 || p.pos.y < 0) {
-            if (water) {
+        if (hitPlayer || hitWorld || water || hitZombie || p.life <= 0 || p.pos.y < 0) {
+            if (water && p.kind != ProjectileKind::Grenade) {
                 spawnBurst(p.pos, {0.6f, 0.75f, 1.0f, 0.8f}, 10, 3.0f, 0.15f, false, 9.0f);
                 emitSound(SND_SPLASH, p.pos, 0.5f);
             } else {
@@ -673,6 +685,9 @@ void Game::impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer)
             if (distXZ(at, player_.position) < 6.0f) shake_ = std::max(shake_, 0.3f);
             break;
         }
+        case ProjectileKind::Grenade:
+            explode(at + Vec3(0, 0.3f, 0), 5.0f, 28.0f, p.damage, false);
+            break;
         case ProjectileKind::Acid: {
             Hazard h;
             h.kind = 1;

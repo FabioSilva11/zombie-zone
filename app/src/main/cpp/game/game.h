@@ -91,6 +91,11 @@ struct InputState {
     int reloads = 0;
     float previewRotate = 0;
     int supplyRequests = 0;
+    int crouchToggles = 0;
+    int sprintToggles = 0;
+    int melees = 0;
+    int grenades = 0;
+    int shoulderSwaps = 0;
 };
 
 // Tipos de zumbi (cada um com habilidade própria). A ordem espelha ZombieKinds no Kotlin.
@@ -177,7 +182,7 @@ struct Pickup {
     bool taken = false;
 };
 
-enum class ProjectileKind { Rock, Molotov, Acid, Knife };
+enum class ProjectileKind { Rock, Molotov, Acid, Knife, Grenade };
 
 struct Projectile {
     ProjectileKind kind = ProjectileKind::Rock;
@@ -287,6 +292,11 @@ public:
     void pressReload();
     void rotatePreview(float dx);
     void requestSupply();
+    void toggleCrouch();
+    void toggleSprint();
+    void pressMelee();
+    void pressGrenade();
+    void swapShoulder();
 
     // Saídas (qualquer thread)
     void copyHud(float* out, int count);
@@ -318,6 +328,10 @@ private:
     void updateCamera(float dt, const InputState& in);
     void updateWeapon(float dt, const InputState& in);
     void fireShot();
+    void meleeHit();
+    void throwGrenade();
+    bool canStand() const;
+    void consumeInput(InputState& in);
     void damagePlayer(float amount, const Vec3& from);
     void damageOverTime(float amount);
     void updateStatus(float dt);
@@ -362,7 +376,8 @@ private:
     void addZombieVisuals(const Zombie& z, const CharacterDraw& draw);
 
     void buildScene();
-    void addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float scale, const Pose& pose, const Vec3& tint, float flash, const Vec3& scaleXYZ = Vec3(1, 1, 1));
+    void addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float scale, const Pose& pose, const Vec3& tint, float flash, const Vec3& scaleXYZ = Vec3(1, 1, 1), float roll = 0);
+    void poseCrouch(Pose& pose, const CharacterModel& model, float blend, float moving);
     void posePlayer(Pose& pose, bool armed);
     void poseZombie(Pose& pose, const Zombie& z, const CharacterModel& model, float t);
     void publishHud();
@@ -422,6 +437,23 @@ private:
     float shake_ = 0;
     float distance_ = 0;
     Vec3 lastPlayerPos_;
+    // Movimento e controles completos
+    bool crouching_ = false;
+    float crouchBlend_ = 0;
+    bool sprintLock_ = false;
+    float shoulder_ = 1.0f, shoulderBlend_ = 1.0f;
+    float coyote_ = 0, jumpBuffer_ = 0;
+    float leanRoll_ = 0;
+    float meleeCooldown_ = 0, meleeTime_ = -1;
+    bool meleeDone_ = false;
+    int grenades_ = 0;
+    float grenadeCooldown_ = 0;
+    float emptyClick_ = 0;
+    bool rackPlayed_ = false;
+    Vec3 camPivot_;
+    bool camPivotInit_ = false;
+    float sprintFov_ = 0;
+    float bobPhase_ = 0;
 
     // Arma
     int ammo_ = 30;

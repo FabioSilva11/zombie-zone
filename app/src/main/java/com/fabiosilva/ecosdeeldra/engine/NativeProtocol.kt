@@ -103,6 +103,11 @@ object Hud {
     const val NEST_NEAR = 539
     const val SUPPLY_X = 540
     const val SUPPLY_Z = 541
+    const val CROUCH = 542
+    const val GRENADES = 543 // -1 = sem granadas (PvP)
+    const val MELEE = 544    // recarga da faca 0..1, -1 = indisponível
+    const val SHOULDER = 545
+    const val SPRINT_LOCK = 546
     const val SIZE = 560
 }
 
@@ -167,7 +172,8 @@ object Snd {
     const val ROCK = 20
     const val CHEST = 21
     const val SPIT = 22
-    const val COUNT = 23
+    const val RACK = 23
+    const val COUNT = 24
 }
 
 object Res {

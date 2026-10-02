@@ -62,6 +62,7 @@ class GameAudio(private val context: Context) {
         engineSounds[Snd.ROCK] = load(R.raw.sfx_rock)
         engineSounds[Snd.CHEST] = load(R.raw.sfx_chest)
         engineSounds[Snd.SPIT] = load(R.raw.sfx_spit)
+        engineSounds[Snd.RACK] = load(R.raw.sfx_rack)
         groanAlt = load(R.raw.sfx_groan2)
         ui["click"] = load(R.raw.ui_click)
         ui["reward"] = load(R.raw.sfx_reward)
@@ -75,7 +76,7 @@ class GameAudio(private val context: Context) {
         if (sound !in engineSounds.indices || sfxVolume <= 0f) return
         val now = SystemClock.uptimeMillis()
         // Evita empilhar o mesmo som no mesmo instante (ex.: rajada + vários impactos).
-        val minGap = when (sound) { Snd.SHOT -> 45L; Snd.STEP -> 120L; Snd.GROAN -> 350L; Snd.EXPLOSION -> 90L; Snd.FIRE -> 120L; else -> 30L }
+        val minGap = when (sound) { Snd.SHOT -> 45L; Snd.STEP -> 120L; Snd.GROAN -> 350L; Snd.EXPLOSION -> 90L; Snd.FIRE -> 120L; Snd.RELOAD, Snd.RACK -> 250L; Snd.EMPTY -> 200L; else -> 30L }
         if (now - lastPlayed[sound] < minGap) return
         lastPlayed[sound] = now
         val v = (volume / 100f).coerceIn(0f, 1f) * sfxVolume

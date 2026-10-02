@@ -41,6 +41,11 @@ object NativeBridge {
     external fun pressJump()
     external fun pressReload()
     external fun requestSupply()
+    external fun toggleCrouch()
+    external fun toggleSprint()
+    external fun pressMelee()
+    external fun pressGrenade()
+    external fun swapShoulder()
 
     // Saídas
     external fun copyHud(out: FloatArray)

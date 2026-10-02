@@ -27,6 +27,8 @@ enum HudIndex {
     H_OBJ_COUNT = 500, H_OBJ = 501,               // (x, z, estado, sx, sy, na tela) x 4 — estado: 1 ninho, 2 destruído, 3 portal fechado, 4 portal aberto
     H_NESTS_DONE = 525, H_NEST_TOTAL, H_NEST_HP, H_BURNING, H_BLEEDING, H_POISON, H_SLOWED, H_BOOST,
     H_SUPPLY, H_DISTANCE, H_CHESTS, H_CHEST_DIAMONDS, H_ISLAND, H_SHAKE, H_NEST_NEAR, H_SUPPLY_X, H_SUPPLY_Z,
+    // Controles completos
+    H_CROUCH = 542, H_GRENADES, H_MELEE, H_SHOULDER, H_SPRINT_LOCK,
     H_SIZE = 560
 };
 constexpr int kHudPvpStride = 11;
@@ -59,7 +61,7 @@ enum EventType {
     EV_PVP_END = 12,      // a = vencedor
     EV_PVP_LOST = 13,     // conexão com o anfitrião perdida
     EV_NEST_DESTROYED = 14, // a = índice do ninho
-    EV_CHEST = 15,        // a = diamantes
+    EV_CHEST = 15,        // a = diamantes, b = 1 se veio granada
     EV_POI = 16,          // a = tipo do local descoberto
     EV_SUPPLY = 17,       // a = 0 lançado, 1 coletado
     EV_ELITE = 18,        // a = tipo, b = mutações
@@ -71,7 +73,7 @@ enum EventType {
 enum SoundId {
     SND_SHOT = 0, SND_RELOAD, SND_HIT, SND_HEADSHOT, SND_GROAN, SND_ZOMBIE_DIE, SND_HURT, SND_PICKUP,
     SND_PORTAL, SND_JUMP, SND_STEP, SND_EMPTY, SND_SPLASH, SND_ZOMBIE_ATTACK, SND_HEAL,
-    SND_THROW, SND_FIRE, SND_EXPLOSION, SND_KNIFE, SND_SCREAM, SND_ROCK, SND_CHEST, SND_SPIT, SND_COUNT
+    SND_THROW, SND_FIRE, SND_EXPLOSION, SND_KNIFE, SND_SCREAM, SND_ROCK, SND_CHEST, SND_SPIT, SND_RACK, SND_COUNT
 };
 
 // Resultado da missão.

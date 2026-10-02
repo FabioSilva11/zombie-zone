@@ -297,7 +297,9 @@ void Game::updateChests(float dt) {
         ++chestsOpened_;
         chestDiamonds_ += c.diamonds;
         ammo_ = std::max(ammo_, config_.magazine);
-        emit(EV_CHEST, c.diamonds);
+        bool grenade = grenades_ < 5 && rng_.chance(0.35f);
+        if (grenade) ++grenades_;
+        emit(EV_CHEST, c.diamonds, grenade ? 1 : 0);
         emitSound(SND_CHEST, c.pos, 1.0f);
         spawnBurst(c.pos + Vec3(0, 0.8f, 0), {1.0f, 0.85f, 0.3f, 1.0f}, 24, 4.0f, 0.14f, true, 4.0f);
         spawnBurst(c.pos + Vec3(0, 0.8f, 0), {0.35f, 0.95f, 1.0f, 1.0f}, 10, 3.0f, 0.12f, true, 4.0f);

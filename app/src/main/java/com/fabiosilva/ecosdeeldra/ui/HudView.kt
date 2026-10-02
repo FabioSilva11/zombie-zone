@@ -30,7 +30,9 @@ import kotlin.math.tan
  * - joystick dinâmico (surge onde o polegar toca; empurrar até o fim = correr);
  * - arrastar na metade direita = girar a câmera;
  * - botão ATIRAR (segurar) também gira a câmera ao arrastar;
- * - MIRAR (alterna), PULAR, RECARREGAR, PAUSA, MINIMAPA e SUPRIMENTOS (anúncio).
+ * - MIRAR, PULAR, RECARREGAR, AGACHAR, CORRER (trava), FACA, GRANADA, TROCAR OMBRO,
+ *   PAUSA, MINIMAPA e SUPRIMENTOS (anúncio); empurrar o joystick bem para cima trava a corrida.
+ * Todos os controles podem ser movidos/redimensionados no editor (modo [editing]).
  * Na ilha mostra ninhos, portal, efeitos (fogo, sangramento, veneno) e zumbis elite.
  */
 @SuppressLint("ViewConstructor")
@@ -41,8 +43,9 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         fun onSupplyRequested()
     }
 
-    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, AIM, JUMP, RELOAD, PAUSE, MAP, SUPPLY }
+    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, FIRE_LEFT, AIM, JUMP, RELOAD, CROUCH, SPRINT, MELEE, GRENADE, SHOULDER, PAUSE, MAP, SUPPLY }
     private class Touch(var role: Role, var x: Float, var y: Float, val startX: Float, val startY: Float)
+    private class Geo(var x: Float = 0f, var y: Float = 0f, var r: Float = 0f, var visible: Boolean = true)
 
     private val hud = FloatArray(Hud.SIZE)
     private val touches = HashMap<Int, Touch>()
@@ -55,6 +58,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     private var vignettePaint = Paint()
     private val statusPaint = Paint()
     private val statusShaders = HashMap<Int, RadialGradient>()
+    private val dash = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
 
     var minimap: Bitmap? = null
     var minimapOriginX = 0f   // canto do bitmap do minimapa em coordenadas do mundo
@@ -65,7 +69,25 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     var showFps = false
     var leftHanded = false
     var vibration = true
+    var layoutText = ""   // layout salvo nos ajustes (vazio = padrão)
+    var opacity = 0.85f   // transparência dos controles
+
+    /** Modo de edição do HUD: arrastar move os controles em vez de jogar. */
+    var editing = false
+        set(value) {
+            field = value
+            selected = null
+            invalidate()
+        }
+    var selected: HudControl? = null
+        private set
+    var onSelectionChanged: ((HudControl?) -> Unit)? = null
+    var layout: HudLayout = HudLayout.defaults(900f, 410f, false)
+        private set
+
     private var aiming = false
+    private var autoRun = false        // trava de corrida: o personagem segue correndo sozinho
+    private var autoRunArmed = false
     private var stickBaseX = 0f
     private var stickBaseY = 0f
     private var stickX = 0f
@@ -75,14 +97,13 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     private var feedColor = Palette.lime
     private var lastHealth = -1f
     private var tip: Pair<String, Long>? = null
+    private var dragControl: HudControl? = null
+    private var dragDx = 0f
+    private var dragDy = 0f
 
-    // Geometria dos controles (px), recalculada no onSizeChanged.
-    private var fireX = 0f; private var fireY = 0f; private var fireR = 0f
-    private var aimX = 0f; private var aimY = 0f
-    private var jumpX = 0f; private var jumpY = 0f
-    private var reloadX = 0f; private var reloadY = 0f
-    private var smallR = 0f
-    private var pauseX = 0f; private var pauseY = 0f
+    // Geometria dos controles (px), recalculada a partir do layout.
+    private val geo: Map<HudControl, Geo> = HudControl.entries.associateWith { Geo() }
+    private fun g(c: HudControl): Geo = geo.getValue(c)
     private var mapX = 0f; private var mapY = 0f; private var mapSize = 0f
     private var supplyX = 0f; private var supplyY = 0f; private var supplyW = 0f; private var supplyH = 0f
     private var stickRadius = 0f
@@ -96,43 +117,64 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        layoutControls()
+        rebuildLayout()
         vignette = RadialGradient(w / 2f, h / 2f, hypot(w / 2f, h / 2f), intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(220, 180, 0, 0)), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
         vignettePaint.shader = vignette
         statusShaders.clear()
     }
 
+    /** Recalcula o layout (padrão ou o salvo pelo jogador) para o tamanho atual da tela. */
+    fun rebuildLayout() {
+        if (width <= 0 || height <= 0) return
+        layout = HudLayout.decode(layoutText, defaultLayout())
+        layoutControls()
+    }
+
+    fun defaultLayout(): HudLayout = HudLayout.defaults(width / density, height / density, leftHanded)
+
+    /** Editor: aplica uma cópia de trabalho sem salvar. */
+    fun setWorkingLayout(l: HudLayout) {
+        layout = l
+        layoutControls()
+        invalidate()
+    }
+
     private fun layoutControls() {
         val w = width.toFloat()
         val h = height.toFloat()
-        fun mx(x: Float) = if (leftHanded) w - x else x
-        fireR = d(46f)
-        smallR = d(30f)
-        fireX = mx(w - d(104f)); fireY = h - d(96f)
-        jumpX = mx(w - d(204f)); jumpY = h - d(52f)
-        aimX = mx(w - d(190f)); aimY = h - d(146f)
-        reloadX = mx(w - d(86f)); reloadY = h - d(200f)
-        pauseX = mx(w - d(40f)); pauseY = d(36f)
-        mapSize = d(112f)
-        mapX = mx(d(28f) + mapSize / 2f); mapY = d(14f) + mapSize / 2f
-        supplyW = d(112f); supplyH = d(34f)
-        supplyX = mapX; supplyY = mapY + mapSize / 2f + d(26f)
-        stickRadius = d(58f)
-        stickHomeX = mx(d(132f)); stickHomeY = h - d(116f)
-        if (!stickActive) { stickBaseX = stickHomeX; stickBaseY = stickHomeY; stickX = stickBaseX; stickY = stickBaseY }
+        if (w <= 0f) return
+        for (c in HudControl.entries) {
+            val pos = layout[c]
+            val gc = g(c)
+            gc.x = pos.x * w
+            gc.y = pos.y * h
+            gc.r = d(c.baseDp) * pos.scale
+            gc.visible = pos.visible
+        }
+        g(HudControl.MAP).let { mapX = it.x; mapY = it.y; mapSize = it.r * 2f }
+        g(HudControl.SUPPLY).let { supplyX = it.x; supplyY = it.y; supplyH = it.r * 2f; supplyW = it.r * 6.6f }
+        g(HudControl.JOYSTICK).let { stickRadius = it.r; stickHomeX = it.x; stickHomeY = it.y }
+        if (!stickActive) {
+            stickBaseX = stickHomeX; stickBaseY = stickHomeY; stickX = stickBaseX; stickY = stickBaseY
+            if (autoRun) stickY = stickBaseY - stickRadius
+        }
     }
 
-    fun applySettings(leftHanded: Boolean, vibration: Boolean, showFps: Boolean) {
+    fun applySettings(leftHanded: Boolean, vibration: Boolean, showFps: Boolean, layoutText: String = this.layoutText, opacity: Float = this.opacity) {
         this.leftHanded = leftHanded
         this.vibration = vibration
         this.showFps = showFps
-        if (width > 0) layoutControls()
+        this.layoutText = layoutText
+        this.opacity = opacity.coerceIn(0.3f, 1f)
+        rebuildLayout()
     }
 
     fun reset() {
         touches.clear()
         aiming = false
         stickActive = false
+        autoRun = false
+        autoRunArmed = false
         feed.clear()
         tip = null
         lastHealth = -1f
@@ -140,6 +182,72 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         NativeBridge.setFire(false)
         NativeBridge.setAim(false)
         if (width > 0) layoutControls()
+    }
+
+    // ------------------------------------------------------------------ editor do HUD
+
+    fun scaleSelected(delta: Float) {
+        val c = selected ?: return
+        val pos = layout[c]
+        pos.scale = (pos.scale + delta).coerceIn(HudLayout.MIN_SCALE, HudLayout.MAX_SCALE)
+        layoutControls()
+        invalidate()
+    }
+
+    /** Mostra/esconde o controle selecionado (só os opcionais); retorna o novo estado. */
+    fun toggleSelectedVisible(): Boolean? {
+        val c = selected ?: return null
+        if (!c.optional) return null
+        val pos = layout[c]
+        pos.visible = !pos.visible
+        layoutControls()
+        invalidate()
+        return pos.visible
+    }
+
+    private fun pickControl(x: Float, y: Float): HudControl? {
+        var best: HudControl? = null
+        var bestDist = Float.MAX_VALUE
+        for (c in HudControl.entries) {
+            val gc = g(c)
+            val hit = when (c) {
+                HudControl.MAP -> abs(x - gc.x) < gc.r && abs(y - gc.y) < gc.r
+                HudControl.SUPPLY -> abs(x - gc.x) < gc.r * 3.3f && abs(y - gc.y) < gc.r * 1.3f
+                else -> hypot(x - gc.x, y - gc.y) < gc.r * 1.25f + d(6f)
+            }
+            if (!hit) continue
+            val dist = hypot(x - gc.x, y - gc.y)
+            if (dist < bestDist) {
+                bestDist = dist
+                best = c
+            }
+        }
+        return best
+    }
+
+    private fun editTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val c = pickControl(event.x, event.y)
+                selected = c
+                onSelectionChanged?.invoke(c)
+                dragControl = c
+                if (c != null) {
+                    dragDx = g(c).x - event.x
+                    dragDy = g(c).y - event.y
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> dragControl?.let { c ->
+                val pos = layout[c]
+                pos.x = ((event.x + dragDx) / width).coerceIn(0.02f, 0.98f)
+                pos.y = ((event.y + dragDy) / height).coerceIn(0.03f, 0.97f)
+                layoutControls()
+                invalidate()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragControl = null
+        }
+        return true
     }
 
     fun message(text: String, color: Int = Palette.lime) {
@@ -165,23 +273,43 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
 
     private fun inside(x: Float, y: Float, cx: Float, cy: Float, r: Float) = hypot(x - cx, y - cy) <= r
 
+    /** O controle aparece nesta partida? (granada e faca só na ilha; suprimentos só quando há.) */
+    private fun available(c: HudControl): Boolean {
+        if (!g(c).visible) return false
+        return when (c) {
+            HudControl.GRENADE -> hud[Hud.GRENADES] >= 0f
+            HudControl.MELEE -> hud[Hud.MELEE] >= 0f
+            HudControl.SUPPLY -> island && hud[Hud.SUPPLY] >= 0f
+            else -> true
+        }
+    }
+
+    private val buttons = listOf(
+        HudControl.FIRE to Role.FIRE, HudControl.FIRE_LEFT to Role.FIRE_LEFT, HudControl.AIM to Role.AIM,
+        HudControl.JUMP to Role.JUMP, HudControl.RELOAD to Role.RELOAD, HudControl.CROUCH to Role.CROUCH,
+        HudControl.SPRINT to Role.SPRINT, HudControl.MELEE to Role.MELEE, HudControl.GRENADE to Role.GRENADE,
+        HudControl.SHOULDER to Role.SHOULDER, HudControl.PAUSE to Role.PAUSE,
+    )
+
     private fun roleAt(x: Float, y: Float): Role {
         val w = width.toFloat()
         val h = height.toFloat()
-        if (inside(x, y, fireX, fireY, fireR * 1.15f)) return Role.FIRE
-        if (inside(x, y, aimX, aimY, smallR * 1.25f)) return Role.AIM
-        if (inside(x, y, jumpX, jumpY, smallR * 1.25f)) return Role.JUMP
-        if (inside(x, y, reloadX, reloadY, smallR * 1.25f)) return Role.RELOAD
-        if (inside(x, y, pauseX, pauseY, d(30f))) return Role.PAUSE
-        if (abs(x - mapX) < mapSize / 2 && abs(y - mapY) < mapSize / 2) return Role.MAP
-        if (island && hud[Hud.SUPPLY] >= 0f && abs(x - supplyX) < supplyW / 2 && abs(y - supplyY) < supplyH / 2 + d(4f)) return Role.SUPPLY
-        val leftSide = if (leftHanded) x > w * 0.55f else x < w * 0.45f
+        for ((c, role) in buttons) {
+            if (!available(c)) continue
+            val gc = g(c)
+            if (inside(x, y, gc.x, gc.y, gc.r * 1.2f + d(4f))) return role
+        }
+        if (available(HudControl.MAP) && abs(x - mapX) < mapSize / 2 && abs(y - mapY) < mapSize / 2) return Role.MAP
+        if (available(HudControl.SUPPLY) && abs(x - supplyX) < supplyW / 2 && abs(y - supplyY) < supplyH / 2 + d(4f)) return Role.SUPPLY
+        // Joystick dinâmico no lado em que ele foi posicionado.
+        val leftSide = if (stickHomeX < w / 2) x < w * 0.45f else x > w * 0.55f
         if (leftSide && y > h * 0.28f && touches.values.none { it.role == Role.JOYSTICK }) return Role.JOYSTICK
         return Role.LOOK
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (editing) return editTouch(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val i = event.actionIndex
@@ -192,13 +320,20 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                 touches[id] = Touch(role, x, y, x, y)
                 when (role) {
                     Role.JOYSTICK -> {
+                        autoRun = false
+                        autoRunArmed = false
                         stickActive = true
                         stickBaseX = x; stickBaseY = y; stickX = x; stickY = y
                     }
-                    Role.FIRE -> { NativeBridge.setFire(true); haptic(false) }
+                    Role.FIRE, Role.FIRE_LEFT -> { NativeBridge.setFire(true); haptic(false) }
                     Role.AIM -> { aiming = !aiming; NativeBridge.setAim(aiming); haptic(false) }
                     Role.JUMP -> { NativeBridge.pressJump(); haptic(false) }
                     Role.RELOAD -> { NativeBridge.pressReload(); haptic(false) }
+                    Role.CROUCH -> { NativeBridge.toggleCrouch(); haptic(false) }
+                    Role.SPRINT -> { NativeBridge.toggleSprint(); haptic(false) }
+                    Role.MELEE -> { NativeBridge.pressMelee(); haptic(false) }
+                    Role.GRENADE -> { NativeBridge.pressGrenade(); haptic(false) }
+                    Role.SHOULDER -> { NativeBridge.swapShoulder(); haptic(false) }
                     Role.PAUSE -> listener.onPauseRequested()
                     Role.MAP -> listener.onMapRequested()
                     Role.SUPPLY -> if (supplyReady) listener.onSupplyRequested()
@@ -221,6 +356,8 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                                 stickBaseX += dx * k; stickBaseY += dy * k
                                 dx = x - stickBaseX; dy = y - stickBaseY
                             }
+                            // Empurrar bem para cima arma a trava de corrida (solte para travar).
+                            autoRunArmed = dy < -stickRadius * 1.3f && abs(dx) < stickRadius * 0.7f
                             val l2 = hypot(dx, dy)
                             val clamped = min(l2, stickRadius)
                             val nx = if (l2 > 0) dx / l2 * clamped else 0f
@@ -232,7 +369,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                             if (mag < 0.12f) { mx = 0f; my = 0f }
                             NativeBridge.setMove(mx, my)
                         }
-                        Role.LOOK, Role.FIRE -> NativeBridge.addLook((x - t.x) / density, (y - t.y) / density)
+                        Role.LOOK, Role.FIRE, Role.FIRE_LEFT -> NativeBridge.addLook((x - t.x) / density, (y - t.y) / density)
                         else -> Unit
                     }
                     t.x = x
@@ -247,9 +384,17 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                         Role.JOYSTICK -> {
                             stickActive = false
                             stickBaseX = stickHomeX; stickBaseY = stickHomeY; stickX = stickBaseX; stickY = stickBaseY
-                            NativeBridge.setMove(0f, 0f)
+                            if (autoRunArmed && event.actionMasked != MotionEvent.ACTION_CANCEL) {
+                                autoRun = true
+                                stickY = stickBaseY - stickRadius
+                                NativeBridge.setMove(0f, 1f)
+                                haptic(true)
+                            } else {
+                                NativeBridge.setMove(0f, 0f)
+                            }
+                            autoRunArmed = false
                         }
-                        Role.FIRE -> NativeBridge.setFire(false)
+                        Role.FIRE, Role.FIRE_LEFT -> if (touches.values.none { it.role == Role.FIRE || it.role == Role.FIRE_LEFT }) NativeBridge.setFire(false)
                         else -> Unit
                     }
                 }
@@ -261,6 +406,10 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     // ------------------------------------------------------------------ desenho
 
     override fun onDraw(canvas: Canvas) {
+        if (editing) {
+            drawEditor(canvas)
+            return
+        }
         NativeBridge.copyHud(hud)
         val w = width.toFloat()
         val h = height.toFloat()
@@ -707,7 +856,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     }
 
     private fun drawStatus(canvas: Canvas, health: Float, maxHealth: Float) {
-        val left = if (leftHanded) width - d(28f) - mapSize - d(176f) else mapX + mapSize / 2 + d(10f)
+        val left = if (leftHanded) width - d(28f) - d(112f) - d(176f) else d(150f)
         val top = d(16f)
         rect.set(left, top, left + d(168f), top + d(50f))
         p.color = Color.argb(200, 8, 14, 26)
@@ -939,84 +1088,288 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     }
 
     private fun drawControls(canvas: Canvas) {
-        // Joystick
-        p.color = Color.argb(if (stickActive) 70 else 40, 255, 255, 255)
-        canvas.drawCircle(stickBaseX, stickBaseY, stickRadius, p)
+        val alpha = opacity
+        val save = if (alpha < 0.99f) canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), (alpha * 255).toInt()) else -1
+        if (editing) for (c in HudControl.entries) if (c.optional && !g(c).visible) drawGhost(canvas, c)
+        drawJoystick(canvas)
+        val firing = hud[Hud.FIRING] > 0.5f || touches.values.any { it.role == Role.FIRE || it.role == Role.FIRE_LEFT }
+        if (available(HudControl.FIRE)) drawFireButton(canvas, HudControl.FIRE, firing, true)
+        if (available(HudControl.FIRE_LEFT)) drawFireButton(canvas, HudControl.FIRE_LEFT, firing, false)
+        if (available(HudControl.AIM)) drawAim(canvas)
+        if (available(HudControl.JUMP)) drawJump(canvas)
+        if (available(HudControl.RELOAD)) drawReload(canvas)
+        if (available(HudControl.CROUCH)) drawCrouch(canvas)
+        if (available(HudControl.SPRINT)) drawSprint(canvas)
+        if (available(HudControl.MELEE)) drawMelee(canvas)
+        if (available(HudControl.GRENADE)) drawGrenade(canvas)
+        if (available(HudControl.SHOULDER)) drawShoulder(canvas)
+        if (available(HudControl.PAUSE)) drawPause(canvas)
+        if (save >= 0) canvas.restoreToCount(save)
+    }
+
+    /** Escala do controle (para textos e ícones acompanharem o tamanho escolhido). */
+    private fun k(c: HudControl): Float = g(c).r / d(c.baseDp)
+
+    private fun label(canvas: Canvas, text: String, x: Float, y: Float, size: Float, color: Int) {
+        textPaint.textSize = d(size)
+        textPaint.color = color
+        canvas.drawText(text, x, y, textPaint)
+    }
+
+    private fun drawJoystick(canvas: Canvas) {
+        val r = stickRadius
+        val lit = stickActive || autoRun
+        p.color = Color.argb(if (lit) 70 else 40, 255, 255, 255)
+        canvas.drawCircle(stickBaseX, stickBaseY, r, p)
         p.style = Paint.Style.STROKE
         p.strokeWidth = d(2f)
-        p.color = Color.argb(if (stickActive) 160 else 90, 168, 255, 62)
-        canvas.drawCircle(stickBaseX, stickBaseY, stickRadius, p)
+        p.color = if (autoRun) Palette.gold else Color.argb(if (lit) 160 else 90, 168, 255, 62)
+        canvas.drawCircle(stickBaseX, stickBaseY, r, p)
         p.style = Paint.Style.FILL
-        p.color = Color.argb(if (stickActive) 220 else 120, 168, 255, 62)
-        canvas.drawCircle(stickX, stickY, d(24f), p)
-        if (hud[Hud.SPRINTING] > 0.5f) {
-            textPaint.textSize = d(13f)
-            textPaint.color = Palette.lime
-            canvas.drawText("» CORRENDO", stickBaseX, stickBaseY - stickRadius - d(10f), textPaint)
-        } else if (!stickActive) {
-            textPaint.textSize = d(10f)
-            textPaint.color = Color.argb(140, 255, 255, 255)
-            canvas.drawText(if (hud[Hud.SLOWED] > 0f) "LENTO (ÁCIDO)" else "MOVER", stickBaseX, stickBaseY + stickRadius + d(14f), textPaint)
+        p.color = if (autoRun) Palette.gold else Color.argb(if (lit) 220 else 120, 168, 255, 62)
+        canvas.drawCircle(stickX, stickY, r * 0.41f, p)
+        val ks = k(HudControl.JOYSTICK)
+        when {
+            autoRunArmed || autoRun -> {
+                val text = if (autoRun) "🔒 CORRIDA TRAVADA" else "🔒 SOLTE PARA TRAVAR"
+                textPaint.textSize = d(12f) * ks
+                val tw = textPaint.measureText(text) + d(16f)
+                val ty = stickBaseY - r - d(18f)
+                rect.set(stickBaseX - tw / 2, ty - d(14f), stickBaseX + tw / 2, ty + d(6f))
+                p.color = Color.argb(200, 40, 30, 8)
+                canvas.drawRoundRect(rect, d(9f), d(9f), p)
+                label(canvas, text, stickBaseX, ty, 12f * ks, Palette.gold)
+            }
+            hud[Hud.SPRINTING] > 0.5f -> label(canvas, "» CORRENDO", stickBaseX, stickBaseY - r - d(10f), 13f * ks, Palette.lime)
+            stickActive && stickY < stickBaseY - r * 0.9f -> label(canvas, "⇡ suba mais para travar", stickBaseX, stickBaseY - r - d(10f), 10f * ks, Color.argb(200, 255, 230, 140))
+            !stickActive -> label(canvas, if (hud[Hud.SLOWED] > 0f) "LENTO (ÁCIDO)" else "MOVER", stickBaseX, stickBaseY + r + d(14f), 10f * ks, Color.argb(140, 255, 255, 255))
         }
+    }
 
-        // Atirar (com anel de recarga)
-        val firing = hud[Hud.FIRING] > 0.5f || touches.values.any { it.role == Role.FIRE }
-        drawButton(canvas, fireX, fireY, fireR, Palette.lime, firing)
-        drawCrosshairIcon(canvas, fireX, fireY, d(16f), if (firing) Palette.dark else Palette.lime)
+    private fun drawFireButton(canvas: Canvas, c: HudControl, firing: Boolean, main: Boolean) {
+        val gc = g(c)
+        val ks = k(c)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, firing)
+        drawCrosshairIcon(canvas, gc.x, gc.y, gc.r * 0.35f, if (firing) Palette.dark else Palette.lime)
         val reload = hud[Hud.RELOAD]
-        if (reload >= 0f) {
+        if (main && reload >= 0f) {
             p.style = Paint.Style.STROKE
             p.strokeWidth = d(5f)
             p.color = Palette.gold
-            rect.set(fireX - fireR - d(5f), fireY - fireR - d(5f), fireX + fireR + d(5f), fireY + fireR + d(5f))
+            rect.set(gc.x - gc.r - d(5f), gc.y - gc.r - d(5f), gc.x + gc.r + d(5f), gc.y + gc.r + d(5f))
             canvas.drawArc(rect, -90f, 360f * reload, false, p)
             p.style = Paint.Style.FILL
         }
-        textPaint.textSize = d(10f)
-        textPaint.color = if (firing) Palette.dark else Color.WHITE
-        canvas.drawText("ATIRAR", fireX, fireY + d(30f), textPaint)
+        label(canvas, "ATIRAR", gc.x, gc.y + gc.r * 0.65f, 10f * ks * (if (main) 1f else 0.85f), if (firing) Palette.dark else Color.WHITE)
+    }
 
-        // Mirar
-        drawButton(canvas, aimX, aimY, smallR, Palette.cyan, aiming)
+    private fun drawAim(canvas: Canvas) {
+        val gc = g(HudControl.AIM)
+        val s = k(HudControl.AIM)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.cyan, aiming)
         p.style = Paint.Style.STROKE
         p.strokeWidth = d(2f)
         p.color = if (aiming) Palette.dark else Palette.cyan
-        canvas.drawCircle(aimX, aimY - d(3f), d(9f), p)
-        canvas.drawLine(aimX - d(13f), aimY - d(3f), aimX + d(13f), aimY - d(3f), p)
-        canvas.drawLine(aimX, aimY - d(16f), aimX, aimY + d(10f), p)
+        canvas.drawCircle(gc.x, gc.y - d(3f) * s, d(9f) * s, p)
+        canvas.drawLine(gc.x - d(13f) * s, gc.y - d(3f) * s, gc.x + d(13f) * s, gc.y - d(3f) * s, p)
+        canvas.drawLine(gc.x, gc.y - d(16f) * s, gc.x, gc.y + d(10f) * s, p)
         p.style = Paint.Style.FILL
-        textPaint.textSize = d(8f)
-        textPaint.color = if (aiming) Palette.dark else Color.WHITE
-        canvas.drawText("MIRAR", aimX, aimY + d(19f), textPaint)
+        label(canvas, "MIRAR", gc.x, gc.y + d(19f) * s, 8f * s, if (aiming) Palette.dark else Color.WHITE)
+    }
 
-        // Pular
+    private fun drawJump(canvas: Canvas) {
+        val gc = g(HudControl.JUMP)
+        val s = k(HudControl.JUMP)
         val jumpReady = hud[Hud.JUMP_READY] > 0.5f || hud[Hud.IN_WATER] > 0.5f
-        drawButton(canvas, jumpX, jumpY, smallR, Palette.lime, false)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, false)
+        val x = gc.x
+        val y = gc.y
         path.reset()
-        path.moveTo(jumpX, jumpY - d(12f)); path.lineTo(jumpX + d(10f), jumpY); path.lineTo(jumpX + d(4f), jumpY)
-        path.lineTo(jumpX + d(4f), jumpY + d(8f)); path.lineTo(jumpX - d(4f), jumpY + d(8f)); path.lineTo(jumpX - d(4f), jumpY); path.lineTo(jumpX - d(10f), jumpY); path.close()
+        path.moveTo(x, y - d(12f) * s); path.lineTo(x + d(10f) * s, y); path.lineTo(x + d(4f) * s, y)
+        path.lineTo(x + d(4f) * s, y + d(8f) * s); path.lineTo(x - d(4f) * s, y + d(8f) * s); path.lineTo(x - d(4f) * s, y); path.lineTo(x - d(10f) * s, y); path.close()
         p.color = if (jumpReady) Palette.lime else Palette.muted
         canvas.drawPath(path, p)
-        textPaint.color = Color.WHITE
-        canvas.drawText("PULAR", jumpX, jumpY + d(19f), textPaint)
+        label(canvas, "PULAR", x, y + d(19f) * s, 8f * s, Color.WHITE)
+    }
 
-        // Recarregar + munição
+    private fun drawReload(canvas: Canvas) {
+        val gc = g(HudControl.RELOAD)
+        val s = k(HudControl.RELOAD)
         val ammo = hud[Hud.AMMO].toInt()
         val mag = hud[Hud.MAG].toInt()
         val lowAmmo = ammo <= mag / 4
-        drawButton(canvas, reloadX, reloadY, smallR, if (lowAmmo) Palette.gold else Palette.lime, false)
-        textPaint.textSize = d(13f)
-        textPaint.color = if (lowAmmo) Palette.gold else Color.WHITE
-        canvas.drawText(if (reload >= 0f) "..." else "$ammo", reloadX, reloadY + d(2f), textPaint)
-        textPaint.textSize = d(8f)
-        textPaint.color = Palette.muted
-        canvas.drawText("RECARREGAR", reloadX, reloadY + d(16f), textPaint)
+        drawButton(canvas, gc.x, gc.y, gc.r, if (lowAmmo) Palette.gold else Palette.lime, false)
+        label(canvas, if (hud[Hud.RELOAD] >= 0f) "..." else "$ammo", gc.x, gc.y + d(2f) * s, 13f * s, if (lowAmmo) Palette.gold else Color.WHITE)
+        label(canvas, "RECARREGAR", gc.x, gc.y + d(16f) * s, 8f * s, Palette.muted)
+    }
 
-        // Pausa
-        drawButton(canvas, pauseX, pauseY, d(20f), Palette.lime, false)
+    private fun drawCrouch(canvas: Canvas) {
+        val gc = g(HudControl.CROUCH)
+        val s = k(HudControl.CROUCH)
+        val on = hud[Hud.CROUCH] > 0.5f
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, on)
+        // Bonequinho abaixado.
+        val color = if (on) Palette.dark else Palette.lime
+        p.color = color
+        canvas.drawCircle(gc.x + d(2f) * s, gc.y - d(9f) * s, d(3.2f) * s, p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(2.6f) * s
+        p.strokeCap = Paint.Cap.ROUND
+        path.reset()
+        path.moveTo(gc.x + d(1f) * s, gc.y - d(5f) * s)
+        path.lineTo(gc.x - d(4f) * s, gc.y + d(1f) * s)
+        path.lineTo(gc.x + d(4f) * s, gc.y + d(3f) * s)
+        path.lineTo(gc.x + d(2f) * s, gc.y + d(8f) * s)
+        canvas.drawPath(path, p)
+        canvas.drawLine(gc.x - d(4f) * s, gc.y + d(1f) * s, gc.x - d(8f) * s, gc.y + d(8f) * s, p)
+        p.style = Paint.Style.FILL
+        label(canvas, "AGACHAR", gc.x, gc.y + d(18f) * s, 7.5f * s, if (on) Palette.dark else Color.WHITE)
+    }
+
+    private fun drawSprint(canvas: Canvas) {
+        val gc = g(HudControl.SPRINT)
+        val s = k(HudControl.SPRINT)
+        val on = hud[Hud.SPRINT_LOCK] > 0.5f || hud[Hud.SPRINTING] > 0.5f || autoRun
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.gold, on)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(3f) * s
+        p.strokeCap = Paint.Cap.ROUND
+        p.color = if (on) Palette.dark else Palette.gold
+        for (i in 0..1) {
+            val y = gc.y - d(4f) * s + i * d(7f) * s
+            canvas.drawLine(gc.x - d(7f) * s, y, gc.x, y - d(6f) * s, p)
+            canvas.drawLine(gc.x, y - d(6f) * s, gc.x + d(7f) * s, y, p)
+        }
+        p.style = Paint.Style.FILL
+        label(canvas, "CORRER", gc.x, gc.y + d(18f) * s, 7.5f * s, if (on) Palette.dark else Color.WHITE)
+    }
+
+    private fun drawMelee(canvas: Canvas) {
+        val gc = g(HudControl.MELEE)
+        val s = k(HudControl.MELEE)
+        val cooldown = hud[Hud.MELEE].coerceIn(0f, 1f)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.red, false)
+        // Faca na diagonal: lâmina e cabo.
+        canvas.save()
+        canvas.rotate(-45f, gc.x, gc.y - d(2f) * s)
+        p.color = Color.rgb(220, 226, 236)
+        path.reset()
+        path.moveTo(gc.x - d(2.5f) * s, gc.y - d(2f) * s)
+        path.lineTo(gc.x + d(2.5f) * s, gc.y - d(2f) * s)
+        path.lineTo(gc.x + d(2.5f) * s, gc.y - d(12f) * s)
+        path.lineTo(gc.x - d(2.5f) * s, gc.y - d(15f) * s)
+        path.close()
+        canvas.drawPath(path, p)
+        p.color = Color.rgb(140, 90, 50)
+        canvas.drawRect(gc.x - d(2.2f) * s, gc.y - d(2f) * s, gc.x + d(2.2f) * s, gc.y + d(6f) * s, p)
+        canvas.restore()
+        if (cooldown > 0f) {
+            p.color = Color.argb(150, 0, 0, 0)
+            rect.set(gc.x - gc.r, gc.y - gc.r, gc.x + gc.r, gc.y + gc.r)
+            canvas.drawArc(rect, -90f, 360f * cooldown, true, p)
+        }
+        label(canvas, "FACA", gc.x, gc.y + d(18f) * s, 7.5f * s, Color.WHITE)
+    }
+
+    private fun drawGrenade(canvas: Canvas) {
+        val gc = g(HudControl.GRENADE)
+        val s = k(HudControl.GRENADE)
+        val count = hud[Hud.GRENADES].toInt()
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, false)
+        val color = if (count > 0) Color.rgb(150, 190, 90) else Palette.muted
+        p.color = color
+        canvas.drawCircle(gc.x, gc.y - d(1f) * s, d(7f) * s, p)
+        canvas.drawRect(gc.x - d(2.5f) * s, gc.y - d(11f) * s, gc.x + d(2.5f) * s, gc.y - d(7f) * s, p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(1.8f) * s
+        canvas.drawCircle(gc.x + d(5f) * s, gc.y - d(11f) * s, d(2.5f) * s, p)
+        p.style = Paint.Style.FILL
+        // Contador.
+        val bx = gc.x + gc.r * 0.72f
+        val by = gc.y - gc.r * 0.72f
+        p.color = if (count > 0) Palette.gold else Palette.stone
+        canvas.drawCircle(bx, by, d(8f) * s, p)
+        label(canvas, "$count", bx, by + d(3.5f) * s, 10f * s, Palette.dark)
+        label(canvas, "GRANADA", gc.x, gc.y + d(18f) * s, 7.5f * s, Color.WHITE)
+    }
+
+    private fun drawShoulder(canvas: Canvas) {
+        val gc = g(HudControl.SHOULDER)
+        val s = k(HudControl.SHOULDER)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.cyan, false)
+        label(canvas, if (hud[Hud.SHOULDER] < 0f) "◧" else "◨", gc.x, gc.y + d(5f) * s, 14f * s, Palette.cyan)
+    }
+
+    private fun drawPause(canvas: Canvas) {
+        val gc = g(HudControl.PAUSE)
+        val s = k(HudControl.PAUSE)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, false)
         p.color = Color.WHITE
-        canvas.drawRect(pauseX - d(6f), pauseY - d(7f), pauseX - d(2f), pauseY + d(7f), p)
-        canvas.drawRect(pauseX + d(2f), pauseY - d(7f), pauseX + d(6f), pauseY + d(7f), p)
+        canvas.drawRect(gc.x - d(6f) * s, gc.y - d(7f) * s, gc.x - d(2f) * s, gc.y + d(7f) * s, p)
+        canvas.drawRect(gc.x + d(2f) * s, gc.y - d(7f) * s, gc.x + d(6f) * s, gc.y + d(7f) * s, p)
+    }
+
+    /** Controle oculto, mostrado só no editor para poder ser ligado de novo. */
+    private fun drawGhost(canvas: Canvas, c: HudControl) {
+        val gc = g(c)
+        dash.color = Color.argb(150, 255, 255, 255)
+        dash.strokeWidth = d(1.5f)
+        dash.pathEffect = android.graphics.DashPathEffect(floatArrayOf(d(5f), d(4f)), 0f)
+        canvas.drawCircle(gc.x, gc.y, gc.r, dash)
+        label(canvas, c.label.uppercase(), gc.x, gc.y + d(3f), 8f, Color.argb(170, 255, 255, 255))
+        label(canvas, "OCULTO", gc.x, gc.y + d(13f), 7f, Color.argb(130, 255, 255, 255))
+    }
+
+    private fun drawEditor(canvas: Canvas) {
+        java.util.Arrays.fill(hud, 0f)
+        hud[Hud.AMMO] = 30f
+        hud[Hud.MAG] = 30f
+        hud[Hud.RELOAD] = -1f
+        hud[Hud.GRENADES] = 3f
+        hud[Hud.MELEE] = 0f
+        hud[Hud.SUPPLY] = 1f
+        hud[Hud.ISLAND] = 1f
+        hud[Hud.JUMP_READY] = 1f
+        hud[Hud.SHOULDER] = 1f
+        val w = width.toFloat()
+        val h = height.toFloat()
+        p.color = Color.argb(24, 255, 255, 255)
+        val step = d(32f)
+        var x = 0f
+        while (x < w) { canvas.drawRect(x, 0f, x + 1f, h, p); x += step }
+        var y = 0f
+        while (y < h) { canvas.drawRect(0f, y, w, y + 1f, p); y += step }
+        rect.set(mapX - mapSize / 2, mapY - mapSize / 2, mapX + mapSize / 2, mapY + mapSize / 2)
+        p.color = Color.argb(200, 8, 14, 26)
+        canvas.drawRoundRect(rect, d(14f), d(14f), p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(2f)
+        p.color = Palette.line
+        canvas.drawRoundRect(rect, d(14f), d(14f), p)
+        p.style = Paint.Style.FILL
+        label(canvas, "MINIMAPA", mapX, mapY + d(4f), 10f * k(HudControl.MAP), Palette.muted)
+        drawSupplyButton(canvas)
+        drawControls(canvas)
+        val c = selected ?: return
+        val gc = g(c)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(2.5f)
+        p.color = Palette.gold
+        when (c) {
+            HudControl.MAP -> { rect.set(gc.x - gc.r - d(5f), gc.y - gc.r - d(5f), gc.x + gc.r + d(5f), gc.y + gc.r + d(5f)); canvas.drawRoundRect(rect, d(16f), d(16f), p) }
+            HudControl.SUPPLY -> { rect.set(supplyX - supplyW / 2 - d(5f), supplyY - supplyH / 2 - d(5f), supplyX + supplyW / 2 + d(5f), supplyY + supplyH / 2 + d(5f)); canvas.drawRoundRect(rect, d(12f), d(12f), p) }
+            else -> canvas.drawCircle(gc.x, gc.y, gc.r + d(6f), p)
+        }
+        p.style = Paint.Style.FILL
+        val top = if (c == HudControl.SUPPLY) supplyY - supplyH / 2 else gc.y - gc.r
+        val text = "${c.label} • ${(layout[c].scale * 100).toInt()}%" + if (!gc.visible) " (oculto)" else ""
+        textPaint.textSize = d(12f)
+        val tw = textPaint.measureText(text) + d(16f)
+        val ty = (top - d(14f)).coerceAtLeast(d(20f))
+        rect.set(gc.x - tw / 2, ty - d(14f), gc.x + tw / 2, ty + d(6f))
+        p.color = Color.argb(220, 40, 30, 8)
+        canvas.drawRoundRect(rect, d(9f), d(9f), p)
+        label(canvas, text, gc.x, ty, 12f, Palette.gold)
     }
 
     private fun drawCrosshairIcon(canvas: Canvas, x: Float, y: Float, r: Float, color: Int) {

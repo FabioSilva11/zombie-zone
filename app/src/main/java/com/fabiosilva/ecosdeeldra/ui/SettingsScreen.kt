@@ -33,7 +33,9 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
         left.addView(toggle("Mira assistida", "Puxa a mira levemente para o zumbi", s.aimAssist) { s.aimAssist = it })
         left.addView(toggle("Tiro automático", "Atira sozinho quando a mira está no zumbi", s.autoFire) { s.autoFire = it })
         left.addView(toggle("Inverter eixo vertical", "", s.invertY) { s.invertY = it })
-        left.addView(toggle("Modo canhoto", "Troca o lado dos botões e do joystick", s.leftHanded) { s.leftHanded = it })
+        left.addView(Ui.button(app, "✥ PERSONALIZAR CONTROLES (HUD)", Palette.cyan, Palette.dark, 13f) { app.applySettings(); app.showHudEditor(fromPause) }, Ui.lp(Ui.MATCH, app.dpi(46)).apply { bottomMargin = app.dpi(4) })
+        left.addView(Ui.text(app, "Mova, aumente ou esconda cada botão: atirar, mirar, pular, agachar, correr, faca, granada...", 10f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(8)) })
+        left.addView(toggle("Modo canhoto", "Espelha o layout padrão (apaga o layout personalizado)", s.leftHanded) { s.leftHanded = it; s.hudLayout = "" })
         left.addView(toggle("Vibração", "Ao levar dano e acertar tiros", s.vibration) { s.vibration = it })
 
         right.addView(section("SOM"))

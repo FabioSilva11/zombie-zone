@@ -38,6 +38,7 @@ import com.fabiosilva.ecosdeeldra.net.LanLobby
 import com.fabiosilva.ecosdeeldra.notify.Reminders
 import com.fabiosilva.ecosdeeldra.ui.DefeatOverlay
 import com.fabiosilva.ecosdeeldra.ui.HomeScreen
+import com.fabiosilva.ecosdeeldra.ui.HudEditorScreen
 import com.fabiosilva.ecosdeeldra.ui.HudView
 import com.fabiosilva.ecosdeeldra.ui.LoadingOverlay
 import com.fabiosilva.ecosdeeldra.ui.MapOverlay
@@ -394,7 +395,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         audio.sfxVolume = s.sfxVolume
         audio.musicVolume = s.musicVolume
         surface.setQuality(s.quality)
-        hud.applySettings(s.leftHanded, s.vibration, s.showFps)
+        hud.applySettings(s.leftHanded, s.vibration, s.showFps, s.hudLayout, s.hudOpacity)
         engine {
             NativeBridge.setSettings(s.sensitivity, s.aimAssist, s.autoFire, s.invertY)
             NativeBridge.setGraphics(s.quality, s.cinematic)
@@ -458,7 +459,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         loading = LoadingOverlay(this, stage).also { showOverlay(it) }
         hud.reset()
         hud.playerName = Skins.get(p.selectedSkin).name
-        hud.applySettings(p.settings.leftHanded, p.settings.vibration, p.settings.showFps)
+        hud.applySettings(p.settings.leftHanded, p.settings.vibration, p.settings.showFps, p.settings.hudLayout, p.settings.hudOpacity)
         audio.setMusic(GameAudio.Music.BATTLE)
         // Deixa a tela de carregamento aparecer antes de gerar o mundo.
         surface.postDelayed({ engine { NativeBridge.startMission(config) } }, 120)
@@ -552,7 +553,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 hud.haptic(true)
             }
             Ev.CHEST -> {
-                hud.message("BAÚ ABERTO! +◆ $a", Palette.gold)
+                hud.message(if (b == 1) "BAÚ ABERTO! +◆ $a  +1 GRANADA" else "BAÚ ABERTO! +◆ $a", Palette.gold)
                 audio.playUi("reward", 0.8f)
             }
             Ev.POI -> {
@@ -776,6 +777,9 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         showOverlay(SettingsScreen(this, fromPause = true))
     }
 
+    /** Editor de HUD (posição, tamanho e transparência dos controles). */
+    fun showHudEditor(fromPause: Boolean) = showOverlay(HudEditorScreen(this, fromPause))
+
     private fun mapStyleName(style: Int): String = when (style) {
         1 -> "ARQUIPÉLAGO"
         2 -> "VALE"
@@ -839,7 +843,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         hud.reset()
         hud.pvpNames = info.players.associate { it.id to it.name }
         hud.playerName = info.players.firstOrNull { it.id == info.localId }?.name ?: "Você"
-        hud.applySettings(progress.settings.leftHanded, progress.settings.vibration, progress.settings.showFps)
+        hud.applySettings(progress.settings.leftHanded, progress.settings.vibration, progress.settings.showFps, progress.settings.hudLayout, progress.settings.hudOpacity)
         audio.setMusic(GameAudio.Music.BATTLE)
         val host = info.hostAddress
         surface.postDelayed({ engine { NativeBridge.startPvp(cfg, host) } }, 120)

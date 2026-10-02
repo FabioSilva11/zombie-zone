@@ -109,6 +109,16 @@ JNIEXPORT void JNICALL ZZ_FN(setGraphics)(JNIEnv*, jobject, jint quality, jboole
 
 JNIEXPORT void JNICALL ZZ_FN(requestSupply)(JNIEnv*, jobject) { game().requestSupply(); }
 
+JNIEXPORT void JNICALL ZZ_FN(toggleCrouch)(JNIEnv*, jobject) { game().toggleCrouch(); }
+
+JNIEXPORT void JNICALL ZZ_FN(toggleSprint)(JNIEnv*, jobject) { game().toggleSprint(); }
+
+JNIEXPORT void JNICALL ZZ_FN(pressMelee)(JNIEnv*, jobject) { game().pressMelee(); }
+
+JNIEXPORT void JNICALL ZZ_FN(pressGrenade)(JNIEnv*, jobject) { game().pressGrenade(); }
+
+JNIEXPORT void JNICALL ZZ_FN(swapShoulder)(JNIEnv*, jobject) { game().swapShoulder(); }
+
 JNIEXPORT void JNICALL ZZ_FN(setMove)(JNIEnv*, jobject, jfloat x, jfloat y) { game().setMove(x, y); }
 
 JNIEXPORT void JNICALL ZZ_FN(addLook)(JNIEnv*, jobject, jfloat dx, jfloat dy) { game().addLook(dx, dy); }
