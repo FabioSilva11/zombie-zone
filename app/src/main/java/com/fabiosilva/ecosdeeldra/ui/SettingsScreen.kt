@@ -10,6 +10,7 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import com.fabiosilva.ecosdeeldra.MainActivity
+import com.fabiosilva.ecosdeeldra.ads.AdConsent
 
 @SuppressLint("ViewConstructor", "UseSwitchCompatOrMaterialCode")
 class SettingsScreen(private val app: MainActivity, private val fromPause: Boolean) : FrameLayout(app) {
@@ -54,6 +55,9 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
             s.reminders = it
             if (it) app.requestNotificationsOnce()
         })
+        if (AdConsent.privacyOptionsRequired(app)) {
+            right.addView(Ui.button(app, "PRIVACIDADE DOS ANÚNCIOS", Palette.stone, Color.WHITE, 12f) { AdConsent.showPrivacyOptions(app) }, Ui.lp(Ui.MATCH, app.dpi(42)).apply { topMargin = app.dpi(4) })
+        }
         right.addView(Ui.text(app, "Personagens: Kenney Blocky Characters (CC0). Mundo, texturas, sons e músicas gerados para o Zombie Zone.", 10f, Palette.muted).apply { setPadding(0, app.dpi(10), 0, 0) })
 
         val columns = Ui.row(app, Gravity.TOP)

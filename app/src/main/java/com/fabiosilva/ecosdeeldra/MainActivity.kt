@@ -14,6 +14,7 @@ import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import com.fabiosilva.ecosdeeldra.ads.AdConsent
 import com.fabiosilva.ecosdeeldra.ads.RewardedAds
 import com.fabiosilva.ecosdeeldra.audio.GameAudio
 import com.fabiosilva.ecosdeeldra.data.Campaign
@@ -148,7 +149,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val newDay = Rules.onAppOpen(progress, today())
         Rules.refreshSkinUnlocks(progress)
         store.save(progress)
-        ads.load()
+        AdConsent.gather(this) { ads.load() }
         showHome()
         if (Rules.canClaimCalendar(progress, today())) {
             surface.postDelayed({ showDailyReward() }, if (newDay) 900L else 600L)

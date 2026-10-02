@@ -129,7 +129,7 @@ adb install -r -t app/build/intermediates/apk/debug/app-debug.apk
 ```
 
 - **Requisitos:** NDK 28.2.13676358 e CMake 3.22.1 (pelo SDK Manager), JDK 17.
-- **ID do app:** `com.fabiosilva.ecosdeeldra`. Versão `0.2.0` (versionCode 2).
+- **ID do app:** `com.fabiosilva.ecosdeeldra`. Versão `0.3.0` (versionCode 3).
 
 ## Versão anterior
 

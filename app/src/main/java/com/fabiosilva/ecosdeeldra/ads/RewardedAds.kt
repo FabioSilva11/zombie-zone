@@ -2,6 +2,7 @@ package com.fabiosilva.ecosdeeldra.ads
 
 import android.app.Activity
 import android.util.Log
+import com.fabiosilva.ecosdeeldra.BuildConfig
 import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
@@ -10,8 +11,8 @@ import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 
 /**
- * Anúncios premiados do AdMob. Usa o ID de TESTE do Google; troque [AD_UNIT_ID]
- * (e o APPLICATION_ID no AndroidManifest) pelos IDs reais antes de publicar.
+ * Anúncios premiados do AdMob (bloco ADMOB_REWARDED_ID, definido no app/build.gradle.kts).
+ * Só carrega depois do consentimento e da inicialização do SDK ([AdConsent]).
  */
 class RewardedAds(private val activity: Activity) {
     private var ad: RewardedAd? = null
@@ -23,7 +24,7 @@ class RewardedAds(private val activity: Activity) {
     val isReady: Boolean get() = ad != null
 
     fun load() {
-        if (ad != null || loading || showing) return
+        if (!AdConsent.ready || ad != null || loading || showing) return
         loading = true
         RewardedAd.load(activity, AD_UNIT_ID, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
             override fun onAdLoaded(loaded: RewardedAd) {
@@ -73,6 +74,6 @@ class RewardedAds(private val activity: Activity) {
 
     private companion object {
         const val TAG = "RewardedAds"
-        const val AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
+        val AD_UNIT_ID: String = BuildConfig.ADMOB_REWARDED_ID
     }
 }
