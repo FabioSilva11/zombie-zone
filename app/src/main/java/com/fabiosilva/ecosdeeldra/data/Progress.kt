@@ -14,6 +14,10 @@ class Stats {
     var pvpKills = 0
     var pvpWins = 0
     var pvpMatches = 0
+    var chests = 0
+    var nests = 0
+    var distance = 0L // metros percorridos nas ilhas
+    var losses = 0
 }
 
 class StageRecord(
@@ -21,6 +25,8 @@ class StageRecord(
     var stars: Int = 0,
     var bestTime: Float = 0f,
     var crystalMask: Int = 0,
+    var fails: Int = 0,
+    var skipped: Boolean = false,
 )
 
 class DailyMission(val id: String, var progress: Int = 0, var claimed: Boolean = false)
@@ -38,6 +44,7 @@ class Settings {
     var showFps = false
     var leftHanded = false
     var playerName = ""
+    var cinematic = false // iluminação cinematográfica (sombras, bloom, raios de sol)
 }
 
 /** Todo o progresso salvo do jogador. A lógica fica em [Rules] para ser testável sem Android. */
@@ -60,14 +67,19 @@ class Progress {
     var adsToday = 0
     var chestReadyAt = 0L
     var tutorialSeen = false
+    var missionsSinceInterstitial = 0
+    var lastAdAt = 0L
     val settings = Settings()
 
     fun record(stage: Int): StageRecord = stages.getOrPut(stage) { StageRecord() }
     fun isStageCompleted(stage: Int): Boolean = stages[stage]?.completed == true
     fun totalStars(): Int = stages.values.sumOf { it.stars }
+    fun completedStages(): Int = stages.values.count { it.completed }
+
+    /** As fases são infinitas: a próxima libera assim que a anterior é vencida (ou pulada). */
     fun highestUnlockedStage(): Int {
         var n = 1
-        while (n < Campaign.stages.size && isStageCompleted(n)) n++
+        while (isStageCompleted(n)) n++
         return n
     }
 }
@@ -83,6 +95,10 @@ data class MissionResult(
     val bestCombo: Int,
     val shots: Int = 0,
     val hits: Int = 0,
+    val chests: Int = 0,
+    val chestDiamonds: Int = 0,
+    val distance: Float = 0f,
+    val nests: Int = 0,
 )
 
 data class RewardSummary(
@@ -93,8 +109,10 @@ data class RewardSummary(
     val crystalBonus: Int,
     val killBonus: Int,
     val newCrystals: Int,
+    val chestBonus: Int = 0,
+    val exploreBonus: Int = 0,
 ) {
-    val total: Int get() = firstClear + starBonus + crystalBonus + killBonus
+    val total: Int get() = firstClear + starBonus + crystalBonus + killBonus + chestBonus + exploreBonus
 }
 
 data class DailyDef(val id: String, val title: String, val goal: Int, val reward: Int)
@@ -116,6 +134,9 @@ object Rules {
         DailyDef("ad", "Assista a 1 anúncio", 1, 30),
         DailyDef("play", "Jogue por 10 minutos", 600, 40),
         DailyDef("combo", "Faça um combo de 5 abates", 1, 50),
+        DailyDef("chest", "Abra 3 baús escondidos na ilha", 3, 45),
+        DailyDef("nest", "Destrua 2 ninhos de infecção", 2, 50),
+        DailyDef("explore", "Percorra 2 km explorando", 2000, 40),
     )
 
     fun dailyDef(id: String): DailyDef = DAILY_POOL.first { it.id == id }
@@ -228,6 +249,12 @@ object Rules {
         bumpDaily(p, "headshot", r.headshots)
         bumpDaily(p, "play", r.elapsedSeconds.toInt())
         if (r.bestCombo >= 5) bumpDaily(p, "combo", 1)
+        p.stats.chests += r.chests
+        p.stats.nests += r.nests
+        p.stats.distance += r.distance.toLong()
+        bumpDaily(p, "chest", r.chests)
+        bumpDaily(p, "nest", r.nests)
+        bumpDaily(p, "explore", r.distance.toInt())
 
         val record = p.record(stage.number)
         val newMask = r.crystalMask and record.crystalMask.inv() and 0b111
@@ -249,13 +276,45 @@ object Rules {
             p.stats.wins += 1
             bumpDaily(p, "win", 1)
             if (stars == 3) bumpDaily(p, "stars3", 1)
+        } else {
+            record.fails += 1
+            p.stats.losses += 1
         }
         val crystalBonus = newCrystals * 10
         val killBonus = r.kills
-        val summary = RewardSummary(stars, conditions, firstClear, starBonus, crystalBonus, killBonus, newCrystals)
+        // Exploração também paga: diamantes dos baús e 1 diamante a cada 100 m percorridos.
+        val exploreBonus = (r.distance / 100f).toInt().coerceAtMost(40)
+        val summary = RewardSummary(stars, conditions, firstClear, starBonus, crystalBonus, killBonus, newCrystals, r.chestDiamonds, exploreBonus)
         p.diamonds += summary.total
         return summary
     }
+
+    /** Fase travada depois de algumas derrotas pode ser pulada com um anúncio. */
+    const val SKIP_AFTER_FAILS = 2
+
+    /** [pendingFails] conta a derrota que ainda está na tela (o resultado só é aplicado ao sair). */
+    fun canSkip(p: Progress, stage: Int, pendingFails: Int = 0): Boolean {
+        val record = p.stages[stage]
+        val fails = (record?.fails ?: 0) + pendingFails
+        return record?.completed != true && fails >= SKIP_AFTER_FAILS && stage == p.highestUnlockedStage()
+    }
+
+    fun skipStage(p: Progress, stage: Int): Boolean {
+        if (!canSkip(p, stage)) return false
+        val record = p.record(stage)
+        record.completed = true
+        record.skipped = true
+        return true
+    }
+
+    /** Intersticial só depois de algumas partidas e nunca colado em outro anúncio. */
+    const val INTERSTITIAL_EVERY = 2
+    const val INTERSTITIAL_GAP_MS = 150_000L
+
+    fun shouldShowInterstitial(p: Progress, now: Long): Boolean =
+        p.stats.wins + p.stats.losses >= 3 &&
+            p.missionsSinceInterstitial >= INTERSTITIAL_EVERY &&
+            now - p.lastAdAt >= INTERSTITIAL_GAP_MS
 
     /** Libera skins cujo objetivo foi cumprido; retorna as recém-liberadas. */
     fun refreshSkinUnlocks(p: Progress): List<SkinDef> {

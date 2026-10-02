@@ -1,7 +1,9 @@
-// Mundo voxel: blocos em grade, chunks com malha (opaca, recorte e água), raycast e colisão AABB.
+// Mundo voxel em chunks de 16x16: mundo finito (lobby/PvP) ou mundo em streaming (ilhas das fases),
+// malha por chunk (opaca, recorte e água), raycast e colisão AABB.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "../core/math.h"
@@ -15,7 +17,10 @@ constexpr float kPosScale = 8.0f;  // posições dos vértices em 1/8 de bloco
 enum VertexFlags : uint8_t {
     VF_WATER = 1,
     VF_EMISSIVE = 2,
-    VF_SWAY = 4,
+    VF_SWAY = 4,    // topo de plantas em cruz (balança com o vento)
+    VF_LEAF = 8,    // folhas das árvores (tremulam com o vento)
+    VF_GRASS = 16,  // topo de grama (ondas de vento na cor)
+    VF_PLANT = 32,  // qualquer vértice de planta em cruz (normal difusa na iluminação)
 };
 
 #pragma pack(push, 1)
@@ -33,12 +38,39 @@ struct ChunkMesh {
     std::vector<VoxelVertex> water;
 };
 
+// Recursos de GPU do chunk (preenchidos e lidos apenas pelo renderer, na thread GL).
+struct ChunkGpu {
+    uint32_t vao[3] = {0, 0, 0};
+    uint32_t vbo[3] = {0, 0, 0};
+    int quads[3] = {0, 0, 0};
+    uint32_t version = 0;
+    int contextId = -1;
+};
+
 struct Chunk {
     int cx = 0, cz = 0;
-    bool dirty = true;
-    uint32_t version = 0;  // incrementa a cada remalha; o renderer reenvia ao GPU
+    bool generated = false;  // blocos preenchidos
+    bool dirty = true;       // precisa remalhar
+    bool meshed = false;     // já tem malha válida
+    uint32_t version = 0;    // incrementa a cada remalha; o renderer reenvia ao GPU
+    int maxY = 0;            // maior y ocupado + 1 (acelera a malha)
+    int listIndex = -1;
+    std::vector<uint8_t> blocks;   // kChunkSize * kChunkSize * altura
+    int16_t ground[kChunkSize * kChunkSize] = {};
     ChunkMesh mesh;
     AABB bounds;
+    std::vector<Vec3> lights;     // lanternas/fogueiras geradas com o chunk
+    std::vector<Vec3> campfires;  // partículas de fogo
+    ChunkGpu gpu;
+};
+
+class World;
+
+// Gera o conteúdo de um chunk sob demanda (mundo em streaming).
+class ChunkSource {
+public:
+    virtual ~ChunkSource() = default;
+    virtual void generate(Chunk& chunk, int height) = 0;
 };
 
 struct RayHit {
@@ -50,58 +82,101 @@ struct RayHit {
 
 class World {
 public:
+    // Mundo finito [0,w) x [0,d): todos os chunks existem desde o início (cheios de ar).
     void reset(int width, int height, int depth);
+    // Mundo em streaming: chunks gerados por `source` ao redor do jogador e descartados ao longe.
+    void resetStreaming(int width, int height, int depth, ChunkSource* source);
 
     int width() const { return width_; }
     int height() const { return height_; }
     int depth() const { return depth_; }
+    bool streaming() const { return source_ != nullptr; }
     bool inBounds(int x, int y, int z) const {
         return x >= 0 && z >= 0 && y >= 0 && x < width_ && z < depth_ && y < height_;
     }
+    bool columnInBounds(int x, int z) const { return x >= 0 && z >= 0 && x < width_ && z < depth_; }
 
     uint8_t get(int x, int y, int z) const {
         if (y < 0) return B_BEDROCK;
-        if (!inBounds(x, y, z)) return B_AIR;
-        return blocks_[index(x, y, z)];
+        if (y >= height_ || !columnInBounds(x, z)) return B_AIR;
+        const Chunk* c = chunkAt(x >> 4, z >> 4);
+        if (!c || !c->generated) return B_AIR;
+        return c->blocks[blockIndex(x & 15, y, z & 15)];
     }
     void set(int x, int y, int z, uint8_t block, bool markDirty = true);
     bool solid(int x, int y, int z) const { return isSolid(get(x, y, z)); }
 
     // Altura em que um ator fica de pé na coluna (primeiro ar acima do chão gerado).
     int standHeight(int x, int z) const;
-    void setGroundHeight(int x, int z, int h) { if (columnInBounds(x, z)) ground_[x + z * width_] = static_cast<int16_t>(h); }
-    int groundHeight(int x, int z) const { return columnInBounds(x, z) ? ground_[x + z * width_] : 0; }
-    bool columnInBounds(int x, int z) const { return x >= 0 && z >= 0 && x < width_ && z < depth_; }
+    void setGroundHeight(int x, int z, int h);
+    int groundHeight(int x, int z) const;
     // Topo visível (inclui árvores) — usado no minimapa.
     int topBlockY(int x, int z) const;
+    // A coluna já foi gerada (o terreno existe ali)?
+    bool columnReady(int x, int z) const {
+        if (!columnInBounds(x, z)) return false;
+        const Chunk* c = chunkAt(x >> 4, z >> 4);
+        return c && c->generated;
+    }
+    // A coluna tem malha pronta (o jogador consegue vê-la)?
+    bool columnMeshed(int x, int z) const {
+        if (!columnInBounds(x, z)) return false;
+        const Chunk* c = chunkAt(x >> 4, z >> 4);
+        return c && c->meshed;
+    }
 
     bool raycast(const Vec3& origin, const Vec3& direction, float maxDistance, RayHit& hit) const;
     bool lineOfSight(const Vec3& from, const Vec3& to) const;
     bool boxCollides(const Vec3& minCorner, const Vec3& maxCorner) const;
     bool isWaterAt(const Vec3& p) const { return get(static_cast<int>(std::floor(p.x)), static_cast<int>(std::floor(p.y)), static_cast<int>(std::floor(p.z))) == B_WATER; }
 
-    std::vector<Chunk>& chunks() { return chunks_; }
-    const std::vector<Chunk>& chunks() const { return chunks_; }
+    const std::vector<Chunk*>& chunks() const { return list_; }
+    Chunk* chunkAt(int cx, int cz) {
+        if (cx < 0 || cz < 0 || cx >= chunksX_ || cz >= chunksZ_) return nullptr;
+        return grid_[static_cast<size_t>(cz) * chunksX_ + cx].get();
+    }
+    const Chunk* chunkAt(int cx, int cz) const {
+        if (cx < 0 || cz < 0 || cx >= chunksX_ || cz >= chunksZ_) return nullptr;
+        return grid_[static_cast<size_t>(cz) * chunksX_ + cx].get();
+    }
     int chunksX() const { return chunksX_; }
     int chunksZ() const { return chunksZ_; }
     uint32_t generation() const { return generation_; }
     void markAllDirty();
-    // Remalha até maxChunks chunks sujos; retorna quantos foram reconstruídos.
+    // Remalha até maxChunks chunks sujos (com vizinhos prontos); retorna quantos foram reconstruídos.
     int rebuildDirty(int maxChunks);
+    // Streaming: gera/malha os chunks mais próximos de (x,z) e descarta os distantes.
+    // Retorna quantos chunks dentro do raio ainda faltam ficar prontos.
+    int stream(float x, float z, int radius, int maxGenerate, int maxMesh);
+    // Recursos de GPU de chunks descartados (o renderer apaga).
+    void drainGpuGarbage(std::vector<ChunkGpu>& out) {
+        out.insert(out.end(), gpuGarbage_.begin(), gpuGarbage_.end());
+        gpuGarbage_.clear();
+    }
 
 private:
-    size_t index(int x, int y, int z) const {
-        return (static_cast<size_t>(y) * depth_ + static_cast<size_t>(z)) * width_ + static_cast<size_t>(x);
+    static size_t blockIndex(int lx, int y, int lz) {
+        return (static_cast<size_t>(y) << 8) | (static_cast<size_t>(lz) << 4) | static_cast<size_t>(lx);
     }
+    void clear();
+    Chunk* createChunk(int cx, int cz);
+    void destroyChunk(Chunk* chunk);
+    bool neighborsReady(int cx, int cz) const;
     void markDirtyAt(int x, int z);
     void buildChunk(Chunk& chunk);
+    void updateMaxY(Chunk& chunk);
 
     int width_ = 0, height_ = 0, depth_ = 0;
     int chunksX_ = 0, chunksZ_ = 0;
     uint32_t generation_ = 0;
-    std::vector<uint8_t> blocks_;
-    std::vector<int16_t> ground_;
-    std::vector<Chunk> chunks_;
+    ChunkSource* source_ = nullptr;
+    std::vector<std::unique_ptr<Chunk>> grid_;
+    std::vector<Chunk*> list_;
+    std::vector<ChunkGpu> gpuGarbage_;
+    std::vector<std::pair<int, int>> spiral_;
+    int spiralRadius_ = -1;
+    size_t unloadCursor_ = 0;
+    std::vector<uint8_t> pad_;  // cópia 18x18xH do chunk + vizinhos para a malha
 };
 
 // Movimento de uma caixa (pés no centro da base) contra blocos sólidos, com subida automática de degrau.

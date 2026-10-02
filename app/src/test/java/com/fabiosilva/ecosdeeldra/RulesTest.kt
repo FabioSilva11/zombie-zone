@@ -139,6 +139,56 @@ class RulesTest {
     }
 
     @Test
+    fun stagesAreInfiniteAndKeepUnlocking() {
+        val p = Progress()
+        for (n in 1..25) Rules.applyResult(p, Campaign.stage(n), win(n))
+        assertEquals(26, p.highestUnlockedStage())
+        val far = Campaign.stage(137)
+        assertEquals(137, far.number)
+        assertTrue(far.title.isNotBlank())
+        assertTrue(Campaign.difficulty(137, 0, 0, 0).zombieHealth > Campaign.difficulty(20, 0, 0, 0).zombieHealth)
+        assertTrue(Campaign.difficulty(137, 0, 0, 0).power > Campaign.difficulty(20, 0, 0, 0).power)
+    }
+
+    @Test
+    fun stuckStageCanBeSkippedAfterTwoDefeats() {
+        val p = Progress()
+        val stage = Campaign.stage(1)
+        val lose = MissionResult(false, 30f, 0f, 100f, 2, 0, 0, 0)
+        Rules.applyResult(p, stage, lose)
+        assertFalse(Rules.canSkip(p, 1))
+        assertTrue(Rules.canSkip(p, 1, pendingFails = 1))
+        Rules.applyResult(p, stage, lose)
+        assertTrue(Rules.skipStage(p, 1))
+        assertEquals(2, p.highestUnlockedStage())
+        assertEquals(0, p.totalStars())
+    }
+
+    @Test
+    fun explorationPaysChestsAndDistance() {
+        val p = Progress()
+        val r = MissionResult(true, 60f, 100f, 100f, 0, 0, 0, 0, chests = 2, chestDiamonds = 25, distance = 1500f, nests = 3)
+        val summary = Rules.applyResult(p, Campaign.stage(1), r)
+        assertEquals(25, summary.chestBonus)
+        assertEquals(15, summary.exploreBonus)
+        assertEquals(2, p.stats.chests)
+        assertEquals(3, p.stats.nests)
+    }
+
+    @Test
+    fun interstitialRespectsFrequency() {
+        val p = Progress()
+        p.stats.wins = 3
+        p.missionsSinceInterstitial = 1
+        assertFalse(Rules.shouldShowInterstitial(p, 1_000_000L))
+        p.missionsSinceInterstitial = 2
+        p.lastAdAt = 1_000_000L - 10_000L
+        assertFalse(Rules.shouldShowInterstitial(p, 1_000_000L))
+        p.lastAdAt = 0L
+        assertTrue(Rules.shouldShowInterstitial(p, 1_000_000L))
+    }
+
+    @Test
     fun difficultyScalesWithStageAndUpgrades() {
         val easy = Campaign.difficulty(1, 0, 0, 0)
         val hard = Campaign.difficulty(20, 5, 5, 5)

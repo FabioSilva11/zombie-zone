@@ -19,7 +19,11 @@ object Cfg {
     const val INVERT_Y = 14
     const val SEED = 15
     const val RELOAD_SPEED = 16
-    const val COUNT = 17
+    const val BOOST_HEALTH = 17
+    const val BOOST_DAMAGE = 18
+    const val QUALITY = 19
+    const val CINEMATIC = 20
+    const val COUNT = 21
 }
 
 object Hud {
@@ -67,18 +71,39 @@ object Hud {
     const val LABEL_COUNT = 161
     const val LABELS = 162
     const val BAR_COUNT = 282
-    const val BARS = 283
-    const val PVP = 350
-    const val PVP_LOCAL = 351
-    const val PVP_TIME = 352
-    const val PVP_LIMIT = 353
-    const val PVP_ENDED = 354
-    const val PVP_WINNER = 355
-    const val PVP_RESPAWN = 356
-    const val PVP_LINK = 357
-    const val PVP_PLAYERS = 358 // (presente, ativo, vivo, abates, mortes, sx, sy, na tela, x, z, atirando) x 8
+    const val BARS = 283 // (sx, sy, fração, alfa, tipo + 100 se elite) x 16
+    const val BAR_STRIDE = 5
+    const val PVP = 400
+    const val PVP_LOCAL = 401
+    const val PVP_TIME = 402
+    const val PVP_LIMIT = 403
+    const val PVP_ENDED = 404
+    const val PVP_WINNER = 405
+    const val PVP_RESPAWN = 406
+    const val PVP_LINK = 407
+    const val PVP_PLAYERS = 408 // (presente, ativo, vivo, abates, mortes, sx, sy, na tela, x, z, atirando) x 8
     const val PVP_STRIDE = 11
-    const val SIZE = 450
+    const val OBJ_COUNT = 500
+    const val OBJ = 501 // (x, z, estado, sx, sy, na tela) x 4 — 1 ninho, 2 destruído, 3 portal fechado, 4 portal aberto
+    const val OBJ_STRIDE = 6
+    const val NESTS_DONE = 525
+    const val NEST_TOTAL = 526
+    const val NEST_HP = 527
+    const val BURNING = 528
+    const val BLEEDING = 529
+    const val POISON = 530
+    const val SLOWED = 531
+    const val BOOST = 532
+    const val SUPPLY = 533
+    const val DISTANCE = 534
+    const val CHESTS = 535
+    const val CHEST_DIAMONDS = 536
+    const val ISLAND = 537
+    const val SHAKE = 538
+    const val NEST_NEAR = 539
+    const val SUPPLY_X = 540
+    const val SUPPLY_Z = 541
+    const val SIZE = 560
 }
 
 /** Configuração da partida PvP (espelha PvpConfigIndex em protocol.h). */
@@ -108,6 +133,14 @@ object Ev {
     const val PVP_LEFT = 11
     const val PVP_END = 12
     const val PVP_LOST = 13
+    const val NEST_DESTROYED = 14
+    const val CHEST = 15
+    const val POI = 16
+    const val SUPPLY = 17
+    const val ELITE = 18
+    const val STATUS = 19
+    const val MINIMAP = 20
+    const val NEW_KIND = 21
 }
 
 object Snd {
@@ -126,6 +159,15 @@ object Snd {
     const val SPLASH = 12
     const val ZOMBIE_ATTACK = 13
     const val HEAL = 14
+    const val THROW = 15
+    const val FIRE = 16
+    const val EXPLOSION = 17
+    const val KNIFE = 18
+    const val SCREAM = 19
+    const val ROCK = 20
+    const val CHEST = 21
+    const val SPIT = 22
+    const val COUNT = 23
 }
 
 object Res {
@@ -138,5 +180,22 @@ object Res {
     const val DAMAGE_TAKEN = 6
     const val SHOTS = 7
     const val HITS = 8
-    const val SIZE = 9
+    const val CHESTS = 9
+    const val CHEST_DIAMONDS = 10
+    const val DISTANCE = 11
+    const val NESTS = 12
+    const val SIZE = 13
+}
+
+/** Tipos de ponto de interesse (CampKind em structures.h). */
+object PoiKind {
+    const val FIRE = 0
+    const val RUINS = 1
+    const val GRAVEYARD = 2
+    const val DEPOT = 3
+    const val FARM = 4
+    const val TOWER = 5
+    const val OUTPOST = 6
+    const val NEST = 7
+    const val PORTAL = 8
 }

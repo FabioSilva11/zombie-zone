@@ -31,6 +31,7 @@ object NativeBridge {
     external fun setPaused(paused: Boolean)
     external fun revive()
     external fun setSettings(sensitivity: Float, aimAssist: Boolean, autoFire: Boolean, invertY: Boolean)
+    external fun setGraphics(quality: Int, cinematic: Boolean)
 
     // Entrada (seguras em qualquer thread)
     external fun setMove(x: Float, y: Float)
@@ -39,6 +40,7 @@ object NativeBridge {
     external fun setAim(on: Boolean)
     external fun pressJump()
     external fun pressReload()
+    external fun requestSupply()
 
     // Saídas
     external fun copyHud(out: FloatArray)
@@ -46,6 +48,8 @@ object NativeBridge {
     external fun copyResult(out: FloatArray)
     external fun minimapSize(): Int
     external fun copyMinimap(out: IntArray)
+    external fun bigMapSize(): Int
+    external fun copyBigMap(out: IntArray)
 
     /**
      * Chamado pelo C++ para decodificar PNGs dos assets com BitmapFactory.

@@ -69,6 +69,9 @@ JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray val
     cfg.invertY = c[C_INVERT_Y] > 0.5f;
     cfg.seed = static_cast<uint32_t>(c[C_SEED]);
     cfg.reloadSpeed = c[C_RELOAD_SPEED] > 0 ? c[C_RELOAD_SPEED] : 1.0f;
+    cfg.boostHealth = c[C_BOOST_HEALTH] > 0 ? c[C_BOOST_HEALTH] : 1.0f;
+    cfg.boostDamage = c[C_BOOST_DAMAGE] > 0 ? c[C_BOOST_DAMAGE] : 1.0f;
+    game().setGraphics(static_cast<int>(c[C_QUALITY]), c[C_CINEMATIC] > 0.5f);
     game().startMission(cfg);
 }
 
@@ -101,6 +104,10 @@ JNIEXPORT void JNICALL ZZ_FN(revive)(JNIEnv*, jobject) { game().revive(); }
 JNIEXPORT void JNICALL ZZ_FN(setSettings)(JNIEnv*, jobject, jfloat sensitivity, jboolean aimAssist, jboolean autoFire, jboolean invertY) {
     game().setSettings(sensitivity, aimAssist, autoFire, invertY);
 }
+
+JNIEXPORT void JNICALL ZZ_FN(setGraphics)(JNIEnv*, jobject, jint quality, jboolean cinematic) { game().setGraphics(quality, cinematic); }
+
+JNIEXPORT void JNICALL ZZ_FN(requestSupply)(JNIEnv*, jobject) { game().requestSupply(); }
 
 JNIEXPORT void JNICALL ZZ_FN(setMove)(JNIEnv*, jobject, jfloat x, jfloat y) { game().setMove(x, y); }
 
@@ -142,6 +149,15 @@ JNIEXPORT void JNICALL ZZ_FN(copyMinimap)(JNIEnv* env, jobject, jintArray out) {
     jsize n = env->GetArrayLength(out);
     std::vector<uint32_t> buffer(static_cast<size_t>(n));
     game().copyMinimap(buffer.data(), n);
+    env->SetIntArrayRegion(out, 0, n, reinterpret_cast<const jint*>(buffer.data()));
+}
+
+JNIEXPORT jint JNICALL ZZ_FN(bigMapSize)(JNIEnv*, jobject) { return game().bigMapSize(); }
+
+JNIEXPORT void JNICALL ZZ_FN(copyBigMap)(JNIEnv* env, jobject, jintArray out) {
+    jsize n = env->GetArrayLength(out);
+    std::vector<uint32_t> buffer(static_cast<size_t>(n));
+    game().copyBigMap(buffer.data(), n);
     env->SetIntArrayRegion(out, 0, n, reinterpret_cast<const jint*>(buffer.data()));
 }
 

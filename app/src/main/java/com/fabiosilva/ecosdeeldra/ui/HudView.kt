@@ -13,6 +13,7 @@ import android.graphics.Shader
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import com.fabiosilva.ecosdeeldra.data.ZombieKinds
 import com.fabiosilva.ecosdeeldra.engine.Hud
 import com.fabiosilva.ecosdeeldra.engine.NativeBridge
 import kotlin.math.PI
@@ -29,16 +30,18 @@ import kotlin.math.tan
  * - joystick dinâmico (surge onde o polegar toca; empurrar até o fim = correr);
  * - arrastar na metade direita = girar a câmera;
  * - botão ATIRAR (segurar) também gira a câmera ao arrastar;
- * - MIRAR (alterna), PULAR, RECARREGAR, PAUSA e MINIMAPA.
+ * - MIRAR (alterna), PULAR, RECARREGAR, PAUSA, MINIMAPA e SUPRIMENTOS (anúncio).
+ * Na ilha mostra ninhos, portal, efeitos (fogo, sangramento, veneno) e zumbis elite.
  */
 @SuppressLint("ViewConstructor")
 class HudView(context: Context, private val listener: Listener) : View(context) {
     interface Listener {
         fun onPauseRequested()
         fun onMapRequested()
+        fun onSupplyRequested()
     }
 
-    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, AIM, JUMP, RELOAD, PAUSE, MAP }
+    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, AIM, JUMP, RELOAD, PAUSE, MAP, SUPPLY }
     private class Touch(var role: Role, var x: Float, var y: Float, val startX: Float, val startY: Float)
 
     private val hud = FloatArray(Hud.SIZE)
@@ -50,8 +53,13 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     private val path = Path()
     private var vignette: RadialGradient? = null
     private var vignettePaint = Paint()
+    private val statusPaint = Paint()
+    private val statusShaders = HashMap<Int, RadialGradient>()
 
     var minimap: Bitmap? = null
+    var minimapOriginX = 0f   // canto do bitmap do minimapa em coordenadas do mundo
+    var minimapOriginZ = 0f
+    var bigMap: Bitmap? = null
     var pvpNames: Map<Int, String> = emptyMap()
     var playerName = ""
     var showFps = false
@@ -66,6 +74,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     private val feed = ArrayList<Pair<String, Long>>()
     private var feedColor = Palette.lime
     private var lastHealth = -1f
+    private var tip: Pair<String, Long>? = null
 
     // Geometria dos controles (px), recalculada no onSizeChanged.
     private var fireX = 0f; private var fireY = 0f; private var fireR = 0f
@@ -75,6 +84,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     private var smallR = 0f
     private var pauseX = 0f; private var pauseY = 0f
     private var mapX = 0f; private var mapY = 0f; private var mapSize = 0f
+    private var supplyX = 0f; private var supplyY = 0f; private var supplyW = 0f; private var supplyH = 0f
     private var stickRadius = 0f
     private var stickHomeX = 0f; private var stickHomeY = 0f
 
@@ -89,6 +99,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         layoutControls()
         vignette = RadialGradient(w / 2f, h / 2f, hypot(w / 2f, h / 2f), intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(220, 180, 0, 0)), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
         vignettePaint.shader = vignette
+        statusShaders.clear()
     }
 
     private fun layoutControls() {
@@ -104,6 +115,8 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         pauseX = mx(w - d(40f)); pauseY = d(36f)
         mapSize = d(112f)
         mapX = mx(d(28f) + mapSize / 2f); mapY = d(14f) + mapSize / 2f
+        supplyW = d(112f); supplyH = d(34f)
+        supplyX = mapX; supplyY = mapY + mapSize / 2f + d(26f)
         stickRadius = d(58f)
         stickHomeX = mx(d(132f)); stickHomeY = h - d(116f)
         if (!stickActive) { stickBaseX = stickHomeX; stickBaseY = stickHomeY; stickX = stickBaseX; stickY = stickBaseY }
@@ -121,6 +134,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         aiming = false
         stickActive = false
         feed.clear()
+        tip = null
         lastHealth = -1f
         NativeBridge.setMove(0f, 0f)
         NativeBridge.setFire(false)
@@ -134,10 +148,18 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         if (feed.size > 3) feed.removeAt(0)
     }
 
+    /** Dica longa (ex.: habilidade de um zumbi novo) mostrada na parte de baixo por alguns segundos. */
+    fun tip(text: String) {
+        tip = text to System.currentTimeMillis()
+    }
+
     fun haptic(strong: Boolean) {
         if (!vibration) return
         performHapticFeedback(if (strong) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.KEYBOARD_TAP)
     }
+
+    private val island get() = hud[Hud.ISLAND] > 0.5f
+    private val supplyReady get() = island && hud[Hud.SUPPLY] >= 1f
 
     // ------------------------------------------------------------------ toque
 
@@ -152,6 +174,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         if (inside(x, y, reloadX, reloadY, smallR * 1.25f)) return Role.RELOAD
         if (inside(x, y, pauseX, pauseY, d(30f))) return Role.PAUSE
         if (abs(x - mapX) < mapSize / 2 && abs(y - mapY) < mapSize / 2) return Role.MAP
+        if (island && hud[Hud.SUPPLY] >= 0f && abs(x - supplyX) < supplyW / 2 && abs(y - supplyY) < supplyH / 2 + d(4f)) return Role.SUPPLY
         val leftSide = if (leftHanded) x > w * 0.55f else x < w * 0.45f
         if (leftSide && y > h * 0.28f && touches.values.none { it.role == Role.JOYSTICK }) return Role.JOYSTICK
         return Role.LOOK
@@ -178,6 +201,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                     Role.RELOAD -> { NativeBridge.pressReload(); haptic(false) }
                     Role.PAUSE -> listener.onPauseRequested()
                     Role.MAP -> listener.onMapRequested()
+                    Role.SUPPLY -> if (supplyReady) listener.onSupplyRequested()
                     else -> Unit
                 }
             }
@@ -242,13 +266,14 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         val h = height.toFloat()
         val health = hud[Hud.HEALTH]
         val maxHealth = hud[Hud.MAX_HEALTH].coerceAtLeast(1f)
-        if (lastHealth >= 0 && health < lastHealth - 0.5f) haptic(true)
+        if (lastHealth >= 0 && health < lastHealth - 2f) haptic(true)
         lastHealth = health
 
+        drawStatusTint(canvas, w, h)
         drawVignette(canvas, w, h, health / maxHealth)
         drawDamageDirection(canvas, w, h)
         drawWorldLabels(canvas, w, h)
-        drawPortalMarker(canvas, w, h)
+        if (island) drawObjectives(canvas, w, h) else drawPortalMarker(canvas, w, h)
         drawReticle(canvas, w, h)
         drawMinimap(canvas)
         drawStatus(canvas, health, maxHealth)
@@ -258,8 +283,13 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             drawPvpScoreboard(canvas, w)
         } else {
             drawObjective(canvas, w)
+            if (island) {
+                drawNestBar(canvas, w)
+                drawSupplyButton(canvas)
+            }
         }
         drawFeed(canvas, w, h)
+        drawTip(canvas, w, h)
         if (hud[Hud.PVP] > 0.5f) drawPvpRespawn(canvas, w, h)
         drawControls(canvas)
         if (showFps) {
@@ -279,6 +309,26 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.drawRect(0f, 0f, w, h, vignettePaint)
     }
 
+    /** Bordas coloridas: laranja queimando, vermelho sangrando, verde envenenado/lento. */
+    private fun drawStatusTint(canvas: Canvas, w: Float, h: Float) {
+        if (!island) return
+        val pulse = 0.75f + 0.25f * sin(System.currentTimeMillis() / 140.0).toFloat()
+        val states = listOf(
+            Triple(hud[Hud.BURNING], Color.rgb(255, 120, 20), 0.75f),
+            Triple(hud[Hud.BLEEDING], Color.rgb(200, 0, 0), 0.5f),
+            Triple(maxOf(hud[Hud.POISON], hud[Hud.SLOWED]), Color.rgb(90, 220, 40), 0.55f),
+        )
+        for ((value, color, strength) in states) {
+            if (value <= 0f) continue
+            val shader = statusShaders.getOrPut(color) {
+                RadialGradient(w / 2f, h / 2f, hypot(w / 2f, h / 2f), intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, color), floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
+            }
+            statusPaint.shader = shader
+            statusPaint.alpha = (min(1f, value) * strength * pulse * 255).toInt().coerceIn(0, 255)
+            canvas.drawRect(0f, 0f, w, h, statusPaint)
+        }
+    }
+
     private fun drawDamageDirection(canvas: Canvas, w: Float, h: Float) {
         val t = hud[Hud.DAMAGE_DIR_T]
         if (t <= 0f) return
@@ -295,22 +345,37 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     }
 
     private fun drawWorldLabels(canvas: Canvas, w: Float, h: Float) {
-        // Barras de vida dos zumbis atingidos.
+        // Barras de vida dos zumbis atingidos e dos elite próximos.
         val bars = hud[Hud.BAR_COUNT].toInt()
         for (i in 0 until bars) {
-            val o = Hud.BARS + i * 4
+            val o = Hud.BARS + i * Hud.BAR_STRIDE
             val x = hud[o] * w
             val y = hud[o + 1] * h
             val f = hud[o + 2]
             val a = hud[o + 3]
-            val bw = d(38f)
+            val code = hud[o + 4].toInt()
+            val elite = code >= 100
+            val info = ZombieKinds.get(code % 100)
+            val bw = d(if (elite) 52f else 38f)
             val bh = d(5f)
             p.color = Color.argb((a * 170).toInt(), 0, 0, 0)
             rect.set(x - bw / 2 - d(1f), y - d(1f), x + bw / 2 + d(1f), y + bh + d(1f))
             canvas.drawRoundRect(rect, d(2f), d(2f), p)
-            p.color = if (f > 0.5f) Color.argb((a * 255).toInt(), 168, 255, 62) else Color.argb((a * 255).toInt(), 255, 90, 70)
+            p.color = when {
+                elite -> Color.argb((a * 255).toInt(), 255, 200, 60)
+                f > 0.5f -> Color.argb((a * 255).toInt(), 168, 255, 62)
+                else -> Color.argb((a * 255).toInt(), 255, 90, 70)
+            }
             rect.set(x - bw / 2, y, x - bw / 2 + bw * f, y + bh)
             canvas.drawRoundRect(rect, d(2f), d(2f), p)
+            if (elite || (code % 100) != 0) {
+                textPaint.textSize = d(10f)
+                val label = (if (elite) "★ " else "") + info.name.uppercase()
+                textPaint.color = Color.argb((a * 160).toInt(), 0, 0, 0)
+                canvas.drawText(label, x + d(1f), y - d(4f) + d(1f), textPaint)
+                textPaint.color = if (elite) Color.argb((a * 255).toInt(), 255, 210, 80) else Color.argb((a * 255).toInt(), Color.red(info.color), Color.green(info.color), Color.blue(info.color))
+                canvas.drawText(label, x, y - d(4f), textPaint)
+            }
         }
         // Números de dano/cura.
         val labels = hud[Hud.LABEL_COUNT].toInt()
@@ -329,6 +394,175 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         }
     }
 
+    private fun drawMarker(canvas: Canvas, x: Float, y: Float, color: Int, label: String, scale: Float, skull: Boolean) {
+        val s = d(11f) * scale
+        path.reset()
+        path.moveTo(x, y - s); path.lineTo(x + s, y); path.lineTo(x, y + s); path.lineTo(x - s, y); path.close()
+        p.color = color
+        canvas.drawPath(path, p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(2f)
+        p.color = Color.WHITE
+        canvas.drawPath(path, p)
+        p.style = Paint.Style.FILL
+        if (skull) {
+            p.color = Color.WHITE
+            canvas.drawCircle(x, y - d(1.5f) * scale, d(3.5f) * scale, p)
+            canvas.drawRect(x - d(2f) * scale, y, x + d(2f) * scale, y + d(3.5f) * scale, p)
+            p.color = color
+            canvas.drawCircle(x - d(1.3f) * scale, y - d(1.5f) * scale, d(1f) * scale, p)
+            canvas.drawCircle(x + d(1.3f) * scale, y - d(1.5f) * scale, d(1f) * scale, p)
+        }
+        textPaint.textSize = d(11f)
+        textPaint.color = Color.argb(150, 0, 0, 0)
+        canvas.drawText(label, x + d(1f), y + s + d(14f), textPaint)
+        textPaint.color = Color.WHITE
+        canvas.drawText(label, x, y + s + d(13f), textPaint)
+    }
+
+    /**
+     * Ninhos e portal: marcador 3D só na área central (longe dos botões) e uma bússola no topo
+     * com a direção de todos os objetivos — nada de setas na borda por cima dos controles.
+     */
+    private fun drawObjectives(canvas: Canvas, w: Float, h: Float) {
+        val n = hud[Hud.OBJ_COUNT].toInt()
+        val px = hud[Hud.PLAYER_X]
+        val pz = hud[Hud.PLAYER_Z]
+        var target = -1
+        var targetDist = Float.MAX_VALUE
+        val portalOpen = hud[Hud.PORTAL_OPEN] > 0.5f
+        for (i in 0 until n) {
+            val o = Hud.OBJ + i * Hud.OBJ_STRIDE
+            val state = hud[o + 2].toInt()
+            val dist = hypot(hud[o] - px, hud[o + 1] - pz)
+            val wanted = (state == 1 && !portalOpen) || state == 4
+            if (wanted && dist < targetDist) { targetDist = dist; target = i }
+            if (state == 2 || state == 3) continue
+            val sx = hud[o + 3]
+            val sy = hud[o + 4]
+            if (hud[o + 5] > 0.5f && sx in 0.18f..0.82f && sy in 0.16f..0.66f) {
+                val pulse = 1f + 0.12f * sin(System.currentTimeMillis() / 200.0).toFloat()
+                val color = if (state == 4) Palette.purple else Color.rgb(200, 60, 200)
+                drawMarker(canvas, sx * w, sy * h, color, (if (state == 4) "PORTAL " else "NINHO ") + formatDist(dist), pulse, state == 1)
+            }
+        }
+        drawCompass(canvas, w, n, px, pz, target, targetDist)
+    }
+
+    private fun wrapAngle(a: Float): Float {
+        var x = a
+        while (x > PI) x -= TAU
+        while (x < -PI) x += TAU
+        return x
+    }
+
+    private fun drawCompass(canvas: Canvas, w: Float, n: Int, px: Float, pz: Float, target: Int, targetDist: Float) {
+        val yaw = hud[Hud.CAM_YAW]
+        val cw = d(320f)
+        val ch = d(20f)
+        val top = d(50f)
+        val left = w / 2 - cw / 2
+        val half = (PI / 2).toFloat() // a bússola mostra 90° para cada lado
+        fun xFor(rel: Float) = w / 2 + rel / half * (cw / 2 - d(8f))
+        rect.set(left, top, left + cw, top + ch)
+        p.color = Color.argb(170, 8, 14, 26)
+        canvas.drawRoundRect(rect, d(8f), d(8f), p)
+        canvas.save()
+        canvas.clipRect(rect)
+        val names = arrayOf("N", "L", "S", "O")
+        textPaint.textSize = d(10f)
+        for (k in 0 until 24) {
+            val rel = wrapAngle(k * TAU / 24f - yaw)
+            if (abs(rel) > half) continue
+            val x = xFor(rel)
+            if (k % 6 == 0) {
+                textPaint.color = if (k == 0) Palette.red else Color.WHITE
+                canvas.drawText(names[k / 6], x, top + d(14f), textPaint)
+            } else {
+                p.color = Color.argb(120, 255, 255, 255)
+                val th = if (k % 2 == 0) d(6f) else d(3f)
+                canvas.drawRect(x - d(0.7f), top + ch - th - d(2f), x + d(0.7f), top + ch - d(2f), p)
+            }
+        }
+        for (i in 0 until n) {
+            val o = Hud.OBJ + i * Hud.OBJ_STRIDE
+            val state = hud[o + 2].toInt()
+            if (state == 2) continue
+            val rel = wrapAngle(atan2(hud[o] - px, -(hud[o + 1] - pz)) - yaw)
+            val color = when (state) { 4 -> Palette.purple; 3 -> Color.argb(150, 150, 120, 210); else -> Color.rgb(225, 75, 225) }
+            p.color = color
+            val s = d(if (i == target) 7f else 5f)
+            val cy = top + ch / 2
+            if (abs(rel) <= half) {
+                val x = xFor(rel)
+                path.reset()
+                path.moveTo(x, cy - s); path.lineTo(x + s, cy); path.lineTo(x, cy + s); path.lineTo(x - s, cy); path.close()
+                canvas.drawPath(path, p)
+            } else {
+                // Fora do campo da bússola: triângulo na ponta indicando para que lado virar.
+                val right = rel > 0
+                val x = if (right) left + cw - d(6f) else left + d(6f)
+                path.reset()
+                if (right) { path.moveTo(x + s * 0.6f, cy); path.lineTo(x - s * 0.6f, cy - s); path.lineTo(x - s * 0.6f, cy + s) }
+                else { path.moveTo(x - s * 0.6f, cy); path.lineTo(x + s * 0.6f, cy - s); path.lineTo(x + s * 0.6f, cy + s) }
+                path.close()
+                canvas.drawPath(path, p)
+            }
+        }
+        canvas.restore()
+        p.color = Color.WHITE
+        canvas.drawRect(w / 2 - d(1f), top - d(2f), w / 2 + d(1f), top + ch + d(2f), p)
+        if (target >= 0) {
+            val state = hud[Hud.OBJ + target * Hud.OBJ_STRIDE + 2].toInt()
+            textPaint.textSize = d(11f)
+            textPaint.color = Color.argb(160, 0, 0, 0)
+            val label = (if (state == 4) "PORTAL " else "PRÓXIMO NINHO ") + formatDist(targetDist)
+            canvas.drawText(label, w / 2 + d(1f), top + ch + d(14f), textPaint)
+            textPaint.color = if (state == 4) Color.rgb(200, 160, 255) else Color.rgb(240, 150, 240)
+            canvas.drawText(label, w / 2, top + ch + d(13f), textPaint)
+        }
+    }
+
+    private fun formatDist(m: Float): String = if (m >= 1000f) "%.1f km".format(m / 1000f) else "${m.toInt()} m"
+
+    private fun drawNestBar(canvas: Canvas, w: Float) {
+        val hp = hud[Hud.NEST_HP]
+        if (hp < 0f) return
+        val bw = d(260f)
+        val top = d(90f)
+        rect.set(w / 2 - bw / 2 - d(6f), top, w / 2 + bw / 2 + d(6f), top + d(30f))
+        p.color = Color.argb(210, 40, 8, 48)
+        canvas.drawRoundRect(rect, d(10f), d(10f), p)
+        textPaint.textSize = d(10f)
+        textPaint.color = Color.rgb(230, 170, 255)
+        canvas.drawText("NINHO DE INFECÇÃO — ATIRE NO NÚCLEO", w / 2, top + d(12f), textPaint)
+        rect.set(w / 2 - bw / 2, top + d(17f), w / 2 + bw / 2, top + d(25f))
+        p.color = Color.argb(160, 0, 0, 0)
+        canvas.drawRoundRect(rect, d(4f), d(4f), p)
+        rect.right = rect.left + bw * hp.coerceIn(0f, 1f)
+        p.color = Color.rgb(200, 70, 230)
+        canvas.drawRoundRect(rect, d(4f), d(4f), p)
+    }
+
+    private fun drawSupplyButton(canvas: Canvas) {
+        val state = hud[Hud.SUPPLY]
+        if (state < 0f) return
+        val ready = state >= 1f
+        rect.set(supplyX - supplyW / 2, supplyY - supplyH / 2, supplyX + supplyW / 2, supplyY + supplyH / 2)
+        p.color = if (ready) Palette.cyan else Color.argb(170, 12, 20, 36)
+        canvas.drawRoundRect(rect, d(10f), d(10f), p)
+        if (!ready) {
+            p.color = Color.argb(120, 60, 230, 255)
+            rect.right = rect.left + supplyW * state.coerceIn(0f, 1f)
+            canvas.drawRoundRect(rect, d(10f), d(10f), p)
+        }
+        textPaint.textSize = d(11f)
+        textPaint.color = if (ready) Palette.dark else Color.argb(200, 255, 255, 255)
+        val pulse = if (ready) 1f + 0.05f * sin(System.currentTimeMillis() / 160.0).toFloat() else 1f
+        textPaint.textSize = d(11f) * pulse
+        canvas.drawText(if (ready) "▶ SUPRIMENTOS" else "SUPRIMENTOS...", supplyX, supplyY + d(4f), textPaint)
+    }
+
     private fun drawPortalMarker(canvas: Canvas, w: Float, h: Float) {
         if (hud[Hud.PORTAL_OPEN] < 0.5f) return
         val dx = hud[Hud.PORTAL_X] - hud[Hud.PLAYER_X]
@@ -343,24 +577,10 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         } else {
             // Seta na borda apontando para o portal (ângulo relativo à câmera).
             val rel = atan2(dx, -dz) - hud[Hud.CAM_YAW]
-            val rx = w * 0.42f
-            val ry = h * 0.38f
-            x = w / 2 + sin(rel) * rx
-            y = h / 2 - cos(rel) * ry
+            x = w / 2 + sin(rel) * w * 0.42f
+            y = h / 2 - cos(rel) * h * 0.38f
         }
-        val s = d(11f) * pulse
-        path.reset()
-        path.moveTo(x, y - s); path.lineTo(x + s, y); path.lineTo(x, y + s); path.lineTo(x - s, y); path.close()
-        p.color = Palette.purple
-        canvas.drawPath(path, p)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2f)
-        p.color = Color.WHITE
-        canvas.drawPath(path, p)
-        p.style = Paint.Style.FILL
-        textPaint.textSize = d(12f)
-        textPaint.color = Color.WHITE
-        canvas.drawText("PORTAL ${dist}m", x, y + s + d(14f), textPaint)
+        drawMarker(canvas, x, y, Palette.purple, "PORTAL ${dist}m", pulse, false)
     }
 
     private fun drawReticle(canvas: Canvas, w: Float, h: Float) {
@@ -370,7 +590,8 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         val focal = (h / 2) / tan(fov / 2)
         val gap = (hud[Hud.SPREAD] * focal).coerceIn(d(5f), d(40f))
         val locked = hud[Hud.TARGET_LOCKED] > 0.5f
-        val color = if (locked) Palette.red else Color.WHITE
+        val boosted = hud[Hud.BOOST] > 0f
+        val color = if (locked) Palette.red else if (boosted) Color.rgb(255, 160, 60) else Color.WHITE
         val len = d(8f)
         p.strokeWidth = d(2.4f)
         p.strokeCap = Paint.Cap.SQUARE
@@ -420,7 +641,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         val px = hud[Hud.PLAYER_X]
         val pz = hud[Hud.PLAYER_Z]
         val yawDeg = Math.toDegrees(hud[Hud.CAM_YAW].toDouble()).toFloat()
-        val scale = mapSize / 64f // 64 blocos visíveis
+        val scale = mapSize / 80f // 80 blocos visíveis
         canvas.save()
         path.reset()
         path.addRoundRect(rect, d(14f), d(14f), Path.Direction.CW)
@@ -429,7 +650,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.rotate(-yawDeg)
         canvas.scale(scale, scale)
         canvas.translate(-px, -pz)
-        if (bmp != null) canvas.drawBitmap(bmp, 0f, 0f, null)
+        if (bmp != null) canvas.drawBitmap(bmp, minimapOriginX, minimapOriginZ, null)
         val alive = hud[Hud.ALIVE].toInt()
         val n = hud[Hud.ENEMY_COUNT].toInt()
         for (i in 0 until n) {
@@ -441,7 +662,19 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             p.color = if (alerted) Palette.red else Color.rgb(255, 160, 60)
             canvas.drawCircle(ex, ez, 1.8f, p)
         }
-        if (hud[Hud.PORTAL_OPEN] > 0.5f) {
+        if (island) {
+            val objs = hud[Hud.OBJ_COUNT].toInt()
+            for (i in 0 until objs) {
+                val o = Hud.OBJ + i * Hud.OBJ_STRIDE
+                val state = hud[o + 2].toInt()
+                p.color = when (state) { 1 -> Color.rgb(220, 70, 220); 2 -> Color.argb(150, 120, 120, 120); 4 -> Palette.purple; else -> Color.argb(170, 140, 110, 200) }
+                canvas.drawCircle(hud[o], hud[o + 1], 3.2f, p)
+            }
+            if (hud[Hud.SUPPLY_X] >= 0f) {
+                p.color = Color.rgb(120, 255, 90)
+                canvas.drawCircle(hud[Hud.SUPPLY_X], hud[Hud.SUPPLY_Z], 2.6f, p)
+            }
+        } else if (hud[Hud.PORTAL_OPEN] > 0.5f) {
             p.color = Palette.purple
             canvas.drawCircle(hud[Hud.PORTAL_X], hud[Hud.PORTAL_Z], 3f, p)
         }
@@ -501,6 +734,27 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             val crystals = "◆ ${hud[Hud.CRYSTALS].toInt()}/${hud[Hud.CRYSTAL_TOTAL].toInt()}"
             canvas.drawText(crystals, left + d(110f), top + d(45f), textPaint)
         }
+        // Efeitos ativos (ícones com tempo).
+        if (island) {
+            var x = left
+            val y = top + d(66f)
+            fun chip(label: String, seconds: Float, color: Int) {
+                if (seconds <= 0f) return
+                val txt = "$label ${seconds.toInt()}s"
+                textPaint.textSize = d(10f)
+                val tw = textPaint.measureText(txt) + d(14f)
+                rect.set(x, y - d(13f), x + tw, y + d(5f))
+                p.color = Color.argb(200, Color.red(color) / 4, Color.green(color) / 4, Color.blue(color) / 4)
+                canvas.drawRoundRect(rect, d(8f), d(8f), p)
+                textPaint.color = color
+                canvas.drawText(txt, x + d(7f), y, textPaint)
+                x += tw + d(5f)
+            }
+            chip("🔥 QUEIMANDO", hud[Hud.BURNING], Color.rgb(255, 150, 60))
+            chip("🩸 SANGRANDO", hud[Hud.BLEEDING], Color.rgb(255, 90, 90))
+            chip("☠ VENENO", hud[Hud.POISON], Color.rgb(140, 255, 90))
+            chip("💥 MUNIÇÃO INCENDIÁRIA", hud[Hud.BOOST], Color.rgb(255, 180, 70))
+        }
         textPaint.textAlign = Paint.Align.CENTER
     }
 
@@ -514,10 +768,18 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
 
     private fun drawObjective(canvas: Canvas, w: Float) {
         val portal = hud[Hud.PORTAL_OPEN] > 0.5f
-        val alive = hud[Hud.ALIVE].toInt()
-        val total = hud[Hud.TOTAL].toInt()
         val kills = hud[Hud.KILLS].toInt()
-        val text = if (portal) "PORTAL ABERTO! Siga o marcador ◆   ☠ $kills" else "☠ $kills ABATES   •   RESTAM $alive DE $total"
+        val text = if (island) {
+            val done = hud[Hud.NESTS_DONE].toInt()
+            val total = hud[Hud.NEST_TOTAL].toInt()
+            val crystals = hud[Hud.CRYSTALS].toInt()
+            if (portal) "PORTAL ABERTO! Siga o marcador ◆   ☠ $kills"
+            else "NINHOS $done/$total   •   ◆ $crystals/$total   •   ☠ $kills"
+        } else {
+            val alive = hud[Hud.ALIVE].toInt()
+            val total = hud[Hud.TOTAL].toInt()
+            if (portal) "PORTAL ABERTO! Siga o marcador ◆   ☠ $kills" else "☠ $kills ABATES   •   RESTAM $alive DE $total"
+        }
         val elapsed = hud[Hud.ELAPSED].toInt()
         val time = "%02d:%02d".format(elapsed / 60, elapsed % 60)
         textPaint.textSize = d(14f)
@@ -530,6 +792,13 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         textPaint.textSize = d(12f)
         textPaint.color = Palette.muted
         canvas.drawText(time, rect.right - d(26f), d(33f), textPaint)
+        if (island && hud[Hud.NEST_HP] < 0f) {
+            textPaint.textSize = d(10f)
+            textPaint.color = Color.argb(200, 255, 220, 120)
+            val chests = hud[Hud.CHESTS].toInt()
+            val gems = hud[Hud.CHEST_DIAMONDS].toInt()
+            canvas.drawText("BAÚS $chests (◆$gems)   •   ${formatDist(hud[Hud.DISTANCE])} percorridos", w / 2, d(100f), textPaint)
+        }
     }
 
     private fun pvpName(id: Int): String = pvpNames[id] ?: "Jogador ${id + 1}"
@@ -639,6 +908,24 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         }
     }
 
+    private fun drawTip(canvas: Canvas, w: Float, h: Float) {
+        val (text, at) = tip ?: return
+        val age = System.currentTimeMillis() - at
+        if (age > 5000) {
+            tip = null
+            return
+        }
+        val a = if (age < 4300) 1f else (5000 - age) / 700f
+        textPaint.textSize = d(13f)
+        val tw = textPaint.measureText(text) + d(30f)
+        val y = h * 0.72f
+        rect.set(w / 2 - tw / 2, y - d(20f), w / 2 + tw / 2, y + d(10f))
+        p.color = Color.argb((a * 210).toInt(), 20, 12, 30)
+        canvas.drawRoundRect(rect, d(12f), d(12f), p)
+        textPaint.color = Color.argb((a * 255).toInt(), 255, 214, 110)
+        canvas.drawText(text, w / 2, y, textPaint)
+    }
+
     private fun drawButton(canvas: Canvas, x: Float, y: Float, r: Float, fill: Int, active: Boolean) {
         p.color = Color.argb(110, 0, 0, 0)
         canvas.drawCircle(x, y + d(3f), r, p)
@@ -669,7 +956,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         } else if (!stickActive) {
             textPaint.textSize = d(10f)
             textPaint.color = Color.argb(140, 255, 255, 255)
-            canvas.drawText("MOVER", stickBaseX, stickBaseY + stickRadius + d(14f), textPaint)
+            canvas.drawText(if (hud[Hud.SLOWED] > 0f) "LENTO (ÁCIDO)" else "MOVER", stickBaseX, stickBaseY + stickRadius + d(14f), textPaint)
         }
 
         // Atirar (com anel de recarga)
@@ -747,7 +1034,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     }
 
     companion object {
-        @Suppress("unused")
         private const val TAU = (PI * 2).toFloat()
     }
 }

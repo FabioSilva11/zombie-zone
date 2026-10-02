@@ -28,7 +28,7 @@ object Header {
 
     fun resources(app: MainActivity): LinearLayout {
         val row = Ui.row(app)
-        row.addView(Ui.chip(app, "★", "${app.progress.totalStars()}/${Campaign.stages.size * 3}", Palette.gold))
+        row.addView(Ui.chip(app, "★", app.progress.totalStars().toString(), Palette.gold))
         row.addView(View(app), Ui.lp(app.dpi(8), 1))
         row.addView(Ui.chip(app, "◆", app.progress.diamonds.toString(), Palette.cyan))
         return row
@@ -63,7 +63,7 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         brand.addView(logo, Ui.lp(app.dpi(48), app.dpi(48)))
         val brandText = Ui.column(app).apply { setPadding(app.dpi(10), 0, 0, 0) }
         brandText.addView(Ui.title(app, "ZOMBIE ZONE", 24f))
-        brandText.addView(Ui.text(app, "MUNDO ABERTO • SOBREVIVA À HORDA", 10f, Palette.lime, Fonts.title))
+        brandText.addView(Ui.text(app, "ILHAS DE 5 KM • FASES INFINITAS", 10f, Palette.lime, Fonts.title))
         brand.addView(brandText)
         addView(brand, Ui.frame(Ui.WRAP, Ui.WRAP, Gravity.TOP or Gravity.START).apply { setMargins(app.dpi(22), app.dpi(14), 0, 0) })
 
@@ -78,7 +78,8 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         val current = Campaign.stage(p.highestUnlockedStage())
         val card = Ui.panel(app)
         card.addView(Ui.text(app, "ZONA ${current.zone.index + 1} • ${current.zone.name.uppercase()}", 11f, current.zone.color, Fonts.title))
-        card.addView(Ui.title(app, "Fase ${current.number} · ${current.title}", 20f).apply { setPadding(0, app.dpi(4), 0, app.dpi(8)) })
+        card.addView(Ui.title(app, "Fase ${current.number} · ${current.title}", 20f).apply { setPadding(0, app.dpi(4), 0, app.dpi(2)) })
+        card.addView(Ui.text(app, "Ilha de ${current.islandKm} • 3 ninhos de infecção • baús escondidos", 11f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(8)) })
         val stats = Ui.row(app)
         fun stat(label: String, value: TextView) = Ui.column(app).apply {
             background = PanelDrawable(app, Color.argb(120, 0, 0, 0), Color.argb(40, 255, 255, 255), 8f)
@@ -86,20 +87,21 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
             addView(Ui.text(app, label, 9f, Palette.muted, Fonts.title))
             addView(value)
         }
-        stats.addView(stat("FASES", stagesValue), Ui.lp(0, Ui.WRAP, 1f))
+        stats.addView(stat("VENCIDAS", stagesValue), Ui.lp(0, Ui.WRAP, 1f))
         stats.addView(View(app), Ui.lp(app.dpi(6), 1))
         stats.addView(stat("ESTRELAS", starsValue), Ui.lp(0, Ui.WRAP, 1f))
         stats.addView(View(app), Ui.lp(app.dpi(6), 1))
         stats.addView(stat("HERÓIS", heroesValue), Ui.lp(0, Ui.WRAP, 1f))
         card.addView(stats)
         val play = Ui.button(app, "JOGAR  ▶", Palette.lime, Palette.dark, 20f) { app.startStage(current.number) }
-        card.addView(play, Ui.lp(Ui.MATCH, app.dpi(58)).apply { topMargin = app.dpi(10) })
+        card.addView(play, Ui.lp(Ui.MATCH, app.dpi(52)).apply { topMargin = app.dpi(8) })
         Ui.pulse(play)
         val secondary = Ui.row(app)
-        secondary.addView(Ui.button(app, "ESCOLHER FASE", Palette.stone, Color.WHITE, 13f) { app.showStages() }, Ui.lp(0, app.dpi(44), 1f).apply { marginEnd = app.dpi(6) })
+        secondary.addView(Ui.button(app, "MAPA DAS ZONAS", Palette.stone, Color.WHITE, 13f) { app.showStages() }, Ui.lp(0, app.dpi(44), 1f).apply { marginEnd = app.dpi(6) })
         secondary.addView(Ui.button(app, "⚔ PvP WI-FI", Palette.red, Color.WHITE, 13f) { app.showPvp() }, Ui.lp(0, app.dpi(44), 1f))
         card.addView(secondary, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
-        addView(card, Ui.frame(app.dpi(330), Ui.WRAP, Gravity.END or Gravity.CENTER_VERTICAL).apply { setMargins(0, app.dpi(30), app.dpi(22), 0) })
+        // Ancorado logo acima da barra de botões (14 de margem + 54 da barra + 12 de folga): nunca fica por trás dela.
+        addView(card, Ui.frame(app.dpi(330), Ui.WRAP, Gravity.END or Gravity.BOTTOM).apply { setMargins(0, 0, app.dpi(22), app.dpi(80)) })
 
         // Herói ativo (o modelo 3D aparece à esquerda, renderizado pelo motor)
         val skin = Skins.get(p.selectedSkin)
@@ -144,8 +146,8 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         resources.removeAllViews()
         resources.addView(Header.resources(app))
         val p = app.progress
-        stagesValue.text = "${p.stages.values.count { it.completed }}/${Campaign.stages.size}"
-        starsValue.text = "${p.totalStars()}/${Campaign.stages.size * 3}"
+        stagesValue.text = p.completedStages().toString()
+        starsValue.text = p.totalStars().toString()
         heroesValue.text = "${p.ownedSkins.size}/${Skins.all.size}"
         missionsBadge.setCount(Rules.claimableDailyCount(app.progress) + if (Rules.canClaimCalendar(app.progress, app.today())) 1 else 0)
         val remaining = Rules.adsRemaining(app.progress, app.today())

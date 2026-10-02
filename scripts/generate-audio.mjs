@@ -1,10 +1,12 @@
 // Sintetiza todos os efeitos sonoros e músicas do Zombie Zone (áudio 100% original).
-// Uso: node scripts/generate-audio.mjs <pasta-wav-temporária>
+// Uso: node scripts/generate-audio.mjs <pasta-wav-temporária> [nomes...]
+// (com nomes, grava só esses arquivos; a síntese das outras faixas roda igual para manter o RNG estável)
 // Depois converta para OGG com ffmpeg (ver scripts/build-audio.ps1).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const OUT = process.argv[2] ?? 'build/audio-wav';
+const ONLY = new Set(process.argv.slice(3));
 mkdirSync(OUT, { recursive: true });
 
 let seed = 1234567;
@@ -59,6 +61,7 @@ function fadeEdges(data, rate, ms = 6) {
 }
 function finish(b, peak = 0.9, ms = 6) { normalize(b.data, peak); fadeEdges(b.data, b.rate, ms); return b; }
 function writeWav(name, { rate, data }) {
+  if (ONLY.size && !ONLY.has(name)) return;
   const bytes = Buffer.alloc(44 + data.length * 2);
   bytes.write('RIFF', 0); bytes.writeUInt32LE(36 + data.length * 2, 4); bytes.write('WAVE', 8);
   bytes.write('fmt ', 12); bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
@@ -333,3 +336,102 @@ writeWav('sfx_defeat', jingle([69, 65, 62, 57], 0.22, 1.6, 'tri', 0.35));
 writeWav('sfx_unlock', arpeggio([76, 79, 83, 88, 91, 95], 0.07, 0.3, 'square', 1.1, 0.45));
 writeWav('music_menu', music({ bpm: 88, bars: 16, chords: [[A, C, E], [F - 12 + 12, A, C], [C, E, G], [G - 12, 59, D]] }));
 writeWav('music_battle', music({ bpm: 124, bars: 16, chords: [[A, C, E], [A, C, E], [F, A, C + 12], [G, 71, D + 12]], dark: true }));
+
+// ------------------------------------------------------------------ habilidades dos zumbis
+
+function throwWhoosh() {
+  const b = buffer(0.32); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const sweep = Math.sin(Math.PI * Math.min(1, t / 0.32)) ** 2;
+    data[i] = noise() * sweep * (0.6 + 0.4 * Math.sin(TAU * 18 * t));
+  }
+  bandpass(data, rate, 900, 1.2).forEach((v, i) => { data[i] = v; });
+  return finish(b, 0.7);
+}
+
+function fireBurst() {
+  const b = buffer(1.4); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const glass = t < 0.12 ? (Math.sin(TAU * 3100 * t) + Math.sin(TAU * 4700 * t) * 0.6) * env(t, 0.001, 0.03) * 0.5 : 0;
+    const whoosh = noise() * env(t, 0.03, 0.45) * 0.9;
+    const crackle = rand() < 0.004 ? noise() * 2.5 : 0;
+    data[i] = glass + whoosh + crackle * Math.exp(-t * 1.5);
+  }
+  lowpass(data, rate, 3800);
+  return finish(b, 0.85, 20);
+}
+
+function explosion() {
+  const b = buffer(1.8); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const boom = Math.sin(TAU * (60 - 30 * Math.min(1, t)) * t) * env(t, 0.002, 0.35) * 1.2;
+    const blast = noise() * env(t, 0.001, 0.25);
+    const rumble = noise() * env(t, 0.05, 0.7) * 0.4;
+    data[i] = boom + blast + rumble;
+  }
+  lowpass(data, rate, 2200);
+  return finish(b, 0.95, 30);
+}
+
+function knife() {
+  const b = buffer(0.3); const { rate, data } = b;
+  let phase = 0;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    phase += (2600 + 2200 * t) / rate;
+    const ring = Math.sin(TAU * phase) * env(t, 0.004, 0.06) * 0.35;
+    const swish = noise() * Math.sin(Math.PI * Math.min(1, t / 0.18)) * 0.6;
+    data[i] = ring + swish;
+  }
+  highpass(data, rate, 1200);
+  return finish(b, 0.75);
+}
+
+function scream() {
+  const b = buffer(1.3); const { rate, data } = b;
+  const src = new Float32Array(data.length);
+  let phase = 0;
+  for (let i = 0; i < src.length; i++) {
+    const t = i / rate;
+    const f = (520 + 260 * Math.sin(Math.PI * Math.min(1, t / 0.5))) * (1 + 0.04 * Math.sin(TAU * 9 * t) + 0.02 * noise());
+    phase += f / rate;
+    const amp = Math.sin(Math.PI * Math.min(1, t / 1.3)) ** 0.5;
+    src[i] = (osc.saw(phase) * 0.7 + noise() * 0.3) * amp;
+  }
+  const f1 = bandpass(src, rate, 1100, 3), f2 = bandpass(src, rate, 2600, 5);
+  for (let i = 0; i < data.length; i++) data[i] = f1[i] + f2[i] * 0.7 + src[i] * 0.05;
+  return finish(b, 0.85, 25);
+}
+
+function rockThud() {
+  const b = buffer(0.45); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    data[i] = Math.sin(TAU * (110 - 60 * t) * t) * env(t, 0.001, 0.08) + noise() * env(t, 0.001, 0.05) * 0.7 + noise() * env(t, 0.02, 0.12) * 0.15;
+  }
+  lowpass(data, rate, 1600);
+  return finish(b, 0.85);
+}
+
+function spit() {
+  const b = buffer(0.5); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const gurgle = Math.sin(TAU * (180 + 60 * Math.sin(TAU * 23 * t)) * t) * env(t, 0.01, 0.12) * 0.5;
+    data[i] = noise() * env(t, 0.005, 0.09) * 0.8 + gurgle;
+  }
+  bandpass(data, rate, 1400, 0.9).forEach((v, i) => { data[i] = v; });
+  return finish(b, 0.75);
+}
+
+writeWav('sfx_throw', throwWhoosh());
+writeWav('sfx_fire', fireBurst());
+writeWav('sfx_explosion', explosion());
+writeWav('sfx_knife', knife());
+writeWav('sfx_scream', scream());
+writeWav('sfx_rock', rockThud());
+writeWav('sfx_chest', arpeggio([79, 83, 86, 91, 95, 98], 0.05, 0.22, 'square', 0.9, 0.42));
+writeWav('sfx_spit', spit());

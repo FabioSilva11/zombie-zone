@@ -1,4 +1,5 @@
-// Lógica principal: lobby 3D, missão (jogador, zumbis, tiros, coletáveis, portal), câmera e HUD.
+// Lógica principal: lobby 3D, missão na ilha em streaming (jogador, zumbis procedurais com habilidades,
+// projéteis, ninhos, baús, suprimentos, portal), PvP, câmera e HUD.
 #pragma once
 
 #include <array>
@@ -6,12 +7,14 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "../core/math.h"
 #include "../core/random.h"
 #include "../render/character.h"
 #include "../render/renderer.h"
+#include "../world/island.h"
 #include "../world/terrain.h"
 #include "../world/theme.h"
 #include "../world/world.h"
@@ -24,7 +27,7 @@ namespace zz {
 struct MissionConfig {
     int stage = 1;
     int skin = 0;
-    int zombieCount = 10;
+    int zombieCount = 10;     // população de zumbis mantida ao redor do jogador
     float zombieHealth = 70;
     float zombieDamage = 8;
     float zombieSpeed = 1.0f;
@@ -39,6 +42,8 @@ struct MissionConfig {
     bool invertY = false;
     uint32_t seed = 1;
     float reloadSpeed = 1.0f;
+    float boostHealth = 1.0f;  // bônus de anúncio antes da fase
+    float boostDamage = 1.0f;
 };
 
 struct PvpConfig {
@@ -85,13 +90,39 @@ struct InputState {
     int jumps = 0;
     int reloads = 0;
     float previewRotate = 0;
+    int supplyRequests = 0;
 };
 
-enum class ZombieKind { Walker = 0, Runner = 1, Brute = 2 };
+// Tipos de zumbi (cada um com habilidade própria). A ordem espelha ZombieKinds no Kotlin.
+enum class ZombieKind {
+    Walker = 0,      // Errante: corpo a corpo comum
+    Runner,          // Corredor: rápido, dá botes
+    Brute,           // Brutamontes: pancada no chão que arremessa
+    Thrower,         // Arremessador: atira pedras
+    Molotov,         // Incendiário: coquetéis molotov que deixam fogo no chão
+    Knife,           // Retalhador: faca, investida e sangramento
+    Exploder,        // Inchado: corre e explode
+    Screamer,        // Gritador: grito que chama e enfurece a horda
+    Spitter,         // Cuspidor: ácido que deixa poça corrosiva
+    KnifeThrower,    // Atirador de facas: facas rápidas em linha reta
+    Count
+};
+
+enum ZombieMutation : uint8_t {
+    MUT_ARMORED = 1,  // capacete e colete: tiros no corpo valem menos
+    MUT_GIANT = 2,
+    MUT_SWIFT = 4,
+    MUT_REGEN = 8,
+    MUT_TOXIC = 16,   // golpes envenenam
+    MUT_RAGE = 32,    // enfurece com pouca vida
+};
+
 enum class ZState { Idle, Wander, Chase, Attack, Dead };
+enum class ZAction { None, Throw, Scream, Slam, Dash, Fuse };
 
 struct Zombie {
     ZombieKind kind = ZombieKind::Walker;
+    uint8_t mutations = 0;
     CharacterAsset* asset = nullptr;
     BodyState body;
     Animator anim;
@@ -100,12 +131,17 @@ struct Zombie {
     float speed = 2.3f;
     float damage = 8;
     float scale = 1.0f;
+    float bloat = 1.0f;
     Vec3 tint{1, 1, 1};
     ZState state = ZState::Idle;
+    ZAction action = ZAction::None;
+    float actionTime = 0;
+    bool actionDone = false;
     bool alerted = false;
     float lostSight = 0;
     float windup = 0;
     float cooldown = 0;
+    float abilityTimer = 0;
     bool attackHit = false;
     float hitFlash = 0;
     float deathTime = 0;
@@ -121,15 +157,85 @@ struct Zombie {
     Vec3 lastPos;
     float stun = 0;
     float barTimer = 0;
+    float frenzy = 0;
+    float regenDelay = 0;
+    float itemHidden = 0;   // item da mão acabou de ser arremessado
+    float strafe = 1;
+    float strafeTimer = 0;
+    float burn = 0;
+    int nest = -1;          // ninho que o gerou
+    bool exploded = false;
+    bool announced = false; // jogador já foi avisado deste tipo/elite
 };
 
 struct Pickup {
-    int type = 0;  // 0 cristal, 1 vida
+    int type = 0;  // 0 cristal, 1 vida, 2 caixa de suprimentos
     int crystalIndex = -1;
     Vec3 position;
     Vec3 velocity;
     float age = 0;
     bool taken = false;
+};
+
+enum class ProjectileKind { Rock, Molotov, Acid, Knife };
+
+struct Projectile {
+    ProjectileKind kind = ProjectileKind::Rock;
+    Vec3 pos, vel;
+    Vec3 target;
+    float damage = 10;
+    float gravity = 22;
+    float life = 4;
+    float spin = 0;
+};
+
+// Área perigosa no chão: fogo do molotov ou poça de ácido.
+struct Hazard {
+    int kind = 0;  // 0 fogo, 1 ácido
+    Vec3 pos;
+    float radius = 2.5f;
+    float life = 5, maxLife = 5;
+    float damage = 8;
+    float fxTimer = 0;
+};
+
+struct Explosion {
+    Vec3 pos;
+    float radius;
+    float playerDamage;
+    float zombieDamage;
+    bool fire;
+};
+
+struct FlashLight {
+    Vec3 pos;
+    float radius;
+    Vec3 color;
+    float life, maxLife;
+};
+
+struct Nest {
+    int poi = -1;
+    Vec3 core;
+    float health = 300, maxHealth = 300;
+    bool destroyed = false;
+    float spawnTimer = 3;
+    float hitFlash = 0;
+    bool awake = false;
+};
+
+struct Chest {
+    Vec3 pos;
+    int diamonds = 8;
+    bool opened = false;
+    float openAnim = 0;
+};
+
+struct SupplyDrop {
+    bool active = false;
+    bool landed = false;
+    Vec3 pos;
+    float age = 0;
 };
 
 struct FxParticle {
@@ -151,6 +257,7 @@ struct FxLabel {
 struct Tracer {
     Vec3 from, to;
     float life = 0;
+    Vec4 color{1.0f, 0.9f, 0.6f, 1.0f};
 };
 
 class Game {
@@ -169,6 +276,7 @@ public:
     void setPaused(bool paused);
     void revive();
     void setSettings(float sensitivity, bool aimAssist, bool autoFire, bool invertY);
+    void setGraphics(int quality, bool cinematic);
 
     // Entrada (qualquer thread)
     void setMove(float x, float y);
@@ -178,17 +286,22 @@ public:
     void pressJump();
     void pressReload();
     void rotatePreview(float dx);
+    void requestSupply();
 
     // Saídas (qualquer thread)
     void copyHud(float* out, int count);
     int drainEvents(int* out, int maxInts);
     void copyResult(float* out, int count);
-    // Minimapa RGBA (thread GL após startMission).
-    int minimapSize() const { return world_.width(); }
+    // Minimapa RGBA (thread GL).
+    int minimapSize() const;
     void copyMinimap(uint32_t* argb, int count);
+    int bigMapSize() const { return island_ ? kBigMapSize : 0; }
+    void copyBigMap(uint32_t* argb, int count);
 
 private:
     enum class Mode { None, Lobby, Mission, Pvp };
+    static constexpr int kMinimapSize = 160;
+    static constexpr int kBigMapSize = 256;
 
     CharacterAsset* character(int skin);
     void emit(int type, int a = 0, int b = 0, int c = 0);
@@ -205,21 +318,53 @@ private:
     void updateCamera(float dt, const InputState& in);
     void updateWeapon(float dt, const InputState& in);
     void fireShot();
-    void updateZombies(float dt);
-    void updateZombie(Zombie& z, size_t index, float dt);
-    void damageZombie(Zombie& z, float amount, bool headshot, const Vec3& dir, const Vec3& hitPoint);
-    void killZombie(Zombie& z, bool headshot);
     void damagePlayer(float amount, const Vec3& from);
+    void damageOverTime(float amount);
+    void updateStatus(float dt);
     void updatePickups(float dt);
     void updateEffects(float dt);
     void spawnBurst(const Vec3& at, const Vec4& color, int count, float speed, float size, bool additive, float gravity);
+    void addFlash(const Vec3& at, float radius, const Vec3& color, float life);
+    void finishResult();
+
+    // Ilha (game_mission.cpp)
+    void streamWorld(int maxGenerate, int maxMesh);
+    void updateSpawner(float dt);
+    void updatePois(float dt);
+    void updateNests(float dt);
+    void updateChests(float dt);
+    void updateSupply(float dt, const InputState& in);
+    void rebuildMinimap();
+    void buildBigMap();
+    bool findSpawnSpot(const Vec3& around, float minDist, float maxDist, bool behindCamera, Vec3& out);
+    bool damageNestRay(const Vec3& origin, const Vec3& dir, float maxT, float& tHit, int& nestIndex);
+    void damageNest(int index, float amount, const Vec3& hitPoint);
+
+    // Zumbis (game_zombies.cpp)
+    void loadZombieAssets();
+    Zombie makeZombie(ZombieKind kind, uint8_t mutations, const Vec3& pos);
+    ZombieKind rollKind();
+    uint8_t rollMutations();
+    void spawnZombie(const Vec3& pos, bool alerted, int nest = -1, bool forceElite = false);
+    void updateZombies(float dt);
+    void updateZombie(Zombie& z, size_t index, float dt);
+    void zombieAbility(Zombie& z, float dist, float dt);
+    void damageZombie(Zombie& z, float amount, bool headshot, const Vec3& dir, const Vec3& hitPoint);
+    void killZombie(Zombie& z, bool headshot);
     void alertNear(const Vec3& at, float radius);
     float zombieHeight(const Zombie& z) const { return 1.8f * z.scale; }
+    void throwProjectile(Zombie& z, ProjectileKind kind);
+    void updateProjectiles(float dt);
+    void impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer);
+    void updateHazards(float dt);
+    void explode(const Vec3& at, float radius, float playerDamage, float zombieDamage, bool fire);
+    void processExplosions();
+    void addZombieVisuals(const Zombie& z, const CharacterDraw& draw);
 
     void buildScene();
-    void addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float scale, const Pose& pose, const Vec3& tint, float flash);
+    void addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float scale, const Pose& pose, const Vec3& tint, float flash, const Vec3& scaleXYZ = Vec3(1, 1, 1));
     void posePlayer(Pose& pose, bool armed);
-    void poseZombieArms(Pose& pose, const CharacterModel& model, float t);
+    void poseZombie(Pose& pose, const Zombie& z, const CharacterModel& model, float t);
     void publishHud();
     bool project(const Vec3& world, float& sx, float& sy) const;
 
@@ -227,12 +372,14 @@ private:
     World world_;
     NavField nav_;
     WorldLayout layout_;
+    std::unique_ptr<IslandGenerator> island_;
     Theme theme_ = lobbyTheme();
     Mode mode_ = Mode::None;
     bool paused_ = false;
     MissionConfig config_;
     std::map<int, std::unique_ptr<CharacterAsset>> characters_;
     std::vector<Vec3> layerColors_;
+    int viewRadius_ = 8;
 
     // Entrada
     std::mutex inputMutex_;
@@ -270,6 +417,11 @@ private:
     float lobbyEmoteTimer_ = 5;
     float previewYaw_ = 0;
     int lobbyScreen_ = 0;
+    float burning_ = 0, bleeding_ = 0, poisoned_ = 0, slowed_ = 0;
+    float damageBoost_ = 0;
+    float shake_ = 0;
+    float distance_ = 0;
+    Vec3 lastPlayerPos_;
 
     // Arma
     int ammo_ = 30;
@@ -305,15 +457,38 @@ private:
     std::vector<FxParticle> particles_;
     std::vector<FxLabel> labels_;
     std::vector<Tracer> tracers_;
+    std::vector<Projectile> projectiles_;
+    std::vector<Hazard> hazards_;
+    std::vector<Explosion> explosions_;
+    std::vector<FlashLight> flashes_;
+    std::vector<Nest> nests_;
+    std::vector<Chest> chests_;
+    std::unordered_set<int> visitedPois_;
+    std::unordered_set<int> announcedPois_;
+    std::vector<const IslandPoi*> poiScratch_;
+    std::vector<int> zombieSkins_;
+    std::vector<Vec3> pendingSpawns_;
+    SupplyDrop supply_;
+    int suppliesLeft_ = 0;
+    float supplyCooldown_ = 0;
+    float supplyPeriod_ = 150;
     int crystalsSpawnedMask_ = 0;
     int crystalsCollectedMask_ = 0;
     int kills_ = 0, headshots_ = 0;
+    int chestsOpened_ = 0, chestDiamonds_ = 0;
+    int seenKinds_ = 0;
     float damageTaken_ = 0;
     bool portalOpen_ = false;
     float portalAnim_ = 0;
     float navTimer_ = 0;
     int navX_ = -1, navZ_ = -1;
     float fireEmberTimer_ = 0;
+    float spawnTimer_ = 0;
+    float poiTimer_ = 0;
+    float minimapTimer_ = 0;
+    int minimapCX_ = 0, minimapCZ_ = 0;
+    std::vector<uint32_t> minimap_;
+    std::vector<uint32_t> bigMap_;
     Rng rng_{1234};
 
     // PvP

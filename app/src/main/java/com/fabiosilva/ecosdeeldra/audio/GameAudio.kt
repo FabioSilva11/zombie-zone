@@ -19,10 +19,10 @@ class GameAudio(private val context: Context) {
         .setUsage(AudioAttributes.USAGE_GAME)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
-    private val pool = SoundPool.Builder().setMaxStreams(14).setAudioAttributes(attributes).build()
-    private val engineSounds = IntArray(15)
+    private val pool = SoundPool.Builder().setMaxStreams(16).setAudioAttributes(attributes).build()
+    private val engineSounds = IntArray(Snd.COUNT)
     private val groanAlt: Int
-    private val lastPlayed = LongArray(15)
+    private val lastPlayed = LongArray(Snd.COUNT)
     private val ui = mutableMapOf<String, Int>()
 
     private var player: MediaPlayer? = null
@@ -54,6 +54,14 @@ class GameAudio(private val context: Context) {
         engineSounds[Snd.SPLASH] = load(R.raw.sfx_splash)
         engineSounds[Snd.ZOMBIE_ATTACK] = load(R.raw.sfx_zombie_attack)
         engineSounds[Snd.HEAL] = load(R.raw.sfx_heal)
+        engineSounds[Snd.THROW] = load(R.raw.sfx_throw)
+        engineSounds[Snd.FIRE] = load(R.raw.sfx_fire)
+        engineSounds[Snd.EXPLOSION] = load(R.raw.sfx_explosion)
+        engineSounds[Snd.KNIFE] = load(R.raw.sfx_knife)
+        engineSounds[Snd.SCREAM] = load(R.raw.sfx_scream)
+        engineSounds[Snd.ROCK] = load(R.raw.sfx_rock)
+        engineSounds[Snd.CHEST] = load(R.raw.sfx_chest)
+        engineSounds[Snd.SPIT] = load(R.raw.sfx_spit)
         groanAlt = load(R.raw.sfx_groan2)
         ui["click"] = load(R.raw.ui_click)
         ui["reward"] = load(R.raw.sfx_reward)
@@ -67,7 +75,7 @@ class GameAudio(private val context: Context) {
         if (sound !in engineSounds.indices || sfxVolume <= 0f) return
         val now = SystemClock.uptimeMillis()
         // Evita empilhar o mesmo som no mesmo instante (ex.: rajada + vários impactos).
-        val minGap = when (sound) { Snd.SHOT -> 45L; Snd.STEP -> 120L; Snd.GROAN -> 350L; else -> 30L }
+        val minGap = when (sound) { Snd.SHOT -> 45L; Snd.STEP -> 120L; Snd.GROAN -> 350L; Snd.EXPLOSION -> 90L; Snd.FIRE -> 120L; else -> 30L }
         if (now - lastPlayed[sound] < minGap) return
         lastPlayed[sound] = now
         val v = (volume / 100f).coerceIn(0f, 1f) * sfxVolume
@@ -78,10 +86,11 @@ class GameAudio(private val context: Context) {
         if (sound == Snd.GROAN && (now and 1L) == 0L) id = groanAlt
         val rate = when (sound) {
             Snd.GROAN, Snd.ZOMBIE_DIE -> 0.85f + (now % 7) * 0.05f
-            Snd.HIT, Snd.STEP -> 0.9f + (now % 5) * 0.05f
+            Snd.HIT, Snd.STEP, Snd.ROCK -> 0.9f + (now % 5) * 0.05f
+            Snd.SCREAM, Snd.THROW -> 0.92f + (now % 4) * 0.05f
             else -> 1f
         }
-        val priority = if (sound == Snd.SHOT || sound == Snd.HURT) 2 else 1
+        val priority = if (sound == Snd.SHOT || sound == Snd.HURT || sound == Snd.EXPLOSION) 2 else 1
         pool.play(id, left, right, priority, 0, rate)
     }
 

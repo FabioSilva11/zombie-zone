@@ -15,6 +15,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import com.fabiosilva.ecosdeeldra.ads.AdConsent
+import com.fabiosilva.ecosdeeldra.ads.InterstitialAds
 import com.fabiosilva.ecosdeeldra.ads.RewardedAds
 import com.fabiosilva.ecosdeeldra.audio.GameAudio
 import com.fabiosilva.ecosdeeldra.data.Campaign
@@ -24,12 +25,14 @@ import com.fabiosilva.ecosdeeldra.data.Rules
 import com.fabiosilva.ecosdeeldra.data.SaveStore
 import com.fabiosilva.ecosdeeldra.data.SkinDef
 import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.ZombieKinds
 import com.fabiosilva.ecosdeeldra.engine.Cfg
 import com.fabiosilva.ecosdeeldra.engine.Ev
-import com.fabiosilva.ecosdeeldra.engine.Hud
-import com.fabiosilva.ecosdeeldra.engine.PvpCfg
 import com.fabiosilva.ecosdeeldra.engine.GameSurfaceView
+import com.fabiosilva.ecosdeeldra.engine.Hud
 import com.fabiosilva.ecosdeeldra.engine.NativeBridge
+import com.fabiosilva.ecosdeeldra.engine.PoiKind
+import com.fabiosilva.ecosdeeldra.engine.PvpCfg
 import com.fabiosilva.ecosdeeldra.engine.Res
 import com.fabiosilva.ecosdeeldra.net.LanLobby
 import com.fabiosilva.ecosdeeldra.notify.Reminders
@@ -64,11 +67,15 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         private set
     lateinit var ads: RewardedAds
         private set
+    private lateinit var interstitials: InterstitialAds
     private lateinit var store: SaveStore
     private lateinit var surface: GameSurfaceView
     private lateinit var hud: HudView
     private lateinit var uiLayer: FrameLayout
     private lateinit var overlayLayer: FrameLayout
+
+    /** Bônus de combate comprado com anúncio (vale para a próxima fase iniciada). */
+    var boostReady = false
 
     private var inMission = false
     private var missionStage = 1
@@ -81,6 +88,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     private var loading: LoadingOverlay? = null
     private var currentScreen: View? = null
     private var homeScreen: HomeScreen? = null
+    private var bigMap: Bitmap? = null
+    private var worldSize = 0f
 
     // PvP em Wi-Fi local
     data class LobbyState(val players: List<LanLobby.LobbyPlayer>, val rules: LanLobby.Rules, val localId: Int, val isHost: Boolean)
@@ -127,6 +136,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         Ui.clickSound = { audio.playUi("click", 0.6f) }
         ads = RewardedAds(this)
         ads.onStateChanged = { runOnUiThread { homeScreen?.refresh() } }
+        interstitials = InterstitialAds(this)
 
         NativeBridge.init(assets)
         val root = FrameLayout(this).apply { setBackgroundColor(Palette.bg) }
@@ -141,6 +151,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         root.addView(overlayLayer, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
         enterImmersive()
+        val s = progress.settings
+        engine { NativeBridge.setGraphics(s.quality, s.cinematic) }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = onBack()
@@ -149,7 +161,10 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val newDay = Rules.onAppOpen(progress, today())
         Rules.refreshSkinUnlocks(progress)
         store.save(progress)
-        AdConsent.gather(this) { ads.load() }
+        AdConsent.gather(this) {
+            ads.load()
+            interstitials.load()
+        }
         showHome()
         if (Rules.canClaimCalendar(progress, today())) {
             surface.postDelayed({ showDailyReward() }, if (newDay) 900L else 600L)
@@ -174,7 +189,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     override fun onPause() {
         // Durante anúncio/derrota/carregamento a missão já está parada; não sobrepor a pausa.
-        if (inMission && !missionPaused && !missionEnded && !defeatShown && loading == null && !ads.showing) pauseMission()
+        if (inMission && !missionPaused && !missionEnded && !defeatShown && loading == null && !ads.showing && !interstitials.showing) pauseMission()
         surface.stop()
         surface.onPause()
         audio.pause()
@@ -191,7 +206,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && !ads.showing) enterImmersive()
+        if (hasFocus && !ads.showing && !interstitials.showing) enterImmersive()
     }
 
     private fun enterImmersive() {
@@ -250,10 +265,13 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         pvpScreen = view as? PvpScreen
     }
 
-    /** Mostra anúncio premiado; [onGranted] roda somente se a recompensa foi ganha. */
-    fun watchAd(onGranted: () -> Unit) {
+    /**
+     * Mostra anúncio premiado; [onGranted] roda somente se a recompensa foi ganha.
+     * [onClosed] roda sempre que o fluxo termina (com ou sem recompensa, ou sem anúncio).
+     */
+    fun watchAd(onClosed: ((Boolean) -> Unit)? = null, onGranted: () -> Unit) {
         if (!ads.isReady) {
-            Popup.show(this, "Anúncio indisponível", "Nenhum anúncio carregado agora. Tente novamente em alguns segundos.", "OK")
+            Popup.show(this, "Anúncio indisponível", "Nenhum anúncio carregado agora. Tente novamente em alguns segundos.", "OK") { onClosed?.invoke(false) }
             ads.load()
             return
         }
@@ -262,13 +280,36 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             runOnUiThread {
                 audio.resume()
                 enterImmersive()
+                progress.lastAdAt = System.currentTimeMillis()
                 if (granted) {
                     Rules.registerAdWatched(progress)
                     onGranted()
                     checkUnlocks()
-                    save()
                 }
+                save()
                 homeScreen?.refresh()
+                onClosed?.invoke(granted)
+            }
+        }
+    }
+
+    /** Intersticial entre partidas, respeitando a frequência de [Rules.shouldShowInterstitial]. */
+    private fun maybeInterstitial(then: () -> Unit) {
+        val now = System.currentTimeMillis()
+        if (!interstitials.enabled || !interstitials.isReady || !Rules.shouldShowInterstitial(progress, now)) {
+            interstitials.load()
+            then()
+            return
+        }
+        progress.missionsSinceInterstitial = 0
+        progress.lastAdAt = now
+        save()
+        audio.pause()
+        interstitials.show {
+            runOnUiThread {
+                audio.resume()
+                enterImmersive()
+                then()
             }
         }
     }
@@ -307,7 +348,14 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         showScreen(HomeScreen(this))
     }
 
-    fun showStages() = showScreen(StagesScreen(this))
+    fun showStages() {
+        closeOverlay()
+        hud.visibility = View.GONE
+        audio.setMusic(GameAudio.Music.MENU)
+        val skin = progress.selectedSkin
+        engine { NativeBridge.enterLobby(skin, 0) }
+        showScreen(StagesScreen(this))
+    }
 
     fun showSkins() {
         val skin = progress.selectedSkin
@@ -347,7 +395,10 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         audio.musicVolume = s.musicVolume
         surface.setQuality(s.quality)
         hud.applySettings(s.leftHanded, s.vibration, s.showFps)
-        engine { NativeBridge.setSettings(s.sensitivity, s.aimAssist, s.autoFire, s.invertY) }
+        engine {
+            NativeBridge.setSettings(s.sensitivity, s.aimAssist, s.autoFire, s.invertY)
+            NativeBridge.setGraphics(s.quality, s.cinematic)
+        }
         save()
     }
 
@@ -377,15 +428,21 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         config[Cfg.PLAYER_HP] = diff.playerHealth
         config[Cfg.MAGAZINE] = diff.magazine.toFloat()
         config[Cfg.POWER] = diff.power
-        config[Cfg.CRYSTAL_MASK] = p.record(stage.number).crystalMask.toFloat()
+        config[Cfg.CRYSTAL_MASK] = 0f
         config[Cfg.CRYSTAL_TOTAL] = stage.crystalTotal.toFloat()
         config[Cfg.SENSITIVITY] = p.settings.sensitivity
         config[Cfg.AIM_ASSIST] = if (p.settings.aimAssist) 1f else 0f
         config[Cfg.AUTO_FIRE] = if (p.settings.autoFire) 1f else 0f
         config[Cfg.INVERT_Y] = if (p.settings.invertY) 1f else 0f
-        // Semente nova a cada partida: o mapa nunca se repete (até 2^24 cabe exato em float).
+        // Semente nova a cada partida: a ilha nunca se repete (até 2^24 cabe exato em float).
         config[Cfg.SEED] = Random.nextInt(1, 16_000_000).toFloat()
         config[Cfg.RELOAD_SPEED] = diff.reloadSpeed
+        config[Cfg.BOOST_HEALTH] = if (boostReady) 1.3f else 1f
+        config[Cfg.BOOST_DAMAGE] = if (boostReady) 1.2f else 1f
+        config[Cfg.QUALITY] = p.settings.quality.toFloat()
+        config[Cfg.CINEMATIC] = if (p.settings.cinematic) 1f else 0f
+        val boosted = boostReady
+        boostReady = false
 
         inMission = true
         missionPaused = false
@@ -394,6 +451,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         reviveUsed = false
         bestCombo = 0
         missionKills = 0
+        bigMap = null
         uiLayer.removeAllViews()
         currentScreen = null
         homeScreen = null
@@ -404,6 +462,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         audio.setMusic(GameAudio.Music.BATTLE)
         // Deixa a tela de carregamento aparecer antes de gerar o mundo.
         surface.postDelayed({ engine { NativeBridge.startMission(config) } }, 120)
+        if (boosted) surface.postDelayed({ if (inMission) hud.message("BÔNUS DE COMBATE ATIVO!", Palette.cyan) }, 2500)
     }
 
     /** Chamado na thread GL com eventos do motor. */
@@ -420,12 +479,28 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 Ev.MISSION_READY -> {
                     val style = a
                     val size = NativeBridge.minimapSize()
-                    val pixels = IntArray(size * size)
-                    NativeBridge.copyMinimap(pixels)
-                    val bitmap = Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
+                    val minimap = copyBitmap(size) { NativeBridge.copyMinimap(it) }
+                    val bigSize = NativeBridge.bigMapSize()
+                    val big = if (bigSize > 0) copyBitmap(bigSize) { NativeBridge.copyBigMap(it) } else null
                     runOnUiThread {
-                        onMissionReady(bitmap)
-                        hud.message("MAPA: " + mapStyleName(style), Palette.cyan)
+                        bigMap = big
+                        worldSize = if (big != null) 6144f else size.toFloat()
+                        if (big == null) {
+                            // PvP: o minimapa é a arena inteira. Na ilha a origem vem do evento MINIMAP.
+                            hud.minimapOriginX = 0f
+                            hud.minimapOriginZ = 0f
+                        }
+                        onMissionReady(minimap)
+                        if (style >= 0) hud.message("MAPA: " + mapStyleName(style), Palette.cyan)
+                    }
+                }
+                Ev.MINIMAP -> {
+                    val size = NativeBridge.minimapSize()
+                    val minimap = copyBitmap(size) { NativeBridge.copyMinimap(it) }
+                    runOnUiThread {
+                        hud.minimap = minimap
+                        hud.minimapOriginX = (a - size / 2).toFloat()
+                        hud.minimapOriginZ = (b - size / 2).toFloat()
                     }
                 }
                 else -> runOnUiThread { onGameEvent(type, a, b, c) }
@@ -433,13 +508,21 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         }
     }
 
-    private fun onMissionReady(minimap: Bitmap) {
+    private fun copyBitmap(size: Int, fill: (IntArray) -> Unit): Bitmap? {
+        if (size <= 0) return null
+        val pixels = IntArray(size * size)
+        fill(pixels)
+        return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun onMissionReady(minimap: Bitmap?) {
         if (!inMission && !inPvp) return
         hud.minimap = minimap
         closeOverlay()
         loading = null
         hud.visibility = View.VISIBLE
-        hud.message(if (inPvp) "QUE VENÇA O MELHOR!" else "ELIMINE A HORDA!", Palette.lime)
+        hud.message(if (inPvp) "QUE VENÇA O MELHOR!" else "DESTRUA OS 3 NINHOS!", Palette.lime)
+        if (!inPvp) hud.tip("Siga as setas roxas até os ninhos • explore para achar baús")
         if (!progress.tutorialSeen) {
             progress.tutorialSeen = true
             save()
@@ -464,6 +547,50 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 hud.message("CRISTAL COLETADO ◆", Palette.cyan)
                 audio.playUi("reward", 0.7f)
             }
+            Ev.NEST_DESTROYED -> {
+                hud.message("NINHO DESTRUÍDO! PEGUE O CRISTAL", Palette.purple)
+                hud.haptic(true)
+            }
+            Ev.CHEST -> {
+                hud.message("BAÚ ABERTO! +◆ $a", Palette.gold)
+                audio.playUi("reward", 0.8f)
+            }
+            Ev.POI -> {
+                val label = when (a) {
+                    PoiKind.FIRE -> "ACAMPAMENTO ABANDONADO"
+                    PoiKind.RUINS -> "RUÍNAS ANTIGAS"
+                    PoiKind.GRAVEYARD -> "CEMITÉRIO"
+                    PoiKind.DEPOT -> "DEPÓSITO DE SUPRIMENTOS"
+                    PoiKind.FARM -> "FAZENDA"
+                    PoiKind.TOWER -> "TORRE DE VIGIA"
+                    PoiKind.OUTPOST -> "POSTO AVANÇADO"
+                    PoiKind.NEST -> "NINHO DE INFECÇÃO!"
+                    else -> "PORTAL DE EXTRAÇÃO"
+                }
+                hud.message(label, if (a == PoiKind.NEST) Palette.purple else Color.WHITE)
+                if (a == PoiKind.TOWER) hud.tip("Suba a escada: lá de cima dá para ver longe — e tem um baú!")
+            }
+            Ev.SUPPLY -> {
+                if (a == 0) hud.message("SUPRIMENTOS CAINDO! SIGA A FUMAÇA VERDE", Palette.cyan)
+                else {
+                    hud.message("MUNIÇÃO INCENDIÁRIA + VIDA!", Palette.gold)
+                    hud.haptic(true)
+                }
+            }
+            Ev.ELITE -> hud.message("ELITE: ${ZombieKinds.get(a).name.uppercase()}", Palette.gold)
+            Ev.NEW_KIND -> {
+                val info = ZombieKinds.get(a)
+                hud.tip("NOVO ZUMBI: ${info.name} — ${info.ability}")
+            }
+            Ev.STATUS -> {
+                when (a) {
+                    1 -> hud.message("QUEIMANDO! PULE NA ÁGUA", Color.rgb(255, 150, 60))
+                    2 -> hud.message("SANGRANDO!", Palette.red)
+                    3 -> hud.message("ENVENENADO!", Color.rgb(140, 255, 90))
+                    4 -> hud.message("ÁCIDO! VOCÊ ESTÁ LENTO", Color.rgb(140, 255, 90))
+                }
+                hud.haptic(true)
+            }
             Ev.PORTAL_OPEN -> hud.message("PORTAL ABERTO!", Palette.purple)
             Ev.HEAL -> hud.message("+$a VIDA", Palette.red)
             Ev.VICTORY -> surface.postDelayed({ finishMission(true) }, 700)
@@ -485,6 +612,10 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             bestCombo = bestCombo,
             shots = r[Res.SHOTS].toInt(),
             hits = r[Res.HITS].toInt(),
+            chests = r[Res.CHESTS].toInt(),
+            chestDiamonds = r[Res.CHEST_DIAMONDS].toInt(),
+            distance = r[Res.DISTANCE],
+            nests = r[Res.NESTS].toInt(),
         )
     }
 
@@ -497,6 +628,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val result = readResult(victory)
         val summary = Rules.applyResult(progress, stage, result)
         val unlocked = Rules.refreshSkinUnlocks(progress)
+        progress.missionsSinceInterstitial += 1
         save()
         audio.playUi(if (victory) "victory" else "defeat", 1f)
         audio.setMusic(GameAudio.Music.MENU)
@@ -509,7 +641,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         hud.visibility = View.GONE
         NativeBridge.setFire(false)
         audio.playUi("defeat", 1f)
-        showOverlay(DefeatOverlay(this, Campaign.stage(missionStage), canRevive = !reviveUsed))
+        showOverlay(DefeatOverlay(this, Campaign.stage(missionStage), canRevive = !reviveUsed, canSkip = Rules.canSkip(progress, missionStage, pendingFails = 1)))
     }
 
     fun reviveWithAd() {
@@ -528,24 +660,44 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         }
     }
 
+    /** Registra a derrota (se ainda não registrada) contando abates, baús e distância. */
+    private fun recordDefeat() {
+        if (missionEnded) return
+        missionEnded = true
+        val result = readResult(false)
+        Rules.applyResult(progress, Campaign.stage(missionStage), result)
+        progress.missionsSinceInterstitial += 1
+        checkUnlocks()
+        save()
+    }
+
     /** Sai da missão contabilizando abates e tempo (derrota ou abandono). */
     fun abandonMission(retry: Boolean) {
-        if (!missionEnded) {
-            missionEnded = true
-            val result = readResult(false)
-            Rules.applyResult(progress, Campaign.stage(missionStage), result)
-            checkUnlocks()
-            save()
-        }
+        recordDefeat()
         endMissionUi()
-        if (retry) startStage(missionStage, skipStory = true) else showHome()
+        maybeInterstitial {
+            if (retry) startStage(missionStage, skipStory = true) else showStages()
+        }
+    }
+
+    fun skipStageWithAd() {
+        watchAd {
+            recordDefeat()
+            if (Rules.skipStage(progress, missionStage)) {
+                save()
+                audio.playUi("unlock", 1f)
+                endMissionUi()
+                startStage(missionStage + 1)
+            }
+        }
     }
 
     fun leaveAfterVictory(next: Boolean) {
         endMissionUi()
-        val nextStage = (missionStage + 1).coerceAtMost(Campaign.stages.size)
-        if (next && progress.isStageCompleted(missionStage) && missionStage < Campaign.stages.size) startStage(nextStage)
-        else showHome()
+        maybeInterstitial {
+            if (next && progress.isStageCompleted(missionStage)) startStage(missionStage + 1)
+            else showStages()
+        }
     }
 
     private fun endMissionUi() {
@@ -570,17 +722,38 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     override fun onMapRequested() {
         if (inPvp && !pvpEnded) {
             hud.reset()
-            showOverlay(MapOverlay(this, hud.minimap) { resumePvp() })
+            showOverlay(MapOverlay(this, hud.minimap, worldSize) { resumePvp() })
             return
         }
         if (!inMission || missionEnded) return
         missionPaused = true
         engine { NativeBridge.setPaused(true) }
         hud.reset()
-        showOverlay(MapOverlay(this, hud.minimap) {
+        showOverlay(MapOverlay(this, bigMap ?: hud.minimap, worldSize) {
             closeOverlay()
             resumeMission()
         })
+    }
+
+    /** Botão SUPRIMENTOS: anúncio premiado → caixa de paraquedas com munição incendiária e vida. */
+    override fun onSupplyRequested() {
+        if (!inMission || missionEnded || missionPaused || defeatShown) return
+        if (!ads.isReady) {
+            hud.message("ANÚNCIO INDISPONÍVEL, TENTE JÁ JÁ", Palette.muted)
+            ads.load()
+            return
+        }
+        missionPaused = true
+        engine { NativeBridge.setPaused(true) }
+        hud.reset()
+        watchAd(onClosed = { if (inMission && !missionEnded) resumeMission() }) {
+            NativeBridge.requestSupply()
+        }
+    }
+
+    fun openMapFromPause() {
+        if (!inMission || missionEnded) return
+        showOverlay(MapOverlay(this, bigMap ?: hud.minimap, worldSize) { showOverlay(PauseOverlay(this, Campaign.stage(missionStage))) })
     }
 
     fun pauseMission() {

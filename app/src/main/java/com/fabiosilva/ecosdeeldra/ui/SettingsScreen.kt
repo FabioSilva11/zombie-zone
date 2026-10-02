@@ -49,7 +49,9 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
             }
             qualityRow.addView(b, Ui.lp(0, app.dpi(42), 1f).apply { marginEnd = if (i < 2) app.dpi(6) else 0 })
         }
-        right.addView(qualityRow, Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(8) })
+        right.addView(qualityRow, Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(4) })
+        right.addView(Ui.text(app, "Qualidade muda a resolução e a distância de visão da ilha.", 10f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(8)) })
+        right.addView(toggle("Iluminação cinematográfica", "Sombras do sol em tempo real, brilho (bloom), raios de sol, névoa nos vales e cores de cinema. Gasta mais bateria.", s.cinematic) { s.cinematic = it })
         right.addView(toggle("Mostrar FPS", "", s.showFps) { s.showFps = it })
         right.addView(toggle("Lembretes", "Avisar quando o baú e o prêmio diário estiverem prontos", s.reminders) {
             s.reminders = it

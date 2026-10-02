@@ -29,6 +29,8 @@ class SaveStore(context: Context) {
                     put("stars", r.stars)
                     put("bestTime", r.bestTime.toDouble())
                     put("crystalMask", r.crystalMask)
+                    put("fails", r.fails)
+                    put("skipped", r.skipped)
                 })
             }
         })
@@ -47,6 +49,10 @@ class SaveStore(context: Context) {
             put("pvpKills", p.stats.pvpKills)
             put("pvpWins", p.stats.pvpWins)
             put("pvpMatches", p.stats.pvpMatches)
+            put("chests", p.stats.chests)
+            put("nests", p.stats.nests)
+            put("distance", p.stats.distance)
+            put("losses", p.stats.losses)
         })
         put("lastLoginDay", p.lastLoginDay)
         put("calendarClaims", p.calendarClaims)
@@ -60,6 +66,8 @@ class SaveStore(context: Context) {
         put("adsToday", p.adsToday)
         put("chestReadyAt", p.chestReadyAt)
         put("tutorialSeen", p.tutorialSeen)
+        put("missionsSinceInterstitial", p.missionsSinceInterstitial)
+        put("lastAdAt", p.lastAdAt)
         put("settings", JSONObject().apply {
             val s = p.settings
             put("sensitivity", s.sensitivity.toDouble())
@@ -74,6 +82,7 @@ class SaveStore(context: Context) {
             put("showFps", s.showFps)
             put("leftHanded", s.leftHanded)
             put("playerName", s.playerName)
+            put("cinematic", s.cinematic)
         })
     }
 
@@ -89,13 +98,15 @@ class SaveStore(context: Context) {
         o.optJSONObject("stages")?.let { stages ->
             stages.keys().forEach { key ->
                 val n = key.toIntOrNull() ?: return@forEach
-                if (n !in 1..Campaign.stages.size) return@forEach
+                if (n < 1) return@forEach
                 val r = stages.getJSONObject(key)
                 p.stages[n] = StageRecord(
                     completed = r.optBoolean("completed"),
                     stars = r.optInt("stars").coerceIn(0, 3),
                     bestTime = r.optDouble("bestTime", 0.0).toFloat(),
                     crystalMask = r.optInt("crystalMask") and 0b111,
+                    fails = r.optInt("fails").coerceAtLeast(0),
+                    skipped = r.optBoolean("skipped"),
                 )
             }
         }
@@ -114,6 +125,10 @@ class SaveStore(context: Context) {
             p.stats.pvpKills = s.optInt("pvpKills")
             p.stats.pvpWins = s.optInt("pvpWins")
             p.stats.pvpMatches = s.optInt("pvpMatches")
+            p.stats.chests = s.optInt("chests")
+            p.stats.nests = s.optInt("nests")
+            p.stats.distance = s.optLong("distance")
+            p.stats.losses = s.optInt("losses")
         }
         p.lastLoginDay = o.optString("lastLoginDay", "")
         p.calendarClaims = o.optInt("calendarClaims")
@@ -131,6 +146,8 @@ class SaveStore(context: Context) {
         p.adsToday = o.optInt("adsToday")
         p.chestReadyAt = o.optLong("chestReadyAt")
         p.tutorialSeen = o.optBoolean("tutorialSeen")
+        p.missionsSinceInterstitial = o.optInt("missionsSinceInterstitial")
+        p.lastAdAt = o.optLong("lastAdAt")
         o.optJSONObject("settings")?.let { s ->
             val t = p.settings
             t.sensitivity = s.optDouble("sensitivity", 1.0).toFloat().coerceIn(0.3f, 2.5f)
@@ -145,6 +162,7 @@ class SaveStore(context: Context) {
             t.showFps = s.optBoolean("showFps", false)
             t.leftHanded = s.optBoolean("leftHanded", false)
             t.playerName = s.optString("playerName", "")
+            t.cinematic = s.optBoolean("cinematic", false)
         }
         return p
     }
