@@ -9,3 +9,10 @@ output/
 kenney_blocky-characters_20/
 kenney_modular-dungeon-kit_1.0/
 docs/screenshots/wifi-device-current.png
+.kotlin/
+**/.cxx/
+
+# Versão web antiga e capturas de depuração locais (fora do repositório)
+legacy/
+codex-*.png
+codex-window.xml

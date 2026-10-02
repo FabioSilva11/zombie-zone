@@ -1,4 +1,0 @@
-﻿nipplejs 1.0.4
-Copyright (c) 2014 Yoann Moinet
-Licensed under the MIT License.
-Source: https://github.com/yoannmoinet/nipplejs

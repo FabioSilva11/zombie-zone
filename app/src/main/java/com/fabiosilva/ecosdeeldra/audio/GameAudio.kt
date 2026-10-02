@@ -1,0 +1,129 @@
+package com.fabiosilva.ecosdeeldra.audio
+
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.SoundPool
+import android.os.SystemClock
+import com.fabiosilva.ecosdeeldra.R
+import com.fabiosilva.ecosdeeldra.engine.Snd
+
+/**
+ * Efeitos com SoundPool (baixa latência, OGG em res/raw) e música com MediaPlayer em loop.
+ * play() é seguro para chamar da thread GL.
+ */
+class GameAudio(private val context: Context) {
+    enum class Music { NONE, MENU, BATTLE }
+
+    private val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_GAME)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+    private val pool = SoundPool.Builder().setMaxStreams(14).setAudioAttributes(attributes).build()
+    private val engineSounds = IntArray(15)
+    private val groanAlt: Int
+    private val lastPlayed = LongArray(15)
+    private val ui = mutableMapOf<String, Int>()
+
+    private var player: MediaPlayer? = null
+    private var currentMusic = Music.NONE
+    private var wantedMusic = Music.NONE
+    private var paused = false
+
+    var sfxVolume = 1f
+    var musicVolume = 0.6f
+        set(value) {
+            field = value
+            player?.setVolume(value, value)
+        }
+
+    init {
+        fun load(id: Int) = pool.load(context, id, 1)
+        engineSounds[Snd.SHOT] = load(R.raw.sfx_shot)
+        engineSounds[Snd.RELOAD] = load(R.raw.sfx_reload)
+        engineSounds[Snd.HIT] = load(R.raw.sfx_hit)
+        engineSounds[Snd.HEADSHOT] = load(R.raw.sfx_headshot)
+        engineSounds[Snd.GROAN] = load(R.raw.sfx_groan1)
+        engineSounds[Snd.ZOMBIE_DIE] = load(R.raw.sfx_zombie_die)
+        engineSounds[Snd.HURT] = load(R.raw.sfx_hurt)
+        engineSounds[Snd.PICKUP] = load(R.raw.sfx_pickup)
+        engineSounds[Snd.PORTAL] = load(R.raw.sfx_portal)
+        engineSounds[Snd.JUMP] = load(R.raw.sfx_jump)
+        engineSounds[Snd.STEP] = load(R.raw.sfx_step)
+        engineSounds[Snd.EMPTY] = load(R.raw.sfx_empty)
+        engineSounds[Snd.SPLASH] = load(R.raw.sfx_splash)
+        engineSounds[Snd.ZOMBIE_ATTACK] = load(R.raw.sfx_zombie_attack)
+        engineSounds[Snd.HEAL] = load(R.raw.sfx_heal)
+        groanAlt = load(R.raw.sfx_groan2)
+        ui["click"] = load(R.raw.ui_click)
+        ui["reward"] = load(R.raw.sfx_reward)
+        ui["victory"] = load(R.raw.sfx_victory)
+        ui["defeat"] = load(R.raw.sfx_defeat)
+        ui["unlock"] = load(R.raw.sfx_unlock)
+    }
+
+    /** Som vindo do motor: volume 0..100 e pan -100..100. */
+    fun playEngine(sound: Int, volume: Int, pan: Int) {
+        if (sound !in engineSounds.indices || sfxVolume <= 0f) return
+        val now = SystemClock.uptimeMillis()
+        // Evita empilhar o mesmo som no mesmo instante (ex.: rajada + vários impactos).
+        val minGap = when (sound) { Snd.SHOT -> 45L; Snd.STEP -> 120L; Snd.GROAN -> 350L; else -> 30L }
+        if (now - lastPlayed[sound] < minGap) return
+        lastPlayed[sound] = now
+        val v = (volume / 100f).coerceIn(0f, 1f) * sfxVolume
+        val p = (pan / 100f).coerceIn(-1f, 1f)
+        val left = v * (1f - p.coerceAtLeast(0f))
+        val right = v * (1f + p.coerceAtMost(0f))
+        var id = engineSounds[sound]
+        if (sound == Snd.GROAN && (now and 1L) == 0L) id = groanAlt
+        val rate = when (sound) {
+            Snd.GROAN, Snd.ZOMBIE_DIE -> 0.85f + (now % 7) * 0.05f
+            Snd.HIT, Snd.STEP -> 0.9f + (now % 5) * 0.05f
+            else -> 1f
+        }
+        val priority = if (sound == Snd.SHOT || sound == Snd.HURT) 2 else 1
+        pool.play(id, left, right, priority, 0, rate)
+    }
+
+    fun playUi(name: String, volume: Float = 0.8f) {
+        val id = ui[name] ?: return
+        pool.play(id, volume * sfxVolume, volume * sfxVolume, 3, 0, 1f)
+    }
+
+    fun setMusic(music: Music) {
+        wantedMusic = music
+        if (paused) return
+        if (music == currentMusic && player != null) return
+        player?.release()
+        player = null
+        currentMusic = music
+        val res = when (music) {
+            Music.MENU -> R.raw.music_menu
+            Music.BATTLE -> R.raw.music_battle
+            Music.NONE -> return
+        }
+        player = MediaPlayer.create(context, res)?.apply {
+            isLooping = true
+            setVolume(musicVolume, musicVolume)
+            start()
+        }
+    }
+
+    fun pause() {
+        paused = true
+        player?.takeIf { it.isPlaying }?.pause()
+        pool.autoPause()
+    }
+
+    fun resume() {
+        paused = false
+        pool.autoResume()
+        if (player == null || currentMusic != wantedMusic) setMusic(wantedMusic) else player?.start()
+    }
+
+    fun release() {
+        player?.release()
+        player = null
+        pool.release()
+    }
+}
