@@ -11,6 +11,7 @@ import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Rules
 import com.fabiosilva.ecosdeeldra.data.Skins
 import com.fabiosilva.ecosdeeldra.data.UnlockKind
+import com.fabiosilva.ecosdeeldra.data.Upgrades
 import java.util.Calendar
 
 /** Missões diárias, calendário de login e conquistas (objetivos que liberam skins). */
@@ -163,6 +164,8 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
 
 @SuppressLint("ViewConstructor")
 class UpgradesScreen(private val app: MainActivity) : FrameLayout(app) {
+    private var scrollY = 0
+
     init {
         setBackgroundColor(Color.argb(150, 6, 10, 20))
         Ui.blockTouches(this)
@@ -171,42 +174,49 @@ class UpgradesScreen(private val app: MainActivity) : FrameLayout(app) {
 
     private fun build() {
         removeAllViews()
+        val p = app.progress
+        val cap = Rules.upgradeCap(p)
         val column = Ui.column(app)
-        column.addView(Header.build(app, "MELHORIAS", "GASTE DIAMANTES PARA FICAR MAIS FORTE") { app.showHome() })
-        val row = Ui.row(app, Gravity.TOP)
-        val defs = listOf(
-            Triple("vitality", "VITALIDADE", "+20 de vida máxima por nível"),
-            Triple("power", "PODER DE FOGO", "+15% de dano por nível"),
-            Triple("reload", "RECARGA RÁPIDA", "+12% de velocidade de recarga"),
-        )
-        defs.forEachIndexed { i, (kind, title, desc) ->
-            val level = Rules.upgradeLevel(app.progress, kind)
-            val cost = Rules.upgradeCost(level)
-            val card = Ui.panel(app)
-            card.addView(Ui.text(app, "NÍVEL $level/5", 11f, Palette.lime, Fonts.title))
-            card.addView(Ui.title(app, title, 18f).apply { setPadding(0, app.dpi(4), 0, app.dpi(4)) })
-            card.addView(Ui.text(app, desc, 12f, Palette.muted))
-            val pips = Ui.row(app).apply { setPadding(0, app.dpi(12), 0, app.dpi(12)) }
-            for (k in 0 until 5) {
-                pips.addView(View(app).apply { background = BlockDrawable(app, if (k < level) Palette.lime else Palette.stone, 3f, 2f) }, Ui.lp(0, app.dpi(16), 1f).apply { marginEnd = app.dpi(4) })
-            }
-            card.addView(pips)
-            val button = if (cost == null) Ui.button(app, "MÁXIMO", Palette.limeDark, Palette.dark, 14f) {}.also { Ui.setEnabledLook(it, false) }
-            else Ui.button(app, "MELHORAR ◆ $cost", Palette.gold, Palette.dark, 14f) {
-                if (Rules.buyUpgrade(app.progress, kind)) {
-                    app.audio.playUi("unlock", 0.9f)
-                    app.save()
-                    build()
-                }
-            }.also { Ui.setEnabledLook(it, app.progress.diamonds >= cost) }
-            card.addView(button, Ui.lp(Ui.MATCH, app.dpi(50)))
-            row.addView(card, Ui.lp(0, Ui.WRAP, 1f).apply { marginEnd = if (i < 2) app.dpi(10) else 0 })
-        }
-        column.addView(row, Ui.lp(Ui.MATCH, Ui.WRAP).apply { setMargins(app.dpi(20), app.dpi(16), app.dpi(20), 0) })
-        column.addView(Ui.text(app, "Dica: diamantes vêm de vitórias, cristais das fases, missões diárias, baú grátis e anúncios.", 12f, Palette.muted).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, app.dpi(14), 0, 0)
+        column.addView(Header.build(app, "MELHORIAS", "FIQUE MAIS FORTE A CADA ZONA") { app.showHome() })
+        column.addView(Ui.text(app, "Limite atual: nível $cap • o limite sobe +3 a cada nova zona liberada (próxima: zona ${Rules.nextCapZone(p)}). As zonas também deixam os zumbis mais fortes!", 12f, Palette.gold).apply {
+            setPadding(app.dpi(20), app.dpi(8), app.dpi(20), app.dpi(4))
         })
+        val grid = Ui.column(app)
+        Upgrades.all.chunked(5).forEach { chunk ->
+            val row = Ui.row(app, Gravity.TOP)
+            chunk.forEachIndexed { i, def ->
+                val level = Rules.upgradeLevel(p, def.key)
+                val cost = Rules.upgradeCost(level)
+                val card = Ui.panel(app)
+                card.addView(Ui.text(app, "NÍVEL $level/$cap", 10f, def.color, Fonts.title))
+                card.addView(Ui.title(app, def.title, 13f).apply { setPadding(0, app.dpi(3), 0, app.dpi(2)) })
+                card.addView(Ui.text(app, def.desc, 10f, Palette.muted).apply { minLines = 3 })
+                card.addView(ProgressBarView(app, def.color).apply { fraction = level.toFloat() / cap.coerceAtLeast(1) }, Ui.lp(Ui.MATCH, app.dpi(7)).apply { setMargins(0, app.dpi(6), 0, app.dpi(4)) })
+                card.addView(Ui.text(app, if (level > 0) Upgrades.effectText(def.key, level) else "—", 10f, Palette.text, Fonts.bold))
+                card.addView(Ui.text(app, "Próximo: " + Upgrades.effectText(def.key, level + 1), 9f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(6)) })
+                val button = when {
+                    level >= cap -> Ui.button(app, "LIMITE", Palette.limeDark, Palette.dark, 12f) {}.also { Ui.setEnabledLook(it, false) }
+                    else -> Ui.button(app, "◆ $cost", Palette.gold, Palette.dark, 13f) {
+                        if (Rules.buyUpgrade(p, def.key)) {
+                            app.audio.playUi("unlock", 0.9f)
+                            app.save()
+                            build()
+                        }
+                    }.also { Ui.setEnabledLook(it, cost != null && p.diamonds >= cost) }
+                }
+                card.addView(button, Ui.lp(Ui.MATCH, app.dpi(42)))
+                row.addView(card, Ui.lp(0, Ui.WRAP, 1f).apply { marginEnd = if (i < chunk.size - 1) app.dpi(8) else 0 })
+            }
+            grid.addView(row, Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(8) })
+        }
+        grid.addView(Ui.text(app, "Dica: diamantes vêm de vitórias, ondas da sobrevivência, missões diárias, baú grátis e anúncios.", 12f, Palette.muted).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, app.dpi(6), 0, app.dpi(10))
+        })
+        val scroll = ScrollView(app).apply { addView(grid) }
+        column.addView(scroll, Ui.lp(Ui.MATCH, 0, 1f).apply { setMargins(app.dpi(20), app.dpi(6), app.dpi(20), 0) })
         addView(column, Ui.frame(Ui.MATCH, Ui.MATCH))
+        scroll.post { scroll.scrollTo(0, scrollY) }
+        scroll.viewTreeObserver.addOnScrollChangedListener { scrollY = scroll.scrollY }
     }
 }

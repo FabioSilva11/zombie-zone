@@ -153,24 +153,25 @@ class LoadingOverlay(app: MainActivity, zoneLabel: String, title: String, zoneCo
 }
 
 @SuppressLint("ViewConstructor")
-class PauseOverlay(app: MainActivity, stage: Stage) : FrameLayout(app) {
+class PauseOverlay(app: MainActivity, subtitle: String, survival: Boolean = false) : FrameLayout(app) {
     init {
         setBackgroundColor(Color.argb(170, 4, 7, 14))
         isClickable = true
         val panel = Ui.panel(app)
         panel.gravity = Gravity.CENTER_HORIZONTAL
         panel.addView(Ui.title(app, "PAUSADO", 26f, Palette.lime))
-        panel.addView(Ui.text(app, "Fase ${stage.number} · ${stage.title}", 13f, Palette.muted).apply { setPadding(0, app.dpi(4), 0, app.dpi(12)) })
+        panel.addView(Ui.text(app, subtitle, 13f, Palette.muted).apply { setPadding(0, app.dpi(4), 0, app.dpi(12)) })
         val buttons = listOf(
             Triple("CONTINUAR ▶", Palette.lime) { app.resumeMission() },
+            Triple("🎒 MOCHILA", Palette.gold) { app.openInventoryInMatch() },
             Triple("MAPA DA ILHA", Palette.cyan) { app.openMapFromPause() },
             Triple("REINICIAR", Palette.stone) { app.abandonMission(retry = true) },
             Triple("AJUSTES", Palette.stone) { app.showPauseSettings() },
-            Triple("SAIR DA FASE", Palette.red) { app.abandonMission(retry = false) },
+            Triple(if (survival) "ENCERRAR (VAI PARA O RANKING)" else "SAIR DA FASE", Palette.red) { app.abandonMission(retry = false) },
         )
         for ((label, color, action) in buttons) {
-            val dark = color == Palette.lime || color == Palette.cyan
-            panel.addView(Ui.button(app, label, color, if (dark) Palette.dark else Color.WHITE, 15f, action), Ui.lp(Ui.MATCH, app.dpi(46)).apply { bottomMargin = app.dpi(7) })
+            val dark = color == Palette.lime || color == Palette.cyan || color == Palette.gold
+            panel.addView(Ui.button(app, label, color, if (dark) Palette.dark else Color.WHITE, 14f, action), Ui.lp(Ui.MATCH, app.dpi(42)).apply { bottomMargin = app.dpi(6) })
         }
         addView(panel, Ui.frame(app.dpi(320), Ui.WRAP, Gravity.CENTER))
         Ui.popIn(panel)

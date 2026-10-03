@@ -46,6 +46,12 @@ object NativeBridge {
     external fun pressMelee()
     external fun pressGrenade()
     external fun swapShoulder()
+    external fun tapSlot(slot: Int)
+    external fun useSlot(slot: Int)
+    external fun setThrowAim(held: Boolean, cancel: Boolean)
+
+    /** Inventário (thread GL): ver [INV_INT_COUNT]. */
+    external fun setInventory(values: IntArray)
 
     // Saídas
     external fun copyHud(out: FloatArray)

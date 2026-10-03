@@ -81,7 +81,7 @@ MapShape makeShape(MapStyle style, int size, Rng& rng) {
     s.nx = std::cos(a);
     s.nz = std::sin(a);
     s.offset = rng.range(-0.08f, 0.08f) * size;
-    s.terrace = rng.range(3.0f, 4.0f);
+    s.terrace = rng.range(2.0f, 2.8f);  // degraus escaláveis
     return s;
 }
 
@@ -128,7 +128,7 @@ float naturalHeight(const MapShape& s, float x, float z, int size, const Theme& 
             float r = std::sqrt(dx * dx + dz * dz);
             float ring = std::exp(-((r - 0.5f) / 0.13f) * ((r - 0.5f) / 0.13f)) * 17.0f * theme.hilliness;
             mountains = ring + mountains * 0.3f;
-            if (r < 0.3f) hills = lerpf(-9.0f, hills, smoothstepf(0.18f, 0.3f, r));
+            if (r < 0.32f) hills = lerpf(-7.0f, hills, smoothstepf(0.06f, 0.32f, r));  // bacia com encosta suave
             break;
         }
         case MapStyle::Rivers:
@@ -310,7 +310,7 @@ void scatterTreesAndPlants(World& world, HeightField& hf, const Theme& theme, in
             float p = theme.treeDensity * densityScale * (0.25f + forest * forest * 4.0f);
             if (rng.chance(p) && !nearReserved(x, z, theme.tree == TreeKind::Cactus ? 2 : 3)) {
                 WorldSink sink(world);
-                placeTree(sink, theme.tree, x, y, z, rng);
+                placeTree(sink, pickTreeKind(theme, x, z, seed, y <= sea + 4), x, y, z, rng);
                 trunk[static_cast<size_t>(z) * hf.w + x] = 1;
                 hf.res(x, z) = R_TREE;
                 continue;
@@ -449,7 +449,11 @@ WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint
         if (!farFromAll(c, placed, minBetween) || !okSpot(c)) continue;
         float h = hf.get(static_cast<int>(c.x), static_cast<int>(c.y));
         placed.push_back(c);
-        camps.push_back({{c.x, std::round(clampf(h, sea + 2.0f, sea + 12.0f)), c.y}, rng.range(6.0f, 8.0f), false, false, rng.rangeInt(0, 4)});
+        // Acampamentos e construções (casas, posto, celeiro) servem de cobertura no PvP.
+        static const int kKinds[] = {K_FIRE, K_RUINS, K_GRAVEYARD, K_DEPOT, K_FARM, K_HOUSE, K_HOUSE, K_GAS, K_BARN};
+        int kind = kKinds[rng.rangeInt(0, static_cast<int>(sizeof(kKinds) / sizeof(kKinds[0])) - 1)];
+        float radius = isBuildingKind(kind) ? buildingRadius(kind) : rng.range(6.0f, 8.0f);
+        camps.push_back({{c.x, std::round(clampf(h, sea + 2.0f, sea + 12.0f)), c.y}, radius, false, false, kind});
     }
     if (options.portal && camps.size() > 1) {
         size_t farIdx = 1;

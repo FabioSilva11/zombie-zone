@@ -63,7 +63,7 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         brand.addView(logo, Ui.lp(app.dpi(48), app.dpi(48)))
         val brandText = Ui.column(app).apply { setPadding(app.dpi(10), 0, 0, 0) }
         brandText.addView(Ui.title(app, "ZOMBIE ZONE", 24f))
-        brandText.addView(Ui.text(app, "ILHAS DE 5 KM • FASES INFINITAS", 10f, Palette.lime, Fonts.title))
+        brandText.addView(Ui.text(app, "ILHAS DE 5 KM • FASES INFINITAS • SOBREVIVÊNCIA", 10f, Palette.lime, Fonts.title))
         brand.addView(brandText)
         addView(brand, Ui.frame(Ui.WRAP, Ui.WRAP, Gravity.TOP or Gravity.START).apply { setMargins(app.dpi(22), app.dpi(14), 0, 0) })
 
@@ -97,8 +97,11 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         card.addView(play, Ui.lp(Ui.MATCH, app.dpi(52)).apply { topMargin = app.dpi(8) })
         Ui.pulse(play)
         val secondary = Ui.row(app)
-        secondary.addView(Ui.button(app, "MAPA DAS ZONAS", Palette.stone, Color.WHITE, 13f) { app.showStages() }, Ui.lp(0, app.dpi(44), 1f).apply { marginEnd = app.dpi(6) })
-        secondary.addView(Ui.button(app, "⚔ PvP WI-FI", Palette.red, Color.WHITE, 13f) { app.showPvp() }, Ui.lp(0, app.dpi(44), 1f))
+        fun small(label: String, fill: Int, text: Int, onClick: () -> Unit) =
+            Ui.button(app, label, fill, text, 12f, onClick).apply { setPadding(app.dpi(4), app.dpi(6), app.dpi(4), app.dpi(10)) }
+        secondary.addView(small("MAPA", Palette.stone, Color.WHITE) { app.showStages() }, Ui.lp(0, app.dpi(44), 0.75f).apply { marginEnd = app.dpi(6) })
+        secondary.addView(small("☠ SOBREVIVER", Palette.gold, Palette.dark) { app.showSurvival() }, Ui.lp(0, app.dpi(44), 1.35f).apply { marginEnd = app.dpi(6) })
+        secondary.addView(small("⚔ PvP", Palette.red, Color.WHITE) { app.showPvp() }, Ui.lp(0, app.dpi(44), 0.9f))
         card.addView(secondary, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
         // Ancorado logo acima da barra de botões (14 de margem + 54 da barra + 12 de folga): nunca fica por trás dela.
         addView(card, Ui.frame(app.dpi(330), Ui.WRAP, Gravity.END or Gravity.BOTTOM).apply { setMargins(0, 0, app.dpi(22), app.dpi(80)) })
@@ -120,6 +123,8 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         nav.addView(missions, Ui.lp(0, app.dpi(54), 1f))
         nav.addView(View(app), Ui.lp(app.dpi(8), 1))
         nav.addView(navButton("▲ MELHORIAS", Palette.stone, Color.WHITE) { app.showUpgrades() }, Ui.lp(0, app.dpi(54), 1f))
+        nav.addView(View(app), Ui.lp(app.dpi(8), 1))
+        nav.addView(navButton("🎒 MOCHILA", Palette.stone, Color.WHITE) { app.showInventory(0) }, Ui.lp(0, app.dpi(54), 1f))
         nav.addView(View(app), Ui.lp(app.dpi(8), 1))
         chestButton = navButton("▣ BAÚ", Palette.stone, Color.WHITE) { onChest() }
         chestLabel = chestButton

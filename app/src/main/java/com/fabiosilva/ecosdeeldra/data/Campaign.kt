@@ -120,19 +120,32 @@ object Campaign {
         )
     }
 
-    fun difficulty(stageNumber: Int, vitality: Int, power: Int, reload: Int): Difficulty {
+    fun difficulty(stageNumber: Int, vitality: Int, power: Int, reload: Int, magazineLevel: Int = 0): Difficulty {
         val step = stageNumber.coerceAtLeast(1) - 1
         val late = (step - 19).coerceAtLeast(0)
+        // Cada zona nova deixa a horda um pouco mais resistente e perigosa.
+        val zoneMul = 1f + (step / STAGES_PER_ZONE) * 0.04f
         return Difficulty(
             zombieCount = (8 + min(step, 30) * 0.6f + late / 10).toInt().coerceAtMost(30),
-            zombieHealth = 60f + min(step, 19) * 12f + late * 4f,
-            zombieDamage = (8f + min(step, 40) * 0.6f + (step - 40).coerceAtLeast(0) * 0.25f).coerceAtMost(50f),
+            zombieHealth = (60f + min(step, 19) * 12f + late * 4f) * zoneMul,
+            zombieDamage = ((8f + min(step, 40) * 0.6f + (step - 40).coerceAtLeast(0) * 0.25f) * zoneMul).coerceAtMost(60f),
             zombieSpeed = 1f + min(0.45f, step * 0.022f),
-            playerHealth = 100f + min(step, 40) * 12f + vitality.coerceIn(0, 5) * 20f,
-            magazine = 30 + min(step, 30) * 2,
+            // A vida e o pente também evoluem a cada fase; as melhorias somam por cima.
+            playerHealth = (100f + min(step, 40) * 12f + min(vitality, 5) * 20f) * (1f + 0.06f * (vitality - 5).coerceAtLeast(0)),
+            magazine = ((30 + min(step, 30) * 2) * Upgrades.magazine(magazineLevel)).toInt(),
             // Armas melhores a cada fase: o dano acompanha a vida dos zumbis nas fases infinitas.
-            power = (1f + power.coerceIn(0, 5) * 0.15f) * (1f + min(late, 60) * 0.02f),
-            reloadSpeed = 1f + reload.coerceIn(0, 5) * 0.12f,
+            power = Upgrades.power(power) * (1f + min(late, 60) * 0.02f) * (1f + (zoneMul - 1f) * 0.8f),
+            reloadSpeed = Upgrades.reload(reload),
         )
+    }
+
+    fun difficulty(stageNumber: Int, p: Progress): Difficulty =
+        difficulty(stageNumber, p.vitality, p.power, p.reload, p.upgrade("magazine"))
+
+    /** Sobrevivência: zumbis começam fracos (as ondas os fortalecem); o jogador usa suas melhorias. */
+    fun survivalDifficulty(p: Progress): Difficulty {
+        val base = difficulty(1, p)
+        val player = difficulty(min(p.highestUnlockedStage(), 10), p)
+        return base.copy(playerHealth = player.playerHealth, magazine = player.magazine)
     }
 }

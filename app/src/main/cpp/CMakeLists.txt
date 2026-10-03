@@ -14,6 +14,7 @@ add_library(zombiezone SHARED
     core/json.cpp
     core/platform.cpp
     world/block_textures.cpp
+    world/buildings.cpp
     world/island.cpp
     world/structures.cpp
     world/terrain.cpp
@@ -22,7 +23,9 @@ add_library(zombiezone SHARED
     render/gl_util.cpp
     render/renderer.cpp
     game/game.cpp
+    game/game_items.cpp
     game/game_mission.cpp
+    game/game_survival.cpp
     game/game_zombies.cpp
     game/nav.cpp
     game/net.cpp

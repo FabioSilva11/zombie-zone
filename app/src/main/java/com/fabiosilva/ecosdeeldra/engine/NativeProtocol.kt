@@ -23,8 +23,21 @@ object Cfg {
     const val BOOST_DAMAGE = 18
     const val QUALITY = 19
     const val CINEMATIC = 20
-    const val COUNT = 21
+    const val MODE = 21        // 0 campanha, 1 sobrevivência
+    const val ARMOR = 22       // redução de dano 0..0.6
+    const val REGEN = 23       // fração da vida por segundo
+    const val SPEED = 24
+    const val HEADSHOT = 25
+    const val LUCK = 26
+    const val EXPLOSIVES = 27
+    const val COUNT = 28
+
+    const val MODE_CAMPAIGN = 0
+    const val MODE_SURVIVAL = 1
 }
+
+/** Inventário enviado ao motor: (id, quantidade) x 24 + espaço da arma + espaço do arremessável. */
+const val INV_INT_COUNT = 24 * 2 + 2
 
 object Hud {
     const val HEALTH = 0
@@ -108,7 +121,33 @@ object Hud {
     const val MELEE = 544    // recarga da faca 0..1, -1 = indisponível
     const val SHOULDER = 545
     const val SPRINT_LOCK = 546
-    const val SIZE = 560
+    const val INV = 560        // (id, quantidade) x 24
+    const val INV_ENABLED = 608
+    const val WEAPON_SLOT = 609
+    const val THROW_SLOT = 610
+    const val WEAPON = 611
+    const val ARMOR = 612
+    const val ARMOR_MAX = 613
+    const val ADRENALINE = 614
+    const val THROW_AIM = 615
+    const val THROW_DIST = 616
+    const val SWAP = 617
+    const val THROW_KIND = 618
+    const val THROW_SX = 619
+    const val THROW_SY = 620
+    const val THROW_ONSCREEN = 621
+    const val SURV = 630
+    const val WAVE = 631
+    const val WAVE_STATE = 632   // 0 preparando, 1 em andamento, 2 vencida
+    const val WAVE_TIMER = 633
+    const val WAVE_PROGRESS = 634
+    const val WAVE_LEFT = 635
+    const val WAVE_BIG = 636
+    const val SURV_TIME = 637
+    const val SCORE = 638
+    const val FRONT_COUNT = 639
+    const val FRONTS = 640
+    const val SIZE = 660
 }
 
 /** Configuração da partida PvP (espelha PvpConfigIndex em protocol.h). */
@@ -146,6 +185,10 @@ object Ev {
     const val STATUS = 19
     const val MINIMAP = 20
     const val NEW_KIND = 21
+    const val ITEM = 22        // a = item, b = quantidade, c = 1 mochila cheia
+    const val ITEM_USED = 23   // a = item, b = 1 usado / 0 recusado
+    const val WEAPON = 24      // a = arma equipada
+    const val WAVE = 25        // a = onda, b = grande horda, c = 0 preparando / 1 começou / 2 vencida
 }
 
 object Snd {
@@ -173,7 +216,16 @@ object Snd {
     const val CHEST = 21
     const val SPIT = 22
     const val RACK = 23
-    const val COUNT = 24
+    const val PISTOL = 24
+    const val SHOTGUN = 25
+    const val SMG = 26
+    const val SNIPER = 27
+    const val LMG = 28
+    const val FLAME = 29
+    const val LAUNCHER = 30
+    const val EQUIP = 31
+    const val WAVE = 32
+    const val COUNT = 33
 }
 
 object Res {
@@ -190,7 +242,9 @@ object Res {
     const val CHEST_DIAMONDS = 10
     const val DISTANCE = 11
     const val NESTS = 12
-    const val SIZE = 13
+    const val WAVE = 13
+    const val SCORE = 14
+    const val SIZE = 15
 }
 
 /** Tipos de ponto de interesse (CampKind em structures.h). */
@@ -204,4 +258,10 @@ object PoiKind {
     const val OUTPOST = 6
     const val NEST = 7
     const val PORTAL = 8
+    const val HOUSE = 9
+    const val VILLAGE = 10
+    const val CHURCH = 11
+    const val GAS = 12
+    const val APARTMENT = 13
+    const val BARN = 14
 }

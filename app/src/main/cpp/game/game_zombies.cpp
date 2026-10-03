@@ -215,7 +215,7 @@ void Game::updateZombie(Zombie& z, size_t index, float dt) {
     z.abilityTimer -= dt;
     if (z.burn > 0) {
         z.burn = std::max(0.0f, z.burn - dt);
-        z.health -= 14.0f * dt;
+        z.health -= z.burnDps * dt;
         z.barTimer = std::max(z.barTimer, 0.5f);
         if (rng_.chance(dt * 14.0f)) spawnBurst(z.body.position + Vec3(0, 1.0f * z.scale, 0), {1.0f, 0.55f, 0.15f, 1.0f}, 1, 1.2f, 0.25f, true, -2.0f);
         if (z.health <= 0) {
@@ -592,7 +592,7 @@ void Game::updateProjectiles(float dt) {
         p.vel.y -= p.gravity * dt;
         Vec3 to = from + p.vel * dt;
         bool hitPlayer = false;
-        if (!dead_ && p.kind != ProjectileKind::Grenade) {
+        if (!dead_ && !p.friendly && p.kind != ProjectileKind::Grenade) {
             for (int s = 1; s <= 3; ++s) {
                 Vec3 q = lerp(from, to, s / 3.0f);
                 if (q.y > player_.position.y - 0.1f && q.y < player_.position.y + 1.85f && distXZ(q, player_.position) < 0.55f) {
@@ -612,7 +612,7 @@ void Game::updateProjectiles(float dt) {
         }
         bool water = !hitPlayer && world_.isWaterAt(to);
         bool hitZombie = false;
-        if (p.kind == ProjectileKind::Grenade) {
+        if (p.kind == ProjectileKind::Grenade || p.friendly) {
             for (const Zombie& z : zombies_) {
                 if (z.state == ZState::Dead) continue;
                 if (length(z.body.position + Vec3(0, 0.9f * z.scale, 0) - to) < 0.8f * z.scale + 0.3f) {
@@ -673,11 +673,22 @@ void Game::impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer)
             Hazard h;
             h.kind = 0;
             h.pos = ground;
-            h.radius = 2.7f;
-            h.life = h.maxLife = 5.5f;
+            h.radius = p.friendly ? p.radius : 2.7f;
+            h.life = h.maxLife = p.friendly ? 7.0f : 5.5f;
             h.damage = 5.0f * (1.0f + std::min(1.5f, config_.stage * 0.03f));
-            hazards_.push_back(h);
-            if (hitPlayer) damagePlayer(p.damage, back);
+            h.friendly = p.friendly;
+            h.zombieDps = p.friendly ? p.damage : 14.0f;
+            if (!world_.isWaterAt(at)) hazards_.push_back(h);
+            if (hitPlayer && !p.friendly) damagePlayer(p.damage, back);
+            if (p.friendly) {
+                // O molotov do jogador também queima na hora quem estiver no alcance.
+                for (Zombie& z : zombies_) {
+                    if (z.state == ZState::Dead || distXZ(z.body.position, ground) > h.radius) continue;
+                    z.burn = std::max(z.burn, 3.0f);
+                    z.burnDps = std::max(z.burnDps, h.zombieDps);
+                    z.alerted = true;
+                }
+            }
             spawnBurst(at, {1.0f, 0.55f, 0.15f, 1.0f}, 30, 6.0f, 0.3f, true, -1.0f);
             spawnBurst(at, {0.7f, 0.9f, 0.6f, 0.8f}, 8, 4.0f, 0.08f, false, 12.0f);  // cacos de vidro
             addFlash(at + Vec3(0, 0.8f, 0), 12.0f, {1.0f, 0.55f, 0.2f}, 0.5f);
@@ -686,7 +697,7 @@ void Game::impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer)
             break;
         }
         case ProjectileKind::Grenade:
-            explode(at + Vec3(0, 0.3f, 0), 5.0f, 28.0f, p.damage, false);
+            explode(at + Vec3(0, 0.3f, 0), p.radius, 28.0f, p.damage, false);
             break;
         case ProjectileKind::Acid: {
             Hazard h;
@@ -732,7 +743,7 @@ void Game::updateHazards(float dt) {
             particles_.push_back(p);
         }
         float d = distXZ(player_.position, h.pos);
-        if (d < h.radius && std::fabs(player_.position.y - h.pos.y) < 1.6f && !dead_) {
+        if (!h.friendly && d < h.radius && std::fabs(player_.position.y - h.pos.y) < 1.6f && !dead_) {
             if (h.kind == 0) {
                 if (burning_ <= 0) emit(EV_STATUS, 1);
                 burning_ = std::max(burning_, 2.0f);
@@ -746,7 +757,10 @@ void Game::updateHazards(float dt) {
         if (h.kind == 0) {
             for (Zombie& z : zombies_) {
                 if (z.state == ZState::Dead || z.kind == ZombieKind::Molotov) continue;
-                if (distXZ(z.body.position, h.pos) < h.radius && std::fabs(z.body.position.y - h.pos.y) < 1.6f) z.burn = std::max(z.burn, 1.5f);
+                if (distXZ(z.body.position, h.pos) < h.radius && std::fabs(z.body.position.y - h.pos.y) < 1.6f) {
+                    z.burn = std::max(z.burn, 1.5f);
+                    z.burnDps = std::max(z.burnDps, h.zombieDps);
+                }
             }
         }
     }
@@ -854,6 +868,8 @@ void Game::killZombie(Zombie& z, bool headshot) {
         emitSound(SND_FIRE, center, 0.7f);
     }
 
+    rollZombieDrop(z);
+    if (survival()) score_ += headshot ? 15 : 10;
     Vec3 drop = z.body.position + Vec3(0, 1.0f, 0);
     float healChance = z.mutations ? 1.0f : (health_ / maxHealth_ < 0.4f ? 0.3f : 0.1f);
     if (rng_.chance(healChance)) {

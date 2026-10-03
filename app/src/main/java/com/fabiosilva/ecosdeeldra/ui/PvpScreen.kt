@@ -83,19 +83,27 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
         left.addView(Ui.button(app, "CRIAR SALA", Palette.lime, Palette.dark, 16f) {
             saveName(name.text.toString())
             lobby.host(playerName(), app.progress.selectedSkin, LanLobby.Rules(10, 5))
-        }, Ui.lp(Ui.MATCH, app.dpi(52)))
+        }, Ui.lp(Ui.MATCH, app.dpi(50)))
+        // Acha a sala sozinho, sem ninguém precisar passar o IP (conectar por IP continua abaixo).
+        val auto = Ui.button(app, if (lobby.autoJoining) "✕ PARAR BUSCA AUTOMÁTICA" else "🔍 ENTRAR AUTOMATICAMENTE", Palette.cyan, Palette.dark, 14f) {
+            saveName(name.text.toString())
+            if (lobby.autoJoining) lobby.cancelAutoJoin() else lobby.autoJoin(playerName(), app.progress.selectedSkin)
+            showBrowse()
+        }
+        left.addView(auto, Ui.lp(Ui.MATCH, app.dpi(48)).apply { topMargin = app.dpi(8) })
+        if (lobby.autoJoining) Ui.pulse(auto)
         left.addView(Ui.button(app, "CONECTAR POR IP", Palette.stone, Color.WHITE, 13f) {
             saveName(name.text.toString())
             askIp()
-        }, Ui.lp(Ui.MATCH, app.dpi(44)).apply { topMargin = app.dpi(8) })
-        left.addView(Ui.text(app, "Todos precisam estar no mesmo Wi-Fi (ou no roteador/hotspot de um dos celulares). Na partida não há mira assistida.", 11f, Palette.muted).apply {
+        }, Ui.lp(Ui.MATCH, app.dpi(42)).apply { topMargin = app.dpi(8) })
+        left.addView(Ui.text(app, "A busca automática encontra a sala sozinha no mesmo Wi-Fi (ou no hotspot de um dos celulares) — ninguém precisa digitar IP. Se a rede bloquear, use CONECTAR POR IP. Na partida não há mira assistida.", 11f, Palette.muted).apply {
             setPadding(0, app.dpi(10), 0, 0)
             setLineSpacing(0f, 1.15f)
         })
         row.addView(left, Ui.lp(0, Ui.WRAP, 1f).apply { marginEnd = app.dpi(12) })
 
         val right = Ui.panel(app)
-        right.addView(Ui.text(app, "SALAS NA SUA REDE", 10f, Palette.lime, Fonts.title))
+        right.addView(Ui.text(app, "SALAS ENCONTRADAS AUTOMATICAMENTE", 10f, Palette.lime, Fonts.title))
         val list = Ui.column(app)
         roomsList = list
         right.addView(ScrollView(app).apply { addView(list) }, Ui.lp(Ui.MATCH, Ui.MATCH))
@@ -121,7 +129,8 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
         val list = roomsList ?: return
         list.removeAllViews()
         if (rooms.isEmpty()) {
-            list.addView(Ui.text(app, "Procurando salas no Wi-Fi...\nPeça para um amigo tocar em CRIAR SALA.", 13f, Palette.muted).apply {
+            val waiting = if (lobby.autoJoining) "🔍 Procurando uma sala para entrar...\nAssim que um amigo tocar em CRIAR SALA você entra sozinho." else "Procurando salas no Wi-Fi...\nPeça para um amigo tocar em CRIAR SALA."
+            list.addView(Ui.text(app, waiting, 13f, if (lobby.autoJoining) Palette.cyan else Palette.muted).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, app.dpi(30), 0, 0)
                 setLineSpacing(0f, 1.2f)
@@ -141,6 +150,16 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
             card.addView(r)
             list.addView(card, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
         }
+    }
+
+    /** A busca automática achou uma sala e está entrando. */
+    fun showAutoJoining(room: LanLobby.Room) {
+        val list = roomsList ?: return
+        list.removeAllViews()
+        list.addView(Ui.text(app, "Sala de ${room.name} encontrada!\nEntrando...", 15f, Palette.lime, Fonts.title).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, app.dpi(30), 0, 0)
+        }, Ui.lp(Ui.MATCH, Ui.WRAP))
     }
 
     private fun askIp() {

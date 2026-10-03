@@ -37,6 +37,15 @@ class SaveStore(context: Context) {
         put("vitality", p.vitality)
         put("power", p.power)
         put("reload", p.reload)
+        put("upgrades", JSONObject().apply { p.upgrades.forEach { (k, v) -> put(k, v) } })
+        put("inventory", p.inventory.encode())
+        put("survival", JSONArray().apply {
+            p.survivalRecords.forEach {
+                put(JSONObject().put("name", it.name).put("seconds", it.seconds).put("wave", it.wave).put("kills", it.kills).put("score", it.score).put("date", it.date))
+            }
+        })
+        put("supplyAdsDay", p.supplyAdsDay)
+        put("supplyAdsToday", p.supplyAdsToday)
         put("stats", JSONObject().apply {
             put("kills", p.stats.kills)
             put("headshots", p.stats.headshots)
@@ -53,6 +62,9 @@ class SaveStore(context: Context) {
             put("nests", p.stats.nests)
             put("distance", p.stats.distance)
             put("losses", p.stats.losses)
+            put("survivalRuns", p.stats.survivalRuns)
+            put("bestWave", p.stats.bestWave)
+            put("bestSurvivalSeconds", p.stats.bestSurvivalSeconds)
         })
         put("lastLoginDay", p.lastLoginDay)
         put("calendarClaims", p.calendarClaims)
@@ -112,9 +124,21 @@ class SaveStore(context: Context) {
                 )
             }
         }
-        p.vitality = o.optInt("vitality").coerceIn(0, 5)
-        p.power = o.optInt("power").coerceIn(0, 5)
-        p.reload = o.optInt("reload").coerceIn(0, 5)
+        p.vitality = o.optInt("vitality").coerceIn(0, 60)
+        p.power = o.optInt("power").coerceIn(0, 60)
+        p.reload = o.optInt("reload").coerceIn(0, 60)
+        o.optJSONObject("upgrades")?.let { u ->
+            u.keys().forEach { key -> if (Upgrades.get(key) != null) p.upgrades[key] = u.optInt(key).coerceIn(0, 60) }
+        }
+        if (o.has("inventory")) p.inventory.copyFrom(Inventory.decode(o.optString("inventory", "")))
+        o.optJSONArray("survival")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val r = arr.optJSONObject(i) ?: continue
+                p.survivalRecords.add(SurvivalRecord(r.optString("name", "Jogador"), r.optInt("seconds"), r.optInt("wave"), r.optInt("kills"), r.optInt("score"), r.optString("date", "")))
+            }
+        }
+        p.supplyAdsDay = o.optString("supplyAdsDay", "")
+        p.supplyAdsToday = o.optInt("supplyAdsToday")
         o.optJSONObject("stats")?.let { s ->
             p.stats.kills = s.optInt("kills")
             p.stats.headshots = s.optInt("headshots")
@@ -131,6 +155,9 @@ class SaveStore(context: Context) {
             p.stats.nests = s.optInt("nests")
             p.stats.distance = s.optLong("distance")
             p.stats.losses = s.optInt("losses")
+            p.stats.survivalRuns = s.optInt("survivalRuns")
+            p.stats.bestWave = s.optInt("bestWave")
+            p.stats.bestSurvivalSeconds = s.optInt("bestSurvivalSeconds")
         }
         p.lastLoginDay = o.optString("lastLoginDay", "")
         p.calendarClaims = o.optInt("calendarClaims")

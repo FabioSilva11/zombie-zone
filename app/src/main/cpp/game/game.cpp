@@ -20,7 +20,6 @@ constexpr float kGravity = 28.0f;
 constexpr float kJumpVelocity = 8.6f;
 constexpr float kStepHeight = 1.05f;
 constexpr float kPlayerSpeed = 4.5f;
-constexpr float kFireInterval = 0.1f;
 constexpr int kSkinCount = 18;
 
 bool rayBox(const Vec3& o, const Vec3& d, const Vec3& mn, const Vec3& mx, float& tHit) {
@@ -269,6 +268,8 @@ void Game::consumeInput(InputState& in) {
     input_.previewRotate = 0;
     input_.supplyRequests = 0;
     input_.crouchToggles = input_.sprintToggles = input_.melees = input_.grenades = input_.shoulderSwaps = 0;
+    input_.tapCount = input_.useCount = 0;
+    input_.throwReleases = input_.throwCancels = 0;
 }
 
 // ----------------------------------------------------------------------------- quadro
@@ -295,6 +296,8 @@ void Game::frame(double now) {
             input_.lookX = input_.lookY = 0;
             input_.jumps = input_.reloads = 0;
             input_.crouchToggles = input_.sprintToggles = input_.melees = input_.grenades = input_.shoulderSwaps = 0;
+            input_.throwReleases = input_.throwCancels = 0;
+            input_.throwAim = false;
         }
     }
     if (!world_.streaming()) world_.rebuildDirty(6);
@@ -330,6 +333,10 @@ void Game::updateLobby(float dt) {
     if (lobbyScreen_ == 1) {
         target = c + Vec3(0.95f, 1.0f, 0);
         eye = target + Vec3(0.0f, 0.35f, 3.5f);
+    } else if (lobbyScreen_ == 2) {
+        // Inventário: o herói aparece no painel "Personagem" à esquerda da tela.
+        target = c + Vec3(5.0f, 0.62f, 0);
+        eye = target + Vec3(0.0f, 0.3f, 6.8f);
     } else {
         target = c + Vec3(1.3f, 1.05f, 0);
         eye = target + Vec3(std::sin(time_ * 0.2f) * 0.25f, 0.5f + std::sin(time_ * 0.13f) * 0.06f, 4.4f);
@@ -349,6 +356,8 @@ void Game::updateMission(float dt) {
     if (!victory_) missionTime_ += dt;
 
     streamWorld(2, 3);
+    for (int i = 0; i < in.tapCount; ++i) handleSlotTap(in.taps[i]);
+    for (int i = 0; i < in.useCount; ++i) useItemSlot(in.uses[i]);
     updateCamera(dt, in);
     updatePlayer(dt, in);
     if (!dead_ && !victory_) updateWeapon(dt, in);
@@ -356,7 +365,13 @@ void Game::updateMission(float dt) {
         firingNow_ = false;
         targetLocked_ = false;
     }
+    updateThrowAim(dt, in);
+    updateItemStatus(dt);
     updateStatus(dt);
+    if (survival()) {
+        if (!dead_) survivalTime_ += dt;
+        updateWaves(dt);
+    }
 
     // Recalcula o campo de fluxo quando o jogador muda de coluna (ou periodicamente).
     navTimer_ -= dt;
@@ -368,7 +383,7 @@ void Game::updateMission(float dt) {
         navTimer_ = 0.3f;
     }
 
-    updateSpawner(dt);
+    if (!survival()) updateSpawner(dt);
     updatePois(dt);
     updateNests(dt);
     updateZombies(dt);
@@ -403,7 +418,8 @@ void Game::updateMission(float dt) {
             emit(EV_VICTORY);
         }
     }
-    if (dead_) finishResult();
+    // Resultado sempre atualizado: sair pelo menu também conta abates, ondas e pontos.
+    finishResult();
 }
 
 void Game::finishResult() {
@@ -424,12 +440,16 @@ void Game::finishResult() {
     result_[R_CHEST_DIAMONDS] = static_cast<float>(chestDiamonds_);
     result_[R_DISTANCE] = distance_;
     result_[R_NESTS] = static_cast<float>(nests);
+    result_[R_WAVE] = static_cast<float>(wave_);
+    result_[R_SCORE] = static_cast<float>(score_ + static_cast<int>(survivalTime_ * 2.0f));
 }
 
 // ----------------------------------------------------------------------------- jogador e câmera
 
 void Game::updateCamera(float dt, const InputState& in) {
-    float k = 0.0058f * config_.sensitivity * (1.0f - 0.42f * aimBlend_);
+    const WeaponDef& weapon = weaponDef(weaponId());
+    // Mirando, a sensibilidade cai junto com o zoom (luneta do rifle de precisão fica bem mais lenta).
+    float k = 0.0058f * config_.sensitivity * lerpf(1.0f, weapon.aimFov * 0.85f, aimBlend_);
     if (targetLocked_ && firingNow_) k *= 0.72f;  // "fricção" da mira sobre o alvo
     if (!dead_) {
         camYaw_ = wrapAngle(camYaw_ + in.lookX * k);
@@ -454,7 +474,7 @@ void Game::updateCamera(float dt, const InputState& in) {
     shake_ = std::max(0.0f, shake_ - dt * 1.8f);
     // Ao correr o campo de visão abre um pouco (sensação de velocidade).
     sprintFov_ = lerpf(sprintFov_, sprinting_ ? 0.07f : 0.0f, damp(4.0f, dt));
-    fov_ = lerpf(1.0f, 0.68f, aimBlend_) + sprintFov_;
+    fov_ = lerpf(1.0f, weapon.aimFov, aimBlend_) + sprintFov_;
     float wantDistance = dead_ ? 5.5f : lerpf(lerpf(4.9f, 4.3f, crouchBlend_), 2.4f, aimBlend_);
     float shoulder = lerpf(1.0f, 0.78f, aimBlend_);
     float pitch = camPitch_ + recoil_;
@@ -500,6 +520,100 @@ bool Game::canStand() const {
     return !world_.boxCollides(mn, mx);
 }
 
+// Procura uma borda de 2 a 3 blocos à frente com espaço para o corpo e começa a escalada.
+bool Game::tryMantle(const Vec3& dir) {
+    if (dead_ || victory_ || mantleTime_ >= 0 || lengthXZ(dir) < 0.5f) return false;
+    const float hw = player_.halfWidth - 1e-3f;
+    Vec3 probe = player_.position + dir * (player_.halfWidth + 0.35f);
+    const int x = static_cast<int>(std::floor(probe.x)), z = static_cast<int>(std::floor(probe.z));
+    const int px = static_cast<int>(std::floor(player_.position.x)), pz = static_cast<int>(std::floor(player_.position.z));
+    if (x == px && z == pz) return false;
+    const int feet = static_cast<int>(std::floor(player_.position.y + 0.05f));
+    int top = -1;
+    for (int y = feet + 1; y <= feet + 3; ++y) {
+        if (world_.solid(x, y - 1, z) && !world_.solid(x, y, z) && !world_.solid(x, y + 1, z)) {
+            top = y;
+            break;
+        }
+    }
+    // Degraus de 1 bloco o movimento normal já sobe sozinho.
+    if (top < 0 || static_cast<float>(top) - player_.position.y < 1.05f) return false;
+    // Precisa de espaço acima da cabeça para subir e de espaço em cima da borda para ficar de pé.
+    Vec3 risen(player_.position.x, top + 0.02f, player_.position.z);
+    if (world_.boxCollides(risen + Vec3(-hw, 0.0f, -hw), risen + Vec3(hw, 1.74f, hw))) return false;
+    Vec3 dest(x + 0.5f, static_cast<float>(top), z + 0.5f);
+    if (world_.boxCollides(dest + Vec3(-hw, 0.02f, -hw), dest + Vec3(hw, 1.74f, hw))) return false;
+    mantleFrom_ = player_.position;
+    mantleTo_ = dest;
+    mantleDuration_ = 0.28f + 0.12f * (static_cast<float>(top) - player_.position.y);
+    mantleTime_ = 0;
+    crouching_ = false;
+    player_.height = 1.75f;
+    player_.velocity = {};
+    playerYaw_ = yawFromDirection(dir.x, dir.z);
+    emitSound(SND_JUMP, player_.position, 0.55f);
+    return true;
+}
+
+// Buraco sem saída: a partir da coluna do jogador, nenhum caminho (andando ou escalando até 3 blocos)
+// chega a 7 blocos de distância.
+bool Game::playerEnclosed() const {
+    constexpr int R = 7, N = 2 * R + 1;
+    const int cx = static_cast<int>(std::floor(player_.position.x)), cz = static_cast<int>(std::floor(player_.position.z));
+    int height[N * N];
+    bool seen[N * N] = {};
+    for (int j = 0; j < N; ++j)
+        for (int i = 0; i < N; ++i) {
+            int x = cx - R + i, z = cz - R + j;
+            height[j * N + i] = world_.columnReady(x, z) ? world_.standHeight(x, z) : -1;
+        }
+    int queue[N * N];
+    int head = 0, tail = 0;
+    queue[tail++] = R * N + R;
+    seen[R * N + R] = true;
+    const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    while (head < tail) {
+        int cur = queue[head++];
+        int ci = cur % N, cj = cur / N;
+        if (ci == 0 || cj == 0 || ci == N - 1 || cj == N - 1) return false;
+        int ha = height[cur];
+        for (const auto& d : dirs) {
+            int ni = ci + d[0], nj = cj + d[1];
+            int n = nj * N + ni;
+            if (seen[n]) continue;
+            int hb = height[n];
+            if (hb < 0) return false;  // área ainda não carregada: não dá para afirmar
+            if (hb - ha > 3 || world_.solid(cx - R + ni, hb + 1, cz - R + nj)) continue;
+            seen[n] = true;
+            queue[tail++] = n;
+        }
+    }
+    return true;
+}
+
+// Tira o jogador do buraco: o chão mais próximo por cima da borda.
+void Game::unstickPlayer() {
+    const int cx = static_cast<int>(std::floor(player_.position.x)), cz = static_cast<int>(std::floor(player_.position.z));
+    const int feet = static_cast<int>(std::floor(player_.position.y + 0.05f));
+    for (int r = 1; r <= 12; ++r) {
+        for (int dz = -r; dz <= r; ++dz)
+            for (int dx = -r; dx <= r; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                int x = cx + dx, z = cz + dz;
+                if (!world_.columnReady(x, z)) continue;
+                int s = world_.standHeight(x, z), g = world_.groundHeight(x, z);
+                if (s < feet + 2 || s - g > 1 || world_.get(x, s, z) == B_WATER || world_.solid(x, s + 1, z)) continue;
+                player_.position = {x + 0.5f, static_cast<float>(s), z + 0.5f};
+                player_.velocity = {};
+                camPivotInit_ = false;
+                spawnBurst(player_.position + Vec3(0, 0.8f, 0), {0.85f, 0.95f, 1.0f, 1.0f}, 18, 3.0f, 0.12f, true, -1.0f);
+                emitSound(SND_JUMP, player_.position, 0.7f);
+                emit(EV_STATUS, 5);
+                return;
+            }
+    }
+}
+
 void Game::updatePlayer(float dt, const InputState& in) {
     invulnerable_ = std::max(0.0f, invulnerable_ - dt);
     damageFlash_ = std::max(0.0f, damageFlash_ - dt * 1.8f);
@@ -522,6 +636,27 @@ void Game::updatePlayer(float dt, const InputState& in) {
     player_.height = crouching_ ? 1.2f : 1.75f;
     crouchBlend_ = lerpf(crouchBlend_, crouching_ ? 1.0f : 0.0f, damp(12.0f, dt));
 
+    // Escalada em andamento: o corpo sobe até a borda e passa por cima (sem física nesse meio-tempo).
+    if (mantleTime_ >= 0) {
+        mantleTime_ += dt;
+        float t = clampf(mantleTime_ / mantleDuration_, 0.0f, 1.0f);
+        float up = smoothstepf(0.0f, 0.65f, t), across = smoothstepf(0.4f, 1.0f, t);
+        player_.position.y = lerpf(mantleFrom_.y, mantleTo_.y + 0.02f, up);
+        player_.position.x = lerpf(mantleFrom_.x, mantleTo_.x, across);
+        player_.position.z = lerpf(mantleFrom_.z, mantleTo_.z, across);
+        player_.velocity = {};
+        if (t >= 1.0f) {
+            mantleTime_ = -1;
+            player_.onGround = true;
+            coyote_ = 0.12f;
+        }
+        if (playerAsset_) {
+            playerAnim_.play(playerAsset_->model.clipIndex("walk"), true, 0.1f, 1.6f);
+            playerAnim_.update(dt);
+        }
+        return;
+    }
+
     float mx = dead_ || victory_ ? 0 : in.moveX, my = dead_ || victory_ ? 0 : in.moveY;
     float mag = std::min(1.0f, std::sqrt(mx * mx + my * my));
     // Curva do analógico: precisão em toques leves, velocidade total no fim do curso.
@@ -531,7 +666,8 @@ void Game::updatePlayer(float dt, const InputState& in) {
     sprinting_ = wantSprint && !crouching_ && aimBlend_ < 0.3f && !in.fire && !firingNow_ && slowed_ <= 0 && meleeTime_ < 0;
     if (sprinting_ && sprintLock_) response = 1.0f;
     float speed = kPlayerSpeed * (sprinting_ ? 1.45f : 1.0f) * (crouching_ ? 0.5f : 1.0f) * lerpf(1.0f, 0.6f, aimBlend_) *
-                  (player_.inWater ? 0.6f : 1.0f) * (slowed_ > 0 ? 0.55f : 1.0f);
+                  (player_.inWater ? 0.6f : 1.0f) * (slowed_ > 0 ? 0.55f : 1.0f) * weaponDef(weaponId()).moveMul *
+                  config_.speedMul * (adrenaline_ > 0 ? 1.3f : 1.0f);
     Vec3 fwd = forwardFromYaw(camYaw_), right = rightFromYaw(camYaw_);
     Vec3 wish = right * mx + fwd * my;
     if (lengthXZ(wish) > 1e-3f) wish = normalize(wish) * (response * speed);
@@ -591,6 +727,27 @@ void Game::updatePlayer(float dt, const InputState& in) {
     }
     if (!dead_) distance_ += distXZ(before, player_.position);
 
+    // Escalar: empurrando contra uma parede de 2 a 3 blocos (ou pulando nela) o personagem agarra a borda e sobe.
+    const float wanted = lengthXZ(wish) * dt;
+    const float moved = distXZ(before, player_.position);
+    if (!dead_ && !victory_ && wanted > 0.004f && moved < wanted * 0.35f) wallPush_ += dt;
+    else wallPush_ = std::max(0.0f, wallPush_ - dt * 3.0f);
+    if (wallPush_ > 0.22f || (wallPush_ > 0.02f && in.jumps > 0)) {
+        if (tryMantle(normalize(Vec3(wish.x, 0, wish.z)))) wallPush_ = 0;
+    }
+    // Resgate: empurrando há alguns segundos sem sair do lugar dentro de um buraco sem saída.
+    stuckCheck_ -= dt;
+    if (stuckCheck_ <= 0) {
+        stuckCheck_ = 1.0f;
+        bool pushing = mag > 0.3f && !dead_ && !victory_ && !player_.inWater;
+        stuckTimer_ = (pushing && distXZ(player_.position, stuckAnchor_) < 1.5f) ? stuckTimer_ + 1.0f : 0.0f;
+        stuckAnchor_ = player_.position;
+        if (stuckTimer_ >= 3.0f) {
+            stuckTimer_ = 0;
+            if (playerEnclosed()) unstickPlayer();
+        }
+    }
+
     float horizontal = lengthXZ(player_.velocity);
     if (player_.onGround && horizontal > 1.0f && !player_.inWater) {
         stepTimer_ -= dt * horizontal / 4.2f;
@@ -629,7 +786,11 @@ void Game::updatePlayer(float dt, const InputState& in) {
 }
 
 void Game::updateWeapon(float dt, const InputState& in) {
-    fireCooldown_ = std::max(-kFireInterval, fireCooldown_ - dt);
+    const int weapon = weaponId();
+    const WeaponDef& w = weaponDef(weapon);
+    const int magazine = magazineFor(weapon);
+    const float interval = w.interval * (adrenaline_ > 0 ? 0.87f : 1.0f);
+    fireCooldown_ = std::max(-interval, fireCooldown_ - dt);
     bloom_ = std::max(0.0f, bloom_ - dt * 0.09f);
     muzzleTimer_ = std::max(0.0f, muzzleTimer_ - dt);
     hitMark_ = std::max(0.0f, hitMark_ - dt);
@@ -638,11 +799,12 @@ void Game::updateWeapon(float dt, const InputState& in) {
 
     emptyClick_ = std::max(0.0f, emptyClick_ - dt);
     auto startReload = [&]() {
+        reloadDuration_ = w.reload / std::max(0.5f, config_.reloadSpeed) / (adrenaline_ > 0 ? 1.5f : 1.0f);
         reloadTimer_ = reloadDuration_;
         rackPlayed_ = false;
         emitSound(SND_RELOAD, player_.position, 0.9f);  // pente saindo e entrando
     };
-    if (in.reloads > 0 && ammo_ < config_.magazine && reloadTimer_ <= 0 && meleeTime_ < 0) startReload();
+    if (in.reloads > 0 && ammo_ < magazine && reloadTimer_ <= 0 && meleeTime_ < 0) startReload();
     if (reloadTimer_ > 0) {
         reloadTimer_ -= dt;
         if (!rackPlayed_ && reloadTimer_ <= reloadDuration_ * 0.3f) {
@@ -651,11 +813,11 @@ void Game::updateWeapon(float dt, const InputState& in) {
         }
         if (reloadTimer_ <= 0) {
             reloadTimer_ = 0;
-            ammo_ = config_.magazine;
+            ammo_ = magazine;
         }
     }
 
-    // Faca (corpo a corpo) e granada.
+    // Faca (corpo a corpo).
     meleeCooldown_ = std::max(0.0f, meleeCooldown_ - dt);
     grenadeCooldown_ = std::max(0.0f, grenadeCooldown_ - dt);
     if (meleeTime_ >= 0) {
@@ -672,20 +834,20 @@ void Game::updateWeapon(float dt, const InputState& in) {
         meleeCooldown_ = 0.55f;
         emitSound(SND_KNIFE, player_.position, 0.6f);
     }
-    if (in.grenades > 0 && grenades_ > 0 && grenadeCooldown_ <= 0 && mode_ == Mode::Mission) throwGrenade();
 
     // Alvo da mira assistida: zumbi vivo mais próximo do centro da tela.
     assistTarget_ = -1;
     assistAngle_ = 10;
     float bestAngle = 10;
     int best = -1;
+    const float assistRange = std::min(60.0f, w.range);
     for (size_t i = 0; i < zombies_.size(); ++i) {
         const Zombie& z = zombies_[i];
         if (z.state == ZState::Dead) continue;
         Vec3 chest = z.body.position + Vec3(0, zombieHeight(z) * 0.55f, 0);
         Vec3 v = chest - camPos_;
         float dist = length(v);
-        if (dist > 60 || dist < 0.5f) continue;
+        if (dist > assistRange || dist < 0.5f) continue;
         float c = dot(v / dist, camForward_);
         if (c < 0.9f) continue;
         // Ângulo efetivo considera o tamanho do alvo (mais tolerante de perto).
@@ -704,16 +866,18 @@ void Game::updateWeapon(float dt, const InputState& in) {
         }
     }
     float cone = config_.aimAssist ? lerpf(0.075f, 0.045f, aimBlend_) : 0.0f;
+    if (w.kind == FireKind::Flame) cone = 0.12f;
     if (assistAngle_ > std::max(cone, 0.03f)) assistTarget_ = -1;
     targetLocked_ = assistTarget_ >= 0;
     targetHp_ = targetLocked_ ? zombies_[static_cast<size_t>(assistTarget_)].health / zombies_[static_cast<size_t>(assistTarget_)].maxHealth : 0;
 
     bool autoTrigger = false;
-    if (config_.autoFire && assistTarget_ >= 0) {
+    if (config_.autoFire && assistTarget_ >= 0 && w.kind != FireKind::Launcher) {
         const Zombie& z = zombies_[static_cast<size_t>(assistTarget_)];
-        autoTrigger = assistAngle_ < 0.035f && distXZ(z.body.position, player_.position) < 42.0f;
+        float reach = w.kind == FireKind::Flame ? w.range : std::min(42.0f, w.range);
+        autoTrigger = assistAngle_ < 0.035f && distXZ(z.body.position, player_.position) < reach;
     }
-    bool trigger = in.fire || autoTrigger;
+    bool trigger = (in.fire || autoTrigger) && swapTimer_ <= 0 && !throwAiming_;
     if (trigger && ammo_ == 0 && reloadTimer_ <= 0 && meleeTime_ < 0) {
         if (emptyClick_ <= 0) {
             emitSound(SND_EMPTY, player_.position, 0.8f);  // clique de arma vazia
@@ -724,8 +888,10 @@ void Game::updateWeapon(float dt, const InputState& in) {
     firingNow_ = trigger && ammo_ > 0 && reloadTimer_ <= 0 && meleeTime_ < 0;
     int fired = 0;
     while (firingNow_ && fireCooldown_ <= 0 && fired < 3 && ammo_ > 0) {
-        fireShot();
-        fireCooldown_ += kFireInterval;
+        if (w.kind == FireKind::Flame) fireFlame();
+        else if (w.kind == FireKind::Launcher) fireLauncher();
+        else fireShot();
+        fireCooldown_ += interval;
         ++fired;
     }
 }
@@ -760,148 +926,189 @@ void Game::meleeHit() {
     }
 }
 
-void Game::throwGrenade() {
-    --grenades_;
-    grenadeCooldown_ = 0.8f;
-    Vec3 hand = player_.position + Vec3(0, 1.6f - 0.45f * crouchBlend_, 0) + rightFromYaw(camYaw_) * 0.35f;
-    Vec3 target = camPos_ + camForward_ * 38.0f;
-    RayHit wh;
-    if (world_.raycast(camPos_, camForward_, 38.0f, wh)) target = camPos_ + camForward_ * wh.distance;
-    float t = clampf(distXZ(hand, target) / 17.0f, 0.35f, 1.5f);
-    Projectile p;
-    p.kind = ProjectileKind::Grenade;
-    p.pos = hand;
-    p.target = target;
-    p.gravity = 22.0f;
-    p.life = 3.0f;
-    Vec3 d = target - hand;
-    p.vel = {d.x / t, (d.y + 0.5f * p.gravity * t * t) / t, d.z / t};
-    p.damage = 200.0f * config_.power * config_.boostDamage;
-    projectiles_.push_back(p);
-    playerYaw_ = camYaw_;
-    emitSound(SND_THROW, hand, 0.8f);
-}
-
 void Game::fireShot() {
+    const int weapon = weaponId();
+    const WeaponDef& w = weaponDef(weapon);
     --ammo_;
     ++shots_;
     Vec3 f = camForward_;
     Vec3 right = normalize(cross(f, Vec3(0, 1, 0)));
     Vec3 up = cross(right, f);
     float moving = std::min(1.0f, lengthXZ(player_.velocity) / kPlayerSpeed);
-    float spread = lerpf(0.016f, 0.004f, aimBlend_) + bloom_ + moving * 0.008f;
-    float ang = rng_.range(0, kTwoPi), rad = std::sqrt(rng_.uniform()) * spread;
-    Vec3 dir = normalize(f + right * (std::cos(ang) * rad) + up * (std::sin(ang) * rad));
-    if (config_.aimAssist && assistTarget_ >= 0) {
-        const Zombie& z = zombies_[static_cast<size_t>(assistTarget_)];
-        Vec3 chest = z.body.position + Vec3(0, zombieHeight(z) * 0.6f, 0);
-        dir = normalize(lerp(dir, normalize(chest - camPos_), 0.6f));
-    }
+    float spread = lerpf(w.spreadHip, w.spreadAim, aimBlend_) + bloom_ + moving * 0.008f;
+    bool boosted = damageBoost_ > 0;
+    float power = config_.power * config_.boostDamage * (boosted ? 1.5f : 1.0f);
+    float headMul = w.headshot * config_.headshotMul;
+    bool anyHit = false, anyHead = false;
+    Vec3 tracerColor = boosted ? Vec3(1.0f, 0.55f, 0.2f) : Vec3(w.tracerR, w.tracerG, w.tracerB);
 
-    RayHit wh;
-    float maxT = 120.0f;
-    bool worldHit = world_.raycast(camPos_, dir, maxT, wh);
-    if (worldHit) maxT = wh.distance;
-    float minT = camDistance_ * 0.7f;
-    int bestZombie = -1;
-    bool head = false;
-    float bestT = maxT;
-    for (size_t i = 0; i < zombies_.size(); ++i) {
-        const Zombie& z = zombies_[i];
-        if (z.state == ZState::Dead) continue;
-        float h = zombieHeight(z), w = 0.36f * z.scale * z.bloat;
-        Vec3 p = z.body.position;
-        float t;
-        if (rayBox(camPos_, dir, p + Vec3(-w * 0.85f, h * 0.68f, -w * 0.85f), p + Vec3(w * 0.85f, h + 0.05f, w * 0.85f), t) && t > minT && t < bestT) {
-            bestT = t; bestZombie = static_cast<int>(i); head = true;
+    for (int pellet = 0; pellet < w.pellets; ++pellet) {
+        float ang = rng_.range(0, kTwoPi), rad = std::sqrt(rng_.uniform()) * spread;
+        Vec3 dir = normalize(f + right * (std::cos(ang) * rad) + up * (std::sin(ang) * rad));
+        if (config_.aimAssist && assistTarget_ >= 0 && w.pellets == 1) {
+            const Zombie& z = zombies_[static_cast<size_t>(assistTarget_)];
+            Vec3 chest = z.body.position + Vec3(0, zombieHeight(z) * 0.6f, 0);
+            dir = normalize(lerp(dir, normalize(chest - camPos_), 0.6f));
         }
-        if (rayBox(camPos_, dir, p + Vec3(-w, 0, -w), p + Vec3(w, h * 0.68f, w), t) && t > minT && t < bestT) {
-            bestT = t; bestZombie = static_cast<int>(i); head = false;
-        }
-    }
-    // Núcleos dos ninhos de infecção.
-    int nestHit = -1;
-    float nestT = 0;
-    if (mode_ == Mode::Mission && damageNestRay(camPos_, dir, bestT, nestT, nestHit) && nestT > minT) {
-        bestT = nestT;
-        bestZombie = -1;
-    } else {
-        nestHit = -1;
-    }
-    // PvP: adversários (posições interpoladas que o jogador vê na tela).
-    int bestRemote = -1;
-    if (mode_ == Mode::Pvp) {
-        for (int i = 0; i < kMaxNetPlayers; ++i) {
-            const RemotePlayer& r = remotes_[i];
-            if (!r.present || !r.alive || !net_.player(i).active) continue;
-            const float h = 1.8f, w = 0.36f;
-            Vec3 p = r.renderPos;
+
+        RayHit wh;
+        float maxT = w.range;
+        bool worldHit = world_.raycast(camPos_, dir, maxT, wh);
+        if (worldHit) maxT = wh.distance;
+        float minT = camDistance_ * 0.7f;
+        // Zumbis atingidos ao longo do raio, do mais próximo ao mais longe
+        // (o rifle de precisão e a metralhadora atravessam alguns).
+        struct Hit {
             float t;
-            if (rayBox(camPos_, dir, p + Vec3(-w * 0.85f, h * 0.68f, -w * 0.85f), p + Vec3(w * 0.85f, h + 0.05f, w * 0.85f), t) && t > minT && t < bestT) {
-                bestT = t; bestRemote = i; head = true;
+            int index;
+            bool head;
+        };
+        Hit hits[8];
+        int hitCount = 0;
+        for (size_t i = 0; i < zombies_.size(); ++i) {
+            const Zombie& z = zombies_[i];
+            if (z.state == ZState::Dead) continue;
+            float h = zombieHeight(z), hw = 0.36f * z.scale * z.bloat;
+            Vec3 p = z.body.position;
+            float t, best = 1e9f;
+            bool head = false;
+            if (rayBox(camPos_, dir, p + Vec3(-hw * 0.85f, h * 0.68f, -hw * 0.85f), p + Vec3(hw * 0.85f, h + 0.05f, hw * 0.85f), t) && t > minT && t < maxT) {
+                best = t;
+                head = true;
             }
-            if (rayBox(camPos_, dir, p + Vec3(-w, 0, -w), p + Vec3(w, h * 0.68f, w), t) && t > minT && t < bestT) {
-                bestT = t; bestRemote = i; head = false;
+            if (rayBox(camPos_, dir, p + Vec3(-hw, 0, -hw), p + Vec3(hw, h * 0.68f, hw), t) && t > minT && t < maxT && t < best) {
+                best = t;
+                head = false;
+            }
+            if (best > maxT) continue;
+            Hit hit{best, static_cast<int>(i), head};
+            int k = std::min(hitCount, 7);
+            while (k > 0 && hits[k - 1].t > hit.t) {
+                hits[k] = hits[k - 1];
+                --k;
+            }
+            hits[k] = hit;
+            hitCount = std::min(8, hitCount + 1);
+        }
+        const int maxTargets = 1 + w.pierce;
+        const int targets = std::min(hitCount, maxTargets);
+        float endT = targets > 0 ? hits[targets - 1].t : maxT;
+        if (hitCount >= maxTargets) worldHit = false;
+        // Núcleos dos ninhos de infecção.
+        int nestHit = -1;
+        float nestT = 0;
+        float nestLimit = hitCount > 0 ? hits[0].t : maxT;
+        if (mode_ == Mode::Mission && damageNestRay(camPos_, dir, nestLimit, nestT, nestHit) && nestT > minT) {
+            hitCount = 0;
+            endT = nestT;
+            worldHit = false;
+        } else {
+            nestHit = -1;
+        }
+        // PvP: adversários (posições interpoladas que o jogador vê na tela).
+        int bestRemote = -1;
+        bool remoteHead = false;
+        if (mode_ == Mode::Pvp) {
+            float bestT = hitCount > 0 ? hits[0].t : maxT;
+            for (int i = 0; i < kMaxNetPlayers; ++i) {
+                const RemotePlayer& r = remotes_[i];
+                if (!r.present || !r.alive || !net_.player(i).active) continue;
+                const float h = 1.8f, rw = 0.36f;
+                Vec3 p = r.renderPos;
+                float t;
+                if (rayBox(camPos_, dir, p + Vec3(-rw * 0.85f, h * 0.68f, -rw * 0.85f), p + Vec3(rw * 0.85f, h + 0.05f, rw * 0.85f), t) && t > minT && t < bestT) {
+                    bestT = t;
+                    bestRemote = i;
+                    remoteHead = true;
+                }
+                if (rayBox(camPos_, dir, p + Vec3(-rw, 0, -rw), p + Vec3(rw, h * 0.68f, rw), t) && t > minT && t < bestT) {
+                    bestT = t;
+                    bestRemote = i;
+                    remoteHead = false;
+                }
+            }
+            if (bestRemote >= 0) {
+                endT = bestT;
+                hitCount = 0;
+                worldHit = false;
             }
         }
+        Vec3 hitPoint = camPos_ + dir * endT;
+        if (mode_ == Mode::Pvp) net_.localFire(muzzlePos_, hitPoint);
+        if (bestRemote >= 0) {
+            int dmg = remoteHead ? 34 : 16;
+            net_.localHit(bestRemote, dmg, remoteHead);
+            anyHit = true;
+            anyHead = anyHead || remoteHead;
+            labels_.push_back({hitPoint, dmg, remoteHead ? 2 : 1, 0.8f});
+            spawnBurst(hitPoint, {0.75f, 0.12f, 0.12f, 1.0f}, remoteHead ? 9 : 5, 2.2f, 0.1f, false, 14.0f);
+            emitSound(remoteHead ? SND_HEADSHOT : SND_HIT, hitPoint, remoteHead ? 0.9f : 0.6f);
+        }
+        Tracer tracer{muzzlePos_, hitPoint, w.pellets > 1 ? 0.05f : 0.06f};
+        tracer.color = {tracerColor.x, tracerColor.y, tracerColor.z, 1.0f};
+        tracers_.push_back(tracer);
+        if (nestHit >= 0) {
+            anyHit = true;
+            damageNest(nestHit, w.damage * power, hitPoint);
+        }
+        for (int k = 0; k < std::min(hitCount, maxTargets); ++k) {
+            Zombie& z = zombies_[static_cast<size_t>(hits[k].index)];
+            if (z.state == ZState::Dead) continue;
+            float falloff = w.pellets > 1 ? clampf(1.0f - (hits[k].t - 6.0f) / w.range, 0.3f, 1.0f) : 1.0f;
+            float pierceLoss = 1.0f - 0.2f * static_cast<float>(k);
+            float dmg = w.damage * power * falloff * pierceLoss * (hits[k].head ? headMul : 1.0f);
+            anyHit = true;
+            anyHead = anyHead || hits[k].head;
+            Vec3 hp = camPos_ + dir * hits[k].t;
+            if (weapon == IT_SHOTGUN) z.body.velocity += Vec3(dir.x, 0, dir.z) * 0.9f;
+            damageZombie(z, dmg, hits[k].head, dir, hp);
+        }
+        if (worldHit && hitCount == 0 && nestHit < 0 && bestRemote < 0) {
+            const BlockInfo& info = blockInfo(wh.block);
+            Vec3 c = info.side < layerColors_.size() ? layerColors_[info.side] : Vec3(0.5f, 0.5f, 0.5f);
+            spawnBurst(hitPoint + Vec3(static_cast<float>(wh.nx), static_cast<float>(wh.ny), static_cast<float>(wh.nz)) * 0.06f,
+                       {c.x, c.y, c.z, 1.0f}, w.pellets > 1 ? 2 : 5, 2.6f, 0.08f, false, 14.0f);
+        }
     }
-    Vec3 hitPoint = camPos_ + dir * bestT;
-    if (mode_ == Mode::Pvp) net_.localFire(muzzlePos_, hitPoint);
-    if (bestRemote >= 0) {
-        int dmg = head ? 34 : 16;
-        net_.localHit(bestRemote, dmg, head);
+    if (anyHit) {
         ++hits_;
         hitMark_ = 0.18f;
-        headshotMark_ = head;
-        labels_.push_back({hitPoint, dmg, head ? 2 : 1, 0.8f});
-        spawnBurst(hitPoint, {0.75f, 0.12f, 0.12f, 1.0f}, head ? 9 : 5, 2.2f, 0.1f, false, 14.0f);
-        emitSound(head ? SND_HEADSHOT : SND_HIT, hitPoint, head ? 0.9f : 0.6f);
-        bestZombie = -1;
-        worldHit = false;
+        headshotMark_ = anyHead;
     }
-    bool boosted = damageBoost_ > 0;
-    Tracer tracer{muzzlePos_, hitPoint, 0.06f};
-    if (boosted) tracer.color = {1.0f, 0.55f, 0.2f, 1.0f};
-    tracers_.push_back(tracer);
-    muzzleTimer_ = 0.05f;
+    const bool heavy = weapon == IT_SHOTGUN || weapon == IT_SNIPER;
+    muzzleTimer_ = heavy ? 0.07f : 0.05f;
     for (int i = 0; i < 2; ++i) {
         FxParticle p;
-        p.position = muzzlePos_ + dir * (0.08f * i);
-        p.velocity = dir * 1.5f;
+        p.position = muzzlePos_ + f * (0.08f * i);
+        p.velocity = f * 1.5f;
         p.color = boosted ? Vec4(1.0f, 0.6f, 0.25f, 1.0f) : Vec4(1.0f, 0.82f, 0.4f, 1.0f);
-        p.size = 0.32f - i * 0.1f;
+        p.size = (0.32f - i * 0.1f) * (heavy ? 1.5f : (weapon == IT_PISTOL ? 0.75f : 1.0f));
         p.life = p.maxLife = 0.05f;
         p.additive = true;
         particles_.push_back(p);
     }
-    float power = config_.power * config_.boostDamage * (boosted ? 1.5f : 1.0f);
-    if (nestHit >= 0) {
-        ++hits_;
-        hitMark_ = 0.18f;
-        headshotMark_ = false;
-        damageNest(nestHit, 18.0f * power, hitPoint);
-    } else if (bestZombie >= 0) {
-        Zombie& z = zombies_[static_cast<size_t>(bestZombie)];
-        float dmg = 18.0f * power * (head ? 2.0f : 1.0f);
-        ++hits_;
-        hitMark_ = 0.18f;
-        headshotMark_ = head;
-        damageZombie(z, dmg, head, dir, hitPoint);
-    } else if (worldHit) {
-        const BlockInfo& info = blockInfo(wh.block);
-        Vec3 c = info.side < layerColors_.size() ? layerColors_[info.side] : Vec3(0.5f, 0.5f, 0.5f);
-        spawnBurst(hitPoint + Vec3(static_cast<float>(wh.nx), static_cast<float>(wh.ny), static_cast<float>(wh.nz)) * 0.06f,
-                   {c.x, c.y, c.z, 1.0f}, 5, 2.6f, 0.08f, false, 14.0f);
-    }
-    bloom_ = std::min(0.045f, bloom_ + 0.004f * (1.0f - aimBlend_ * 0.5f));
-    recoil_ += 0.012f;
-    camPitch_ += 0.0035f;
-    emitSound(SND_SHOT, muzzlePos_, 0.75f);
-    alertNear(player_.position, 30.0f);
+    bloom_ = std::min(0.045f, bloom_ + w.bloomPerShot * (1.0f - aimBlend_ * 0.5f));
+    recoil_ += w.recoil;
+    camPitch_ += w.recoil * 0.3f;
+    if (heavy) shake_ = std::max(shake_, 0.25f);
+    emitSound(w.sound, muzzlePos_, weapon == IT_SNIPER ? 0.95f : 0.75f);
+    alertNear(player_.position, weapon == IT_SNIPER ? 45.0f : 30.0f);
 }
 
 void Game::damagePlayer(float amount, const Vec3& from) {
     if (invulnerable_ > 0 || dead_ || victory_) return;
+    // Melhoria de armadura reduz todo dano; o colete absorve a maior parte até acabar.
+    amount *= 1.0f - clampf(config_.armor, 0.0f, 0.6f);
+    if (armor_ > 0) {
+        float absorbed = std::min(armor_, amount * 0.7f);
+        armor_ -= absorbed;
+        amount -= absorbed;
+        if (armor_ <= 0.5f) {
+            armor_ = armorMax_ = 0;
+            spawnBurst(player_.position + Vec3(0, 1.2f, 0), {0.6f, 0.7f, 0.9f, 1.0f}, 14, 3.0f, 0.12f, false, 12.0f);
+        }
+    }
+    sinceHurt_ = 0;
     health_ -= amount;
     damageTaken_ += amount;
     damageFlash_ = 1.0f;
@@ -922,6 +1129,8 @@ void Game::damagePlayer(float amount, const Vec3& from) {
 
 void Game::damageOverTime(float amount) {
     if (dead_ || victory_ || invulnerable_ > 1.0f) return;
+    amount *= 1.0f - clampf(config_.armor, 0.0f, 0.6f);
+    sinceHurt_ = 0;
     health_ -= amount;
     damageTaken_ += amount;
     if (health_ <= 0) {
@@ -968,9 +1177,10 @@ void Game::updatePickups(float dt) {
     for (auto& p : pickups_) {
         if (p.taken) continue;
         p.age += dt;
+        p.blocked = std::max(0.0f, p.blocked - dt);
         Vec3 toPlayer = player_.position + Vec3(0, 0.8f, 0) - p.position;
         float dist = length(toPlayer);
-        bool magnet = p.type != 2 && p.age > 0.6f && dist < 3.2f && !dead_;
+        bool magnet = p.type != 2 && p.age > 0.6f && dist < 3.2f && !dead_ && p.blocked <= 0;
         if (magnet) {
             p.velocity = lerp(p.velocity, normalize(toPlayer) * 9.0f, damp(8.0f, dt));
         } else {
@@ -985,7 +1195,11 @@ void Game::updatePickups(float dt) {
             p.position.y = floorY;
             p.velocity.y = 0;
         }
-        if (dist < (p.type == 2 ? 1.9f : 1.25f) && !dead_) {
+        if (dist < (p.type == 2 ? 1.9f : 1.25f) && !dead_ && p.blocked <= 0) {
+            if (p.type == 3) {
+                p.taken = collectPickup(p);
+                continue;
+            }
             p.taken = true;
             if (p.type == 0) {
                 crystalsCollectedMask_ |= 1 << p.crystalIndex;
@@ -1003,10 +1217,13 @@ void Game::updatePickups(float dt) {
                 // Caixa de suprimentos (anúncio): munição, vida e munição incendiária.
                 float heal = maxHealth_ * 0.5f;
                 health_ = std::min(maxHealth_, health_ + heal);
-                ammo_ = config_.magazine;
+                ammo_ = magazineFor(weaponId());
+                for (int w = IT_RIFLE; w <= IT_LAUNCHER; ++w) clipsInit_[w] = false;
+                clipsInit_[weaponId()] = true;
+                clips_[weaponId()] = ammo_;
                 reloadTimer_ = 0;
                 damageBoost_ = 45.0f;
-                grenades_ = std::max(grenades_, 3);
+                giveSupplyBundle();
                 burning_ = bleeding_ = poisoned_ = slowed_ = 0;
                 labels_.push_back({p.position, static_cast<int>(std::lround(heal)), 3, 0.9f});
                 emit(EV_SUPPLY, 1);
@@ -1055,6 +1272,32 @@ void Game::updateEffects(float dt) {
     tracers_.erase(std::remove_if(tracers_.begin(), tracers_.end(), [](const Tracer& t) { return t.life <= 0; }), tracers_.end());
     for (auto& f : flashes_) f.life -= dt;
     flashes_.erase(std::remove_if(flashes_.begin(), flashes_.end(), [](const FlashLight& f) { return f.life <= 0; }), flashes_.end());
+
+    // Pétalas de cerejeira, ipê e jacarandá e folhas de bordo levadas pelo vento.
+    static float petalTimer = 0;
+    petalTimer -= dt;
+    if (petalTimer <= 0 && mode_ != Mode::None && particles_.size() < 760) {
+        petalTimer = 0.05f;
+        Vec3 around = mode_ == Mode::Lobby ? layout_.start : player_.position;
+        for (int k = 0; k < 4; ++k) {
+            float ang = rng_.range(0, kTwoPi), r = rng_.range(2.0f, 20.0f);
+            int x = static_cast<int>(std::floor(around.x + std::cos(ang) * r));
+            int z = static_cast<int>(std::floor(around.z + std::sin(ang) * r));
+            int y = static_cast<int>(std::floor(around.y)) + rng_.rangeInt(2, 10);
+            uint8_t b = world_.get(x, y, z);
+            if (!isBlossomBlock(b) || world_.get(x, y - 1, z) != B_AIR) continue;
+            uint32_t c = blockInfo(b).mapColor;
+            FxParticle p;
+            p.position = {x + rng_.uniform(), static_cast<float>(y) - 0.05f, z + rng_.uniform()};
+            p.velocity = {rng_.range(0.3f, 1.0f), rng_.range(-0.6f, -0.3f), rng_.range(0.1f, 0.7f)};
+            float shade = rng_.range(0.85f, 1.1f);
+            p.color = {((c >> 16) & 0xFF) / 255.0f * shade, ((c >> 8) & 0xFF) / 255.0f * shade, (c & 0xFF) / 255.0f * shade, 1.0f};
+            p.size = rng_.range(0.07f, 0.12f);
+            p.life = p.maxLife = rng_.range(3.0f, 5.0f);
+            p.gravity = 0.15f;
+            particles_.push_back(p);
+        }
+    }
 
     // Brasas das fogueiras e faíscas do portal.
     fireEmberTimer_ -= dt;
@@ -1125,6 +1368,15 @@ void Game::posePlayer(Pose& pose, bool armed) {
     const CharacterModel& m = playerAsset_->model;
     bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
     if (playing) poseCrouch(pose, m, crouchBlend_, clampf(lengthXZ(player_.velocity) / 2.0f, 0.0f, 1.0f));
+    if (playing && mantleTime_ >= 0) {
+        // Escalando: os dois braços se esticam para a borda e puxam o corpo.
+        float k = clampf(mantleTime_ / std::max(0.05f, mantleDuration_), 0.0f, 1.0f);
+        float reach = lerpf(-kPi * 0.95f, -kPi * 0.35f, k);
+        int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left");
+        if (armR >= 0) pose.r[armR] = Quat::axisAngle({0, 0, 1}, -0.15f) * Quat::axisAngle({1, 0, 0}, reach);
+        if (armL >= 0) pose.r[armL] = Quat::axisAngle({0, 0, 1}, 0.15f) * Quat::axisAngle({1, 0, 0}, reach);
+        return;
+    }
     if (!armed) return;
     float pitch = playing ? camPitch_ : -0.3f;
     poseArmed(pose, m, pitch, playing);
@@ -1243,7 +1495,8 @@ void Game::buildScene() {
         posePlayer(scratchPose_, armed);
         bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
         Vec3 pos = player_.position + Vec3(0, visualStep_ - (playing ? 0.22f * crouchBlend_ : 0.0f), 0);
-        float yaw = mode_ == Mode::Lobby ? kPi + previewYaw_ : playerModelYaw_;
+        // No inventário a câmera fica de lado: o herói vira de frente para ela.
+        float yaw = mode_ == Mode::Lobby ? kPi + previewYaw_ - (lobbyScreen_ == 2 ? 0.6f : 0.0f) : playerModelYaw_;
         float flash = invulnerable_ > 0 && damageFlash_ > 0.6f ? 0.45f : 0.0f;
         addCharacter(playerAsset_, pos, yaw, 1.0f, scratchPose_, {1, 1, 1}, flash, Vec3(1, 1, 1), playing ? leanRoll_ : 0.0f);
         CharacterDraw& draw = scene_.characters[scene_.characterCount - 1];
@@ -1263,7 +1516,8 @@ void Game::buildScene() {
                 blade.emissive = 0.2f;
                 s.boxes.push_back(blade);
             } else {
-                addRifle(draw, armR, &muzzlePos_);
+                if (mode_ == Mode::Pvp) addRifle(draw, armR, &muzzlePos_);
+                else addWeaponModel(draw, armR, weaponId(), &muzzlePos_);
             }
         }
     }
@@ -1307,6 +1561,12 @@ void Game::buildScene() {
             flash = 0.75f;
             flashColor = {1.0f, 1.0f, 0.85f};
         }
+        // Zumbis dentro do raio da granada mirada piscam em amarelo.
+        if (throwAiming_ && throwLandingValid_ && z.state != ZState::Dead &&
+            length(z.body.position + Vec3(0, 0.9f, 0) - throwLanding_) < (throwableId() == IT_MOLOTOV ? 3.2f : 5.0f)) {
+            flash = std::max(flash, 0.3f + 0.15f * std::sin(time_ * 12.0f));
+            flashColor = {1.0f, 0.85f, 0.3f};
+        }
         Vec3 tint = z.tint;
         if (z.frenzy > 0) tint = lerp(tint, Vec3(1.0f, 0.45f, 0.4f), 0.35f);
         addCharacter(z.asset, z.body.position, z.yaw, z.scale, scratchPose_, tint, flash, Vec3(z.bloat, 1.0f, z.bloat));
@@ -1329,6 +1589,61 @@ void Game::buildScene() {
             box.emissive = 0.75f;
             s.boxes.push_back(box);
             s.particles.push_back({pos, {0.3f, 1.0f, 0.9f, 0.6f}, 1.3f, true});
+        } else if (p.type == 3) {
+            // Item do inventário: modelo simples girando + brilho e feixe de luz para achar no chão.
+            Mat4 base = Mat4::translation(pos) * Mat4::rotationY(p.age * 1.8f);
+            auto part = [&](const Vec3& c, const Vec3& size, const Vec4& color, float emissive) {
+                BoxDraw b;
+                b.world = base * Mat4::translation(c) * Mat4::scale(size);
+                b.color = color;
+                b.emissive = emissive;
+                s.boxes.push_back(b);
+            };
+            Vec4 glow{1.0f, 0.9f, 0.5f, 0.5f};
+            if (isWeaponItem(p.item)) {
+                part({0, 0, 0}, {0.14f, 0.18f, 0.8f}, {0.22f, 0.24f, 0.27f, 1}, 0.0f);
+                part({0, -0.14f, 0.1f}, {0.1f, 0.2f, 0.12f}, {0.16f, 0.17f, 0.19f, 1}, 0.0f);
+                part({0, 0.1f, 0.2f}, {0.08f, 0.05f, 0.12f}, {1.0f, 0.8f, 0.3f, 1}, 0.8f);
+                glow = {1.0f, 0.75f, 0.25f, 0.7f};
+            } else {
+                switch (p.item) {
+                    case IT_MEDKIT:
+                        part({0, 0, 0}, {0.42f, 0.3f, 0.3f}, {0.95f, 0.95f, 0.95f, 1}, 0.2f);
+                        part({0, 0, 0.16f}, {0.26f, 0.08f, 0.02f}, {0.9f, 0.1f, 0.1f, 1}, 0.5f);
+                        part({0, 0, 0.16f}, {0.08f, 0.24f, 0.02f}, {0.9f, 0.1f, 0.1f, 1}, 0.5f);
+                        glow = {1.0f, 0.4f, 0.4f, 0.5f};
+                        break;
+                    case IT_BANDAGE: part({0, 0, 0}, {0.24f, 0.24f, 0.24f}, {0.93f, 0.85f, 0.72f, 1}, 0.2f); glow = {1.0f, 0.6f, 0.6f, 0.4f}; break;
+                    case IT_ANTIDOTE:
+                        part({0, 0, 0}, {0.16f, 0.3f, 0.16f}, {0.4f, 0.95f, 0.4f, 1}, 0.5f);
+                        part({0, 0.2f, 0}, {0.08f, 0.1f, 0.08f}, {0.9f, 0.9f, 0.9f, 1}, 0.0f);
+                        glow = {0.5f, 1.0f, 0.4f, 0.5f};
+                        break;
+                    case IT_ADRENALINE:
+                        part({0, 0, 0}, {0.08f, 0.08f, 0.36f}, {0.3f, 0.95f, 1.0f, 1}, 0.7f);
+                        part({0, 0, 0.24f}, {0.02f, 0.02f, 0.14f}, {0.85f, 0.85f, 0.9f, 1}, 0.0f);
+                        glow = {0.4f, 1.0f, 1.0f, 0.5f};
+                        break;
+                    case IT_FIRE_AMMO: part({0, 0, 0}, {0.36f, 0.24f, 0.24f}, {1.0f, 0.5f, 0.15f, 1}, 0.6f); glow = {1.0f, 0.55f, 0.2f, 0.6f}; break;
+                    case IT_ARMOR:
+                        part({0, 0, 0}, {0.4f, 0.44f, 0.16f}, {0.35f, 0.42f, 0.55f, 1}, 0.15f);
+                        part({0, 0.12f, 0.09f}, {0.3f, 0.08f, 0.02f}, {0.75f, 0.8f, 0.9f, 1}, 0.3f);
+                        glow = {0.6f, 0.7f, 1.0f, 0.5f};
+                        break;
+                    case IT_MOLOTOV:
+                        part({0, 0, 0}, {0.14f, 0.3f, 0.14f}, {0.3f, 0.45f, 0.2f, 1}, 0.0f);
+                        part({0, 0.2f, 0}, {0.06f, 0.1f, 0.06f}, {1.0f, 0.6f, 0.2f, 1}, 1.0f);
+                        glow = {1.0f, 0.55f, 0.2f, 0.5f};
+                        break;
+                    default:  // granada
+                        part({0, 0, 0}, {0.22f, 0.26f, 0.22f}, {0.28f, 0.34f, 0.18f, 1}, 0.0f);
+                        part({0, 0.16f, 0}, {0.08f, 0.06f, 0.08f}, {0.7f, 0.7f, 0.7f, 1}, 0.0f);
+                        glow = {0.9f, 1.0f, 0.5f, 0.45f};
+                        break;
+                }
+            }
+            s.particles.push_back({pos, glow, 1.0f, true});
+            if (length(pos - camPos_) < 60.0f) s.beams.push_back({pos, pos + Vec3(0, 2.6f, 0), {glow.x, glow.y, glow.z, 0.35f}, 0.05f});
         } else if (p.type == 1) {
             box.world = Mat4::translation(pos) * Mat4::rotationY(p.age * 1.6f) * Mat4::scale({0.32f, 0.3f, 0.32f});
             box.color = {0.92f, 0.16f, 0.16f, 1};
@@ -1463,6 +1778,29 @@ void Game::buildScene() {
         else s.decals.push_back({h.pos, h.radius, {0.4f, 0.95f, 0.2f, 0.6f * a}, 0});
     }
 
+    // Mira do arremesso: arco pontilhado, anel de alcance da explosão e marcador no ponto de queda.
+    if (throwAiming_ && throwArc_.size() > 1) {
+        const bool molotov = throwableId() == IT_MOLOTOV;
+        const Vec4 arc = molotov ? Vec4(1.0f, 0.65f, 0.25f, 0.9f) : Vec4(1.0f, 0.95f, 0.55f, 0.9f);
+        for (size_t i = 0; i + 1 < throwArc_.size(); ++i) {
+            if (i % 2 == 1) continue;  // tracejado
+            float fade = 0.45f + 0.55f * (static_cast<float>(i) / throwArc_.size());
+            s.beams.push_back({throwArc_[i], throwArc_[i + 1], {arc.x, arc.y, arc.z, arc.w * fade}, 0.06f});
+        }
+        if (throwLandingValid_) {
+            const float radius = molotov ? 3.2f : 5.0f;
+            int gx = static_cast<int>(std::floor(throwLanding_.x)), gz = static_cast<int>(std::floor(throwLanding_.z));
+            float ground = world_.columnReady(gx, gz) ? static_cast<float>(world_.standHeight(gx, gz)) : throwLanding_.y;
+            if (ground > throwLanding_.y + 1.5f) ground = std::floor(throwLanding_.y);
+            Vec3 spot(throwLanding_.x, ground, throwLanding_.z);
+            s.decals.push_back({spot, radius, molotov ? Vec4(1.0f, 0.45f, 0.1f, 0.85f) : Vec4(1.0f, 0.25f, 0.15f, 0.85f), 1});
+            s.decals.push_back({spot, 0.6f, {1.0f, 1.0f, 1.0f, 0.9f}, 0});
+            float pulse = 0.8f + 0.2f * std::sin(time_ * 9.0f);
+            s.particles.push_back({throwLanding_ + Vec3(0, 0.3f, 0), {arc.x, arc.y, arc.z, 0.8f}, 0.9f * pulse, true});
+            s.beams.push_back({spot, spot + Vec3(0, 3.0f, 0), {arc.x, arc.y, arc.z, 0.5f}, 0.07f});
+        }
+    }
+
     // Partículas, fogueiras e traçantes.
     for (const auto& p : particles_) {
         float a = clampf(p.life / std::max(0.01f, p.maxLife), 0, 1);
@@ -1483,7 +1821,7 @@ void Game::buildScene() {
     }
     for (const auto& t : tracers_) s.beams.push_back({t.from, t.to, {t.color.x, t.color.y, t.color.z, std::min(1.0f, t.life * 18.0f)}, 0.045f});
 
-    s.portalVisible = mode_ == Mode::Mission;
+    s.portalVisible = mode_ == Mode::Mission && !survival();
     s.portalCenter = layout_.portalBase;
     s.portalYaw = layout_.portalYaw;
     s.portalOpen = portalAnim_;
@@ -1532,9 +1870,12 @@ void Game::resetPlayerState(const Vec3& position, float yaw, float health, int m
     meleeTime_ = -1;
     meleeCooldown_ = grenadeCooldown_ = emptyClick_ = 0;
     coyote_ = jumpBuffer_ = 0;
+    mantleTime_ = -1;
+    wallPush_ = stuckTimer_ = 0;
+    stuckAnchor_ = position;
     camPivotInit_ = false;
     rackPlayed_ = true;
-    grenades_ = 3;
+    resetInventory();
     pickups_.clear();
     particles_.clear();
     labels_.clear();
@@ -1594,7 +1935,6 @@ void Game::startPvp(const PvpConfig& c) {
     Vec3 spawn = layout_.spawnPoints.empty() ? layout_.start : layout_.spawnPoints[static_cast<size_t>(c.localId) % layout_.spawnPoints.size()];
     Vec3 toCenter = Vec3(world_.width() * 0.5f, 0, world_.depth() * 0.5f) - spawn;
     resetPlayerState(spawn, yawFromDirection(toCenter.x, toCenter.z), 100, 30);
-    grenades_ = 0;  // PvP: sem granadas
     invulnerable_ = 2.0f;
     playerAsset_ = character(config_.skin);
     playerAnim_ = Animator();
@@ -1656,6 +1996,7 @@ void Game::updatePvp(float dt) {
             Vec3 spawn = layout_.spawnPoints.empty() ? layout_.start : layout_.spawnPoints[me.spawnIndex % layout_.spawnPoints.size()];
             player_.position = spawn;
             player_.velocity = {};
+            mantleTime_ = -1;
             camPivotInit_ = false;
             crouching_ = false;
             dead_ = false;
@@ -1814,7 +2155,7 @@ void Game::publishHud() {
     h[H_HEALTH] = health_;
     h[H_MAX_HEALTH] = maxHealth_;
     h[H_AMMO] = static_cast<float>(ammo_);
-    h[H_MAG] = static_cast<float>(config_.magazine);
+    h[H_MAG] = static_cast<float>(magazineFor(weaponId()));
     h[H_RELOAD] = reloadTimer_ > 0 ? 1.0f - reloadTimer_ / reloadDuration_ : -1.0f;
     h[H_ALIVE] = static_cast<float>(alive);
     h[H_TOTAL] = static_cast<float>(zombies_.size());
@@ -1827,7 +2168,10 @@ void Game::publishHud() {
     h[H_TARGET_LOCKED] = targetLocked_ ? 1.0f : 0.0f;
     h[H_TARGET_HP] = targetHp_;
     h[H_AIM] = aimBlend_;
-    h[H_SPREAD] = lerpf(0.016f, 0.004f, aimBlend_) + bloom_ + std::min(1.0f, lengthXZ(player_.velocity) / kPlayerSpeed) * 0.008f;
+    {
+        const WeaponDef& w = weaponDef(weaponId());
+        h[H_SPREAD] = lerpf(w.spreadHip, w.spreadAim, aimBlend_) + bloom_ + std::min(1.0f, lengthXZ(player_.velocity) / kPlayerSpeed) * 0.008f;
+    }
     h[H_HITMARK] = hitMark_ / 0.18f;
     h[H_HEADSHOT_MARK] = headshotMark_ ? 1.0f : 0.0f;
     h[H_DAMAGE_FLASH] = damageFlash_;
@@ -1858,8 +2202,54 @@ void Game::publishHud() {
     h[H_CROUCH] = crouching_ ? 1.0f : 0.0f;
     h[H_SHOULDER] = shoulder_;
     h[H_SPRINT_LOCK] = sprintLock_ ? 1.0f : 0.0f;
-    h[H_GRENADES] = mode_ == Mode::Mission ? static_cast<float>(grenades_) : -1.0f;
+    h[H_GRENADES] = inventoryEnabled() ? static_cast<float>(countItem(throwableId())) : -1.0f;
     h[H_MELEE] = mode_ == Mode::Mission ? meleeCooldown_ / 0.55f : -1.0f;
+
+    // Inventário (barra rápida e mochila) e efeitos dos itens.
+    h[H_INV_ENABLED] = inventoryEnabled() ? 1.0f : 0.0f;
+    h[H_WEAPON] = static_cast<float>(weaponId());
+    if (inventoryEnabled()) {
+        for (int i = 0; i < kInvSlots; ++i) {
+            h[H_INV + i * 2] = static_cast<float>(inv_[static_cast<size_t>(i)].id);
+            h[H_INV + i * 2 + 1] = static_cast<float>(inv_[static_cast<size_t>(i)].count);
+        }
+        h[H_WEAPON_SLOT] = static_cast<float>(weaponSlot_);
+        int ts = throwSlot_;
+        if (ts < 0 || !isThrowableItem(inv_[static_cast<size_t>(ts)].id)) {
+            ts = -1;
+            for (int i = 0; i < kInvSlots; ++i)
+                if (isThrowableItem(inv_[static_cast<size_t>(i)].id)) { ts = i; break; }
+        }
+        h[H_THROW_SLOT] = static_cast<float>(ts);
+        h[H_THROW_KIND] = static_cast<float>(throwableId());
+        h[H_ARMOR] = armor_;
+        h[H_ARMOR_MAX] = armorMax_;
+        h[H_ADRENALINE] = adrenaline_;
+        h[H_SWAP] = swapTimer_ / 0.35f;
+        h[H_THROW_AIM] = throwAiming_ ? 1.0f : 0.0f;
+        if (throwAiming_ && throwLandingValid_) {
+            h[H_THROW_DIST] = distXZ(throwLanding_, player_.position);
+            float tx = 0, ty = 0;
+            bool on = project(throwLanding_ + Vec3(0, 0.6f, 0), tx, ty);
+            h[H_THROW_SX] = tx;
+            h[H_THROW_SY] = ty;
+            h[H_THROW_ONSCREEN] = on ? 1.0f : 0.0f;
+        }
+    }
+    if (survival()) {
+        h[H_SURV] = 1.0f;
+        h[H_WAVE] = static_cast<float>(wave_);
+        h[H_WAVE_STATE] = static_cast<float>(waveState_);
+        h[H_WAVE_TIMER] = waveTimer_;
+        int killed = kills_ - waveKilledBase_;
+        h[H_WAVE_PROGRESS] = waveTotal_ > 0 ? clampf(static_cast<float>(killed) / waveTotal_, 0.0f, 1.0f) : 0.0f;
+        h[H_WAVE_LEFT] = static_cast<float>(std::max(0, waveTotal_ - killed));
+        h[H_WAVE_BIG] = waveBig_ ? 1.0f : 0.0f;
+        h[H_SURV_TIME] = survivalTime_;
+        h[H_SCORE] = static_cast<float>(score_ + static_cast<int>(survivalTime_ * 2.0f));
+        h[H_FRONT_COUNT] = waveState_ == 1 ? static_cast<float>(frontCount_) : 0.0f;
+        for (int i = 0; i < 3; ++i) h[H_FRONTS + i] = frontAngles_[i];
+    }
 
     // Inimigos para o minimapa: os mais próximos primeiro.
     static std::vector<std::pair<float, const Zombie*>> near;
@@ -1933,7 +2323,7 @@ void Game::publishHud() {
                 nearNest = static_cast<int>(i);
             }
         }
-        if (n < kMaxHudObjectives) {
+        if (n < kMaxHudObjectives && !survival()) {
             const int o = H_OBJ + n * kHudObjStride;
             h[o] = layout_.portalBase.x;
             h[o + 1] = layout_.portalBase.z;

@@ -80,6 +80,101 @@ void placeDeadTree(BlockSink& w, int x, int y, int z, Rng& rng) {
     }
 }
 
+// Bétula: tronco branco alto e fino, copa estreita.
+void placeBirch(BlockSink& w, int x, int y, int z, Rng& rng) {
+    int h = rng.rangeInt(7, 10);
+    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_BIRCH);
+    for (int dy = h - 4; dy <= h + 1; ++dy) {
+        int r = (dy >= h) ? 1 : (dy <= h - 4 ? 1 : 2);
+        for (int dz = -r; dz <= r; ++dz)
+            for (int dx = -r; dx <= r; ++dx) {
+                if (std::abs(dx) == r && std::abs(dz) == r && (r > 1 || rng.chance(0.6f))) continue;
+                if (dx == 0 && dz == 0 && dy < h) continue;
+                leafBlock(w, x + dx, y + dy, z + dz, B_LEAVES_BIRCH);
+            }
+    }
+}
+
+// Copa arredondada (cerejeira, bordo): bolha larga e um pouco achatada.
+void roundCanopy(BlockSink& w, int x, int cy, int z, int rx, int ry, uint8_t leaf, Rng& rng) {
+    for (int dy = -ry; dy <= ry; ++dy)
+        for (int dz = -rx; dz <= rx; ++dz)
+            for (int dx = -rx; dx <= rx; ++dx) {
+                float d = static_cast<float>(dx * dx + dz * dz) / static_cast<float>(rx * rx) + static_cast<float>(dy * dy) / static_cast<float>(std::max(1, ry * ry));
+                if (d > 1.05f || (d > 0.75f && rng.chance(0.35f))) continue;
+                leafBlock(w, x + dx, cy + dy, z + dz, leaf);
+            }
+}
+
+// Cerejeira: tronco curto que se abre em galhos e copa rosa larga.
+void placeCherry(BlockSink& w, int x, int y, int z, Rng& rng) {
+    int h = rng.rangeInt(4, 6);
+    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_CHERRY);
+    const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    int a = rng.rangeInt(0, 3), b = (a + 1 + rng.rangeInt(0, 2)) % 4;
+    for (int k : {a, b}) {
+        w.set(x + dirs[k][0], y + h, z + dirs[k][1], B_LOG_CHERRY);
+        w.set(x + dirs[k][0] * 2, y + h + 1, z + dirs[k][1] * 2, B_LOG_CHERRY);
+        roundCanopy(w, x + dirs[k][0] * 2, y + h + 2, z + dirs[k][1] * 2, 2, 1, B_LEAVES_CHERRY, rng);
+    }
+    roundCanopy(w, x, y + h + 1, z, 3, 2, B_LEAVES_CHERRY, rng);
+}
+
+// Bordo de outono: copa redonda vermelho-alaranjada.
+void placeMaple(BlockSink& w, int x, int y, int z, Rng& rng) {
+    int h = rng.rangeInt(6, 8);
+    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_OAK);
+    roundCanopy(w, x, y + h - 1, z, 3, 3, B_LEAVES_MAPLE, rng);
+}
+
+// Ipê amarelo: tronco alto e copa em guarda-chuva, plana e larga.
+void placeIpe(BlockSink& w, int x, int y, int z, Rng& rng) {
+    int h = rng.rangeInt(6, 8);
+    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_DEAD);
+    for (int dz = -3; dz <= 3; ++dz)
+        for (int dx = -3; dx <= 3; ++dx) {
+            int d2 = dx * dx + dz * dz;
+            if (d2 > 10) continue;
+            leafBlock(w, x + dx, y + h, z + dz, B_LEAVES_GOLD);
+            if (d2 <= 5) leafBlock(w, x + dx, y + h + 1, z + dz, B_LEAVES_GOLD);
+            if (d2 > 4 && d2 <= 9 && rng.chance(0.5f)) leafBlock(w, x + dx, y + h - 1, z + dz, B_LEAVES_GOLD);
+        }
+}
+
+// Jacarandá: tronco que se divide em dois braços com tufos roxos.
+void placeJacaranda(BlockSink& w, int x, int y, int z, Rng& rng) {
+    int h = rng.rangeInt(4, 5);
+    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_CHERRY);
+    bool alongX = rng.chance(0.5f);
+    for (int side = -1; side <= 1; side += 2) {
+        int bx = alongX ? side : 0, bz = alongX ? 0 : side;
+        w.set(x + bx, y + h, z + bz, B_LOG_CHERRY);
+        w.set(x + bx * 2, y + h + 1, z + bz * 2, B_LOG_CHERRY);
+        w.set(x + bx * 2, y + h + 2, z + bz * 2, B_LOG_CHERRY);
+        roundCanopy(w, x + bx * 2, y + h + 3, z + bz * 2, 2, 1, B_LEAVES_PURPLE, rng);
+    }
+    roundCanopy(w, x, y + h + 2, z, 2, 1, B_LEAVES_PURPLE, rng);
+}
+
+// Coqueiro: tronco levemente curvo e folhas compridas que caem nas pontas.
+void placePalm(BlockSink& w, int x, int y, int z, Rng& rng) {
+    int h = rng.rangeInt(6, 9);
+    int lean = rng.rangeInt(0, 3);
+    const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    int tx = x, tz = z;
+    for (int i = 0; i < h; ++i) {
+        if (i == h / 2 || i == h - 2) { tx += dirs[lean][0]; tz += dirs[lean][1]; }
+        w.set(tx, y + i, tz, B_LOG_PALM);
+    }
+    int top = y + h;
+    leafBlock(w, tx, top, tz, B_LEAVES_PALM);
+    const int fronds[8][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+    for (const auto& f : fronds) {
+        int len = (f[0] && f[1]) ? 2 : 3;
+        for (int k = 1; k <= len; ++k) leafBlock(w, tx + f[0] * k, top - (k == len ? 1 : 0), tz + f[1] * k, B_LEAVES_PALM);
+    }
+}
+
 void tent(BlockSink& w, int x, int y, int z, bool alongZ, uint8_t cloth) {
     // Barraca em "A" aberta nas pontas (cobertura, nunca sala fechada).
     for (int k = 0; k < 3; ++k) {
@@ -99,6 +194,42 @@ void placeTree(BlockSink& w, TreeKind kind, int x, int y, int z, Rng& rng) {
         case TreeKind::Spruce: placeSpruce(w, x, y, z, rng); break;
         case TreeKind::Cactus: placeCactus(w, x, y, z, rng); break;
         case TreeKind::Dead: placeDeadTree(w, x, y, z, rng); break;
+        case TreeKind::Birch: placeBirch(w, x, y, z, rng); break;
+        case TreeKind::Cherry: placeCherry(w, x, y, z, rng); break;
+        case TreeKind::Maple: placeMaple(w, x, y, z, rng); break;
+        case TreeKind::Ipe: placeIpe(w, x, y, z, rng); break;
+        case TreeKind::Jacaranda: placeJacaranda(w, x, y, z, rng); break;
+        case TreeKind::Palm: placePalm(w, x, y, z, rng); break;
+    }
+}
+
+TreeKind pickTreeKind(const Theme& theme, int x, int z, uint32_t seed, bool shore) {
+    // Bosques: cada região tem uma espécie dominante (cerejeiras juntas, ipês juntos...).
+    float grove = fbm(x / 150.0f, z / 150.0f, seed + 4242, 2);
+    float species = fbm(x / 260.0f, z / 260.0f, seed + 4245, 2);
+    float pick = hashFloat(x, z, seed + 4243);
+    auto flowering = [&]() {
+        if (species < 0.42f) return TreeKind::Cherry;
+        if (species < 0.5f) return TreeKind::Ipe;
+        if (species < 0.58f) return TreeKind::Jacaranda;
+        return TreeKind::Maple;
+    };
+    switch (theme.id) {
+        case 0:  // floresta
+            if (shore && pick < 0.65f) return TreeKind::Palm;
+            if (grove > 0.58f) return pick < 0.82f ? flowering() : TreeKind::Oak;
+            if (pick < 0.03f) return flowering();
+            return pick < (species > 0.55f ? 0.45f : 0.25f) ? TreeKind::Birch : TreeKind::Oak;
+        case 1:  // deserto: cactos, coqueiros nos oásis e ipês raros
+            if (shore) return pick < 0.8f ? TreeKind::Palm : TreeKind::Cactus;
+            if (grove > 0.64f && pick < 0.4f) return TreeKind::Ipe;
+            return pick < 0.12f ? TreeKind::Palm : TreeKind::Cactus;
+        case 2:  // neve: pinheiros, bétulas e bordos de outono
+            if (grove > 0.6f && pick < 0.6f) return TreeKind::Maple;
+            return pick < 0.22f ? TreeKind::Birch : TreeKind::Spruce;
+        default:  // terra devastada: árvores mortas e jacarandás "corrompidos"
+            if (grove > 0.6f && pick < 0.55f) return pick < 0.35f ? TreeKind::Jacaranda : TreeKind::Maple;
+            return TreeKind::Dead;
     }
 }
 
@@ -110,6 +241,10 @@ void lanternPost(BlockSink& w, int x, int y, int z, DecorOut& out) {
 }
 
 void decorateCamp(BlockSink& w, const Camp& camp, const Theme& theme, Rng& rng, DecorOut& out) {
+    if (isBuildingKind(camp.kind) && !camp.start && !camp.portal) {
+        buildBuilding(w, camp, theme, rng, out);
+        return;
+    }
     int cx = static_cast<int>(std::floor(camp.center.x)), cz = static_cast<int>(std::floor(camp.center.z));
     int y = static_cast<int>(camp.center.y);
     int r = static_cast<int>(camp.radius);

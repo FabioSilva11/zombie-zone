@@ -6,7 +6,7 @@
 
 namespace zz {
 
-enum class TreeKind { Oak, Spruce, Cactus, Dead };
+enum class TreeKind { Oak, Spruce, Cactus, Dead, Birch, Cherry, Maple, Ipe, Jacaranda, Palm };
 
 struct SkyPreset {
     Vec3 zenith;

@@ -63,6 +63,15 @@ class GameAudio(private val context: Context) {
         engineSounds[Snd.CHEST] = load(R.raw.sfx_chest)
         engineSounds[Snd.SPIT] = load(R.raw.sfx_spit)
         engineSounds[Snd.RACK] = load(R.raw.sfx_rack)
+        engineSounds[Snd.PISTOL] = load(R.raw.sfx_pistol)
+        engineSounds[Snd.SHOTGUN] = load(R.raw.sfx_shotgun)
+        engineSounds[Snd.SMG] = load(R.raw.sfx_smg)
+        engineSounds[Snd.SNIPER] = load(R.raw.sfx_sniper)
+        engineSounds[Snd.LMG] = load(R.raw.sfx_lmg)
+        engineSounds[Snd.FLAME] = load(R.raw.sfx_flame)
+        engineSounds[Snd.LAUNCHER] = load(R.raw.sfx_launcher)
+        engineSounds[Snd.EQUIP] = load(R.raw.sfx_equip)
+        engineSounds[Snd.WAVE] = load(R.raw.sfx_wave)
         groanAlt = load(R.raw.sfx_groan2)
         ui["click"] = load(R.raw.ui_click)
         ui["reward"] = load(R.raw.sfx_reward)
@@ -76,7 +85,7 @@ class GameAudio(private val context: Context) {
         if (sound !in engineSounds.indices || sfxVolume <= 0f) return
         val now = SystemClock.uptimeMillis()
         // Evita empilhar o mesmo som no mesmo instante (ex.: rajada + vários impactos).
-        val minGap = when (sound) { Snd.SHOT -> 45L; Snd.STEP -> 120L; Snd.GROAN -> 350L; Snd.EXPLOSION -> 90L; Snd.FIRE -> 120L; Snd.RELOAD, Snd.RACK -> 250L; Snd.EMPTY -> 200L; else -> 30L }
+        val minGap = when (sound) { Snd.SHOT, Snd.SMG, Snd.LMG -> 45L; Snd.FLAME -> 150L; Snd.WAVE -> 1500L; Snd.STEP -> 120L; Snd.GROAN -> 350L; Snd.EXPLOSION -> 90L; Snd.FIRE -> 120L; Snd.RELOAD, Snd.RACK -> 250L; Snd.EMPTY -> 200L; else -> 30L }
         if (now - lastPlayed[sound] < minGap) return
         lastPlayed[sound] = now
         val v = (volume / 100f).coerceIn(0f, 1f) * sfxVolume
@@ -91,7 +100,7 @@ class GameAudio(private val context: Context) {
             Snd.SCREAM, Snd.THROW -> 0.92f + (now % 4) * 0.05f
             else -> 1f
         }
-        val priority = if (sound == Snd.SHOT || sound == Snd.HURT || sound == Snd.EXPLOSION) 2 else 1
+        val priority = if (sound == Snd.SHOT || sound == Snd.HURT || sound == Snd.EXPLOSION || sound == Snd.WAVE || sound in Snd.PISTOL..Snd.LAUNCHER) 2 else 1
         pool.play(id, left, right, priority, 0, rate)
     }
 

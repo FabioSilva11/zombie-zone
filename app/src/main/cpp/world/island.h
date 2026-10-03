@@ -60,7 +60,8 @@ struct ColumnInfo {
 
 class IslandGenerator : public ChunkSource {
 public:
-    IslandGenerator(const Theme& theme, int stage, uint32_t seed);
+    // objectives = false: ilha livre (modo sobrevivência), sem ninhos nem portal.
+    IslandGenerator(const Theme& theme, int stage, uint32_t seed, bool objectives = true);
     void generate(Chunk& chunk, int height) override;
 
     float landMask(float x, float z) const;
@@ -95,6 +96,7 @@ private:
     Theme primary_, secondary_;
     int stage_ = 1;
     uint32_t seed_ = 1;
+    bool objectives_ = true;
     int sea_ = 14;
     Vec3 start_;
     float startYaw_ = 0;

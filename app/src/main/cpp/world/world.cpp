@@ -26,7 +26,7 @@ const uint8_t kUv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
 const float kAoCurve[4] = {0.46f, 0.64f, 0.82f, 1.0f};
 constexpr int kPad = kChunkSize + 2;
 
-bool isLeaf(uint8_t b) { return b == B_LEAVES_OAK || b == B_LEAVES_SPRUCE; }
+bool isLeaf(uint8_t b) { return isLeafBlock(b); }
 
 }  // namespace
 
@@ -319,6 +319,7 @@ void World::buildChunk(Chunk& chunk) {
                 const bool water = info.shape == Shape::Liquid;
                 if (info.shape != Shape::Cube && !water) continue;
                 const bool leaf = isLeaf(b);
+                const bool glass = b == B_GLASS;
 
                 for (int f = 0; f < 6; ++f) {
                     const FaceDef& face = kFaces[f];
@@ -328,6 +329,7 @@ void World::buildChunk(Chunk& chunk) {
                         if (face.ny < 0) continue;
                     } else {
                         if (isOpaque(nb)) continue;
+                        if (glass && nb == B_GLASS) continue;
                         if (y + face.ny < 0) continue;
                     }
                     uint8_t layer = face.ny > 0 ? info.top : (face.ny < 0 ? info.bottom : info.side);
@@ -347,7 +349,7 @@ void World::buildChunk(Chunk& chunk) {
                     }
                     // Gira o quad quando a AO é anisotrópica para evitar costura diagonal.
                     int start = (ao[0] + ao[2] < ao[1] + ao[3]) ? 1 : 0;
-                    std::vector<VoxelVertex>& target = water ? mesh.water : mesh.opaque;
+                    std::vector<VoxelVertex>& target = water ? mesh.water : (glass ? mesh.cutout : mesh.opaque);
                     const bool waterAbove = at(px, y + 1, pz) == B_WATER;
                     uint8_t flags = static_cast<uint8_t>((water ? VF_WATER : 0) | (info.emissive ? VF_EMISSIVE : 0) | (leaf ? VF_LEAF : 0));
                     if (b == B_GRASS && face.ny > 0) flags |= VF_GRASS;

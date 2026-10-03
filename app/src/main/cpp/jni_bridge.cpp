@@ -71,6 +71,13 @@ JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray val
     cfg.reloadSpeed = c[C_RELOAD_SPEED] > 0 ? c[C_RELOAD_SPEED] : 1.0f;
     cfg.boostHealth = c[C_BOOST_HEALTH] > 0 ? c[C_BOOST_HEALTH] : 1.0f;
     cfg.boostDamage = c[C_BOOST_DAMAGE] > 0 ? c[C_BOOST_DAMAGE] : 1.0f;
+    cfg.mode = static_cast<int>(c[C_MODE]);
+    cfg.armor = c[C_ARMOR];
+    cfg.regen = c[C_REGEN];
+    cfg.speedMul = c[C_SPEED] > 0 ? c[C_SPEED] : 1.0f;
+    cfg.headshotMul = c[C_HEADSHOT] > 0 ? c[C_HEADSHOT] : 1.0f;
+    cfg.luck = c[C_LUCK] > 0 ? c[C_LUCK] : 1.0f;
+    cfg.explosives = static_cast<int>(c[C_EXPLOSIVES]);
     game().setGraphics(static_cast<int>(c[C_QUALITY]), c[C_CINEMATIC] > 0.5f);
     game().startMission(cfg);
 }
@@ -118,6 +125,19 @@ JNIEXPORT void JNICALL ZZ_FN(pressMelee)(JNIEnv*, jobject) { game().pressMelee()
 JNIEXPORT void JNICALL ZZ_FN(pressGrenade)(JNIEnv*, jobject) { game().pressGrenade(); }
 
 JNIEXPORT void JNICALL ZZ_FN(swapShoulder)(JNIEnv*, jobject) { game().swapShoulder(); }
+
+JNIEXPORT void JNICALL ZZ_FN(tapSlot)(JNIEnv*, jobject, jint slot) { game().tapSlot(slot); }
+
+JNIEXPORT void JNICALL ZZ_FN(useSlot)(JNIEnv*, jobject, jint slot) { game().useSlot(slot); }
+
+JNIEXPORT void JNICALL ZZ_FN(setThrowAim)(JNIEnv*, jobject, jboolean held, jboolean cancel) { game().setThrowAim(held, cancel); }
+
+JNIEXPORT void JNICALL ZZ_FN(setInventory)(JNIEnv* env, jobject, jintArray values) {
+    int data[zz::proto::kInvIntCount] = {0};
+    jsize n = std::min<jsize>(env->GetArrayLength(values), zz::proto::kInvIntCount);
+    env->GetIntArrayRegion(values, 0, n, reinterpret_cast<jint*>(data));
+    game().setInventory(data, n);
+}
 
 JNIEXPORT void JNICALL ZZ_FN(setMove)(JNIEnv*, jobject, jfloat x, jfloat y) { game().setMove(x, y); }
 

@@ -194,7 +194,8 @@ class RulesTest {
         val hard = Campaign.difficulty(20, 5, 5, 5)
         assertTrue(hard.zombieCount > easy.zombieCount)
         assertTrue(hard.zombieHealth > easy.zombieHealth)
-        assertEquals(1.75f, hard.power, 0.001f)
+        // 5 níveis de poder (+75%) e o bônus da zona 4 (+12% de zona x 0,8).
+        assertEquals(1.75f * (1f + 0.12f * 0.8f), hard.power, 0.001f)
         assertEquals(18, Skins.all.size)
     }
 }

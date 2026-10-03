@@ -26,7 +26,8 @@ void Game::startMission(const MissionConfig& config) {
     rng_.reseed(config.seed * 2654435761u + 17u);
 
     // A ilha nova só substitui a antiga depois que o mundo deixa de apontar para ela.
-    auto island = std::make_unique<IslandGenerator>(theme_, config.stage, config.seed);
+    // Na sobrevivência a ilha é livre: sem ninhos nem portal, só as ondas de zumbis.
+    auto island = std::make_unique<IslandGenerator>(theme_, config.stage, config.seed, config.mode != 1);
     world_.resetStreaming(kIslandSize, kIslandHeight, kIslandSize, island.get());
     island_ = std::move(island);
     layout_ = WorldLayout{};
@@ -71,9 +72,10 @@ void Game::startMission(const MissionConfig& config) {
     visitedPois_.clear();
     announcedPois_.clear();
     supply_ = SupplyDrop{};
-    suppliesLeft_ = 2;
-    supplyPeriod_ = 150.0f;
-    supplyCooldown_ = 75.0f;
+    suppliesLeft_ = config.mode == 1 ? 4 : 2;
+    supplyPeriod_ = config.mode == 1 ? 120.0f : 150.0f;
+    supplyCooldown_ = config.mode == 1 ? 45.0f : 75.0f;
+    startSurvivalState();
     spawnTimer_ = 2.5f;
     poiTimer_ = 0;
     {
@@ -91,7 +93,7 @@ void Game::startMission(const MissionConfig& config) {
     lastTime_ = -1;
     buildBigMap();
     rebuildMinimap();
-    emit(EV_MISSION_READY, -1);
+    emit(EV_MISSION_READY, config.mode == 1 ? -2 : -1);
     LOGI("Missão %d: ilha %d, %zu chunks, %zu ninhos, rota %.0f m", config.stage, static_cast<int>(config.seed), world_.chunks().size(), nests_.size(), island_->routeLength());
 }
 
@@ -170,14 +172,16 @@ void Game::updatePois(float dt) {
         if (p->role == ROLE_START) continue;
         Rng prng(hash2(p->cellX, p->cellZ, config_.seed + 99u));
         int guards;
+        const bool guarded = !survival();
         if (p->role == ROLE_NEST) guards = 4 + std::min(4, config_.stage / 3);
         else if (p->role == ROLE_PORTAL) guards = 3 + std::min(3, config_.stage / 4);
         else guards = prng.rangeInt(2, 4) + std::min(2, config_.stage / 5);
-        for (int i = 0; i < guards; ++i) {
+        for (int i = 0; i < (guarded ? guards : 0); ++i) {
             float ang = prng.range(0, kTwoPi), dist = prng.range(1.5f, p->radius + 2.0f);
             int x = static_cast<int>(std::floor(p->center.x + std::cos(ang) * dist));
             int z = static_cast<int>(std::floor(p->center.z + std::sin(ang) * dist));
             if (!world_.columnReady(x, z) || world_.solid(x, world_.standHeight(x, z) + 1, z)) continue;
+            if (world_.standHeight(x, z) - world_.groundHeight(x, z) > 1) continue;  // nada de zumbi em cima do telhado
             spawnZombie({x + 0.5f, static_cast<float>(world_.standHeight(x, z)), z + 0.5f}, false, -1, p->role != ROLE_NONE && i == 0);
             zombies_.back().home = p->center;
         }
@@ -296,9 +300,21 @@ void Game::updateChests(float dt) {
         c.opened = true;
         ++chestsOpened_;
         chestDiamonds_ += c.diamonds;
-        ammo_ = std::max(ammo_, config_.magazine);
-        bool grenade = grenades_ < 5 && rng_.chance(0.35f);
-        if (grenade) ++grenades_;
+        ammo_ = std::max(ammo_, magazineFor(weaponId()));
+        // Itens do baú: um ou dois consumíveis e, raramente, uma arma que o jogador ainda não tem.
+        bool grenade = rng_.chance(0.35f);
+        if (grenade) {
+            int left = addItem(IT_GRENADE, 1);
+            if (left > 0) dropItem(c.pos + Vec3(0, 1.0f, 0), IT_GRENADE, left);
+        }
+        static const int kChestLoot[] = {IT_BANDAGE, IT_BANDAGE, IT_MEDKIT, IT_MOLOTOV, IT_ADRENALINE, IT_ANTIDOTE, IT_FIRE_AMMO, IT_ARMOR};
+        int extra = rng_.chance(0.5f) ? 2 : 1;
+        for (int k = 0; k < extra; ++k) dropItem(c.pos + Vec3(0, 1.0f, 0), kChestLoot[rng_.rangeInt(0, 7)], 1);
+        if (rng_.chance(0.05f * config_.luck)) {
+            static const int kWeaponsLoot[] = {IT_PISTOL, IT_SHOTGUN, IT_SMG, IT_SMG, IT_SHOTGUN, IT_SNIPER, IT_LMG, IT_FLAMER, IT_LAUNCHER};
+            int wpn = kWeaponsLoot[rng_.rangeInt(0, 8)];
+            if (countItem(wpn) == 0) dropItem(c.pos + Vec3(0, 1.2f, 0), wpn, 1);
+        }
         emit(EV_CHEST, c.diamonds, grenade ? 1 : 0);
         emitSound(SND_CHEST, c.pos, 1.0f);
         spawnBurst(c.pos + Vec3(0, 0.8f, 0), {1.0f, 0.85f, 0.3f, 1.0f}, 24, 4.0f, 0.14f, true, 4.0f);

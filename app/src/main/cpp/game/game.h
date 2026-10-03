@@ -18,6 +18,7 @@
 #include "../world/terrain.h"
 #include "../world/theme.h"
 #include "../world/world.h"
+#include "items.h"
 #include "nav.h"
 #include "net.h"
 #include "protocol.h"
@@ -44,6 +45,14 @@ struct MissionConfig {
     float reloadSpeed = 1.0f;
     float boostHealth = 1.0f;  // bônus de anúncio antes da fase
     float boostDamage = 1.0f;
+    int mode = 0;              // 0 campanha, 1 sobrevivência por ondas
+    // Melhorias compradas com diamantes
+    float armor = 0;           // redução de dano (0..0.6)
+    float regen = 0;           // fração da vida máxima por segundo
+    float speedMul = 1.0f;
+    float headshotMul = 1.0f;
+    float luck = 1.0f;         // chance de itens dos zumbis
+    int explosives = 0;        // nível de explosivos
 };
 
 struct PvpConfig {
@@ -96,6 +105,15 @@ struct InputState {
     int melees = 0;
     int grenades = 0;
     int shoulderSwaps = 0;
+    // Inventário: toques na barra rápida e "usar" vindos da mochila.
+    int taps[8] = {};
+    int tapCount = 0;
+    int uses[8] = {};
+    int useCount = 0;
+    // Mira do arremesso: segurar mostra a trajetória, soltar arremessa.
+    bool throwAim = false;
+    int throwReleases = 0;
+    int throwCancels = 0;
 };
 
 // Tipos de zumbi (cada um com habilidade própria). A ordem espelha ZombieKinds no Kotlin.
@@ -169,13 +187,17 @@ struct Zombie {
     float strafeTimer = 0;
     float burn = 0;
     int nest = -1;          // ninho que o gerou
+    float burnDps = 14.0f;  // dano do fogo por segundo
     bool exploded = false;
     bool announced = false; // jogador já foi avisado deste tipo/elite
 };
 
 struct Pickup {
-    int type = 0;  // 0 cristal, 1 vida, 2 caixa de suprimentos
+    int type = 0;  // 0 cristal, 1 vida, 2 caixa de suprimentos, 3 item do inventário
     int crystalIndex = -1;
+    int item = 0;
+    int count = 0;
+    float blocked = 0;  // mochila cheia: espera antes de tentar de novo
     Vec3 position;
     Vec3 velocity;
     float age = 0;
@@ -192,6 +214,8 @@ struct Projectile {
     float gravity = 22;
     float life = 4;
     float spin = 0;
+    bool friendly = false;  // lançado pelo jogador (não o atinge)
+    float radius = 5.0f;    // raio da explosão (granada/lança-granadas)
 };
 
 // Área perigosa no chão: fogo do molotov ou poça de ácido.
@@ -202,6 +226,8 @@ struct Hazard {
     float life = 5, maxLife = 5;
     float damage = 8;
     float fxTimer = 0;
+    bool friendly = false;   // fogo do molotov do jogador: queima só os zumbis
+    float zombieDps = 14.0f;
 };
 
 struct Explosion {
@@ -297,6 +323,11 @@ public:
     void pressMelee();
     void pressGrenade();
     void swapShoulder();
+    void tapSlot(int slot);
+    void useSlot(int slot);
+    void setThrowAim(bool held, bool cancel);
+    // Inventário vindo do Kotlin (thread GL): (id, qtd) x 24 + espaço da arma + do arremessável.
+    void setInventory(const int* data, int count);
 
     // Saídas (qualquer thread)
     void copyHud(float* out, int count);
@@ -310,6 +341,10 @@ public:
 
 private:
     enum class Mode { None, Lobby, Mission, Pvp };
+    struct ItemStack {
+        int id = 0;
+        int count = 0;
+    };
     static constexpr int kMinimapSize = 160;
     static constexpr int kBigMapSize = 256;
 
@@ -323,19 +358,49 @@ private:
     void updateRemotes(float dt);
     void resetPlayerState(const Vec3& position, float yaw, float health, int magazine);
     void addRifle(const CharacterDraw& draw, int armRight, Vec3* muzzle);
+    void addWeaponModel(const CharacterDraw& draw, int armRight, int weapon, Vec3* muzzle);
     void poseArmed(Pose& pose, const CharacterModel& model, float pitch, bool moveHead);
     void updatePlayer(float dt, const InputState& in);
     void updateCamera(float dt, const InputState& in);
     void updateWeapon(float dt, const InputState& in);
     void fireShot();
+    void fireFlame();
+    void fireLauncher();
     void meleeHit();
-    void throwGrenade();
+
+    // Inventário e itens (game_items.cpp)
+    bool inventoryEnabled() const { return mode_ == Mode::Mission; }
+    int weaponId() const;
+    int magazineFor(int weapon) const;
+    void resetInventory();
+    void ensureWeapon();
+    void loadWeaponAmmo();
+    void equipSlot(int slot, bool silent);
+    void handleSlotTap(int slot);
+    void useItemSlot(int slot);
+    int addItem(int id, int count);        // retorna o que não coube
+    int countItem(int id) const;
+    bool takeItem(int id, int count);
+    int throwableId() const;
+    void dropItem(const Vec3& at, int id, int count);
+    void rollZombieDrop(const Zombie& z);
+    void giveSupplyBundle();
+    void updateThrowAim(float dt, const InputState& in);
+    bool throwVelocity(Vec3& hand, Vec3& vel, float& gravity) const;
+    void simulateThrow();
+    void throwSelected();
+    void updateItemStatus(float dt);
     bool canStand() const;
+    // Escalada: agarra bordas de até 3 blocos; resgate se ficar preso num buraco sem saída.
+    bool tryMantle(const Vec3& dir);
+    bool playerEnclosed() const;
+    void unstickPlayer();
     void consumeInput(InputState& in);
     void damagePlayer(float amount, const Vec3& from);
     void damageOverTime(float amount);
     void updateStatus(float dt);
     void updatePickups(float dt);
+    bool collectPickup(Pickup& p);
     void updateEffects(float dt);
     void spawnBurst(const Vec3& at, const Vec4& color, int count, float speed, float size, bool additive, float gravity);
     void addFlash(const Vec3& at, float radius, const Vec3& color, float life);
@@ -353,6 +418,13 @@ private:
     bool findSpawnSpot(const Vec3& around, float minDist, float maxDist, bool behindCamera, Vec3& out);
     bool damageNestRay(const Vec3& origin, const Vec3& dir, float maxT, float& tHit, int& nestIndex);
     void damageNest(int index, float amount, const Vec3& hitPoint);
+
+    // Sobrevivência por ondas (game_survival.cpp)
+    void startSurvivalState();
+    void updateWaves(float dt);
+    void startWave();
+    void spawnWaveZombie();
+    bool survival() const { return config_.mode == 1; }
 
     // Zumbis (game_zombies.cpp)
     void loadZombieAssets();
@@ -446,7 +518,6 @@ private:
     float leanRoll_ = 0;
     float meleeCooldown_ = 0, meleeTime_ = -1;
     bool meleeDone_ = false;
-    int grenades_ = 0;
     float grenadeCooldown_ = 0;
     float emptyClick_ = 0;
     bool rackPlayed_ = false;
@@ -454,6 +525,30 @@ private:
     bool camPivotInit_ = false;
     float sprintFov_ = 0;
     float bobPhase_ = 0;
+    float mantleTime_ = -1, mantleDuration_ = 0.4f;
+    Vec3 mantleFrom_, mantleTo_;
+    float wallPush_ = 0;
+    float stuckTimer_ = 0, stuckCheck_ = 1.0f;
+    Vec3 stuckAnchor_;
+
+    // Inventário
+    std::array<ItemStack, kInvSlots> inv_{};
+    int weaponSlot_ = -1;     // espaço da arma em mãos (-1: fuzil padrão)
+    int throwSlot_ = -1;      // espaço do arremessável escolhido
+    int clips_[16] = {};      // munição no pente de cada arma
+    bool clipsInit_[16] = {};
+    float swapTimer_ = 0;
+    float armor_ = 0, armorMax_ = 0;
+    float adrenaline_ = 0;
+    float sinceHurt_ = 0;
+    float flameSoundTimer_ = 0;
+    float invFullTimer_ = 0;
+    // Mira do arremesso
+    bool throwAiming_ = false;
+    std::vector<Vec3> throwArc_;
+    Vec3 throwLanding_;
+    bool throwLandingValid_ = false;
+    float throwAimTime_ = 0;
 
     // Arma
     int ammo_ = 30;
@@ -532,6 +627,20 @@ private:
     float pvpHealthSeen_ = 100;
     bool pvpEnded_ = false;
     bool pvpLost_ = false;
+
+    // Sobrevivência
+    int wave_ = 0;
+    int waveState_ = 0;        // 0 preparando, 1 em andamento, 2 vencida (intervalo)
+    float waveTimer_ = 0;      // contagem regressiva / tempo da onda
+    int waveTotal_ = 0;        // zumbis desta onda
+    int waveSpawned_ = 0;
+    int waveKilledBase_ = 0;   // abates antes da onda começar
+    float waveSpawnTimer_ = 0;
+    bool waveBig_ = false;
+    float frontAngles_[3] = {0, 0, 0};
+    int frontCount_ = 1;
+    float survivalTime_ = 0;
+    int score_ = 0;
 
     FrameScene scene_;
     Pose scratchPose_;

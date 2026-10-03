@@ -86,8 +86,8 @@ uint32_t shadeColor(uint32_t c, float f) {
 
 }  // namespace
 
-IslandGenerator::IslandGenerator(const Theme& theme, int stage, uint32_t seed)
-    : primary_(theme), stage_(std::max(1, stage)), seed_(seed ? seed : 1u) {
+IslandGenerator::IslandGenerator(const Theme& theme, int stage, uint32_t seed, bool objectives)
+    : primary_(theme), stage_(std::max(1, stage)), seed_(seed ? seed : 1u), objectives_(objectives) {
     // Bioma secundário: outra zona, escolhida pela semente.
     int other = (theme.id + 1 + static_cast<int>(seed_ % 3u)) % 4;
     secondary_ = themeForStage(other * 5 + 1);
@@ -128,7 +128,8 @@ float IslandGenerator::naturalHeight(float x, float z) const {
     float h = static_cast<float>(sea_) + 6.5f + hills + m * m * 32.0f * hill;
     // Mesetas em terraços nas áreas de deserto.
     float desert = (primary_.id == 1 ? 1.0f - sw : 0.0f) + (secondary_.id == 1 ? sw : 0.0f);
-    if (desert > 0.01f) h = lerpf(h, std::floor(h / 3.5f) * 3.5f, desert * 0.85f);
+    // Degraus de até ~2,5 blocos: dá para escalar (o jogador agarra bordas de até 3 blocos).
+    if (desert > 0.01f) h = lerpf(h, std::floor(h / 2.5f) * 2.5f, desert * 0.85f);
     if (h > 40.0f) h = 40.0f + (h - 40.0f) * 0.55f;
     h = lerpf(static_cast<float>(sea_) - 12.0f, h, land);
     // Rios: margens rebaixadas e leito abaixo do mar.
@@ -162,17 +163,25 @@ IslandPoi IslandGenerator::basePoi(int cx, int cz) const {
     float nh = naturalHeight(px, pz);
     if (nh < sea_ + 1.6f || nh > sea_ + 24.0f) return p;
     p.center.y = clampf(std::round(nh), sea_ + 2.0f, sea_ + 20.0f);
-    p.exists = ((h >> 8) & 0xFFFF) < static_cast<uint32_t>(0.6f * 65536.0f);
+    p.exists = ((h >> 8) & 0xFFFF) < static_cast<uint32_t>(0.66f * 65536.0f);
+    // Quase metade dos locais são construções: casas, vilarejos, igrejas, postos, prédios e celeiros.
     int roll = static_cast<int>((h >> 24) % 100u);
-    if (roll < 18) p.kind = K_FIRE;
-    else if (roll < 35) p.kind = K_RUINS;
-    else if (roll < 47) p.kind = K_GRAVEYARD;
-    else if (roll < 61) p.kind = K_DEPOT;
-    else if (roll < 72) p.kind = K_FARM;
-    else if (roll < 86) p.kind = K_TOWER;
-    else p.kind = K_OUTPOST;
+    if (roll < 10) p.kind = K_FIRE;
+    else if (roll < 19) p.kind = K_RUINS;
+    else if (roll < 26) p.kind = K_GRAVEYARD;
+    else if (roll < 34) p.kind = K_DEPOT;
+    else if (roll < 40) p.kind = K_FARM;
+    else if (roll < 49) p.kind = K_TOWER;
+    else if (roll < 56) p.kind = K_OUTPOST;
+    else if (roll < 71) p.kind = K_HOUSE;
+    else if (roll < 79) p.kind = K_VILLAGE;
+    else if (roll < 84) p.kind = K_CHURCH;
+    else if (roll < 91) p.kind = K_GAS;
+    else if (roll < 96) p.kind = K_APARTMENT;
+    else p.kind = K_BARN;
     p.radius = 6.5f + hashFloat(cx, cz, seed_ + 3) * 2.0f;
     if (p.kind == K_TOWER || p.kind == K_OUTPOST) p.radius = std::max(p.radius, 7.5f);
+    if (isBuildingKind(p.kind)) p.radius = buildingRadius(p.kind);
     return p;
 }
 
@@ -254,7 +263,7 @@ void IslandGenerator::chooseLayout() {
         float ang = rng.range(0, kTwoPi), dist = (r0 + r1) * 0.5f;
         return findNear(s.x + std::cos(ang) * dist, s.y + std::sin(ang) * dist, used);
     };
-    for (int i = 0; i < kNestCount; ++i) {
+    for (int i = 0; i < (objectives_ ? kNestCount : 0); ++i) {
         int id = pick(ranges[i][0] * scale, ranges[i][1] * scale, 0.9f);
         if (id < 0) continue;
         used.push_back(id);
@@ -262,7 +271,7 @@ void IslandGenerator::chooseLayout() {
         IslandPoi b = basePoi(id % kIslandCells, id / kIslandCells);
         dirs.push_back(Vec2(b.center.x - s.x, b.center.z - s.y));
     }
-    portal_ = pick(350 * scale, 720 * scale, 0.7f);
+    portal_ = objectives_ ? pick(350 * scale, 720 * scale, 0.7f) : -1;
     if (portal_ >= 0) {
         used.push_back(portal_);
         roles_[portal_] = ROLE_PORTAL;
@@ -442,11 +451,11 @@ void IslandGenerator::generate(Chunk& chunk, int height) {
 
     // 2) Árvores: uma por célula 5x5 no máximo, determinística (copas cruzam a borda do chunk).
     const int tc = 5;
-    for (int tz = floorDiv(z0 - 4, tc); tz <= floorDiv(z0 + kChunkSize + 3, tc); ++tz) {
-        for (int tx = floorDiv(x0 - 4, tc); tx <= floorDiv(x0 + kChunkSize + 3, tc); ++tx) {
+    for (int tz = floorDiv(z0 - 6, tc); tz <= floorDiv(z0 + kChunkSize + 5, tc); ++tz) {
+        for (int tx = floorDiv(x0 - 6, tc); tx <= floorDiv(x0 + kChunkSize + 5, tc); ++tx) {
             uint32_t h = hash2(tx, tz, seed_ + 404);
             int x = tx * tc + static_cast<int>((h >> 4) % tc), z = tz * tc + static_cast<int>((h >> 12) % tc);
-            if (x < x0 - 3 || x > x0 + kChunkSize + 2 || z < z0 - 3 || z > z0 + kChunkSize + 2) continue;
+            if (x < x0 - 5 || x > x0 + kChunkSize + 4 || z < z0 - 5 || z > z0 + kChunkSize + 4) continue;
             if (x < 2 || z < 2 || x >= kIslandSize - 2 || z >= kIslandSize - 2) continue;
             float roll = static_cast<float>((h >> 20) & 4095u) / 4096.0f;
             if (roll > 0.9f) continue;
@@ -458,7 +467,8 @@ void IslandGenerator::generate(Chunk& chunk, int height) {
             if (c.water || c.top <= sea_ + 2 || c.top >= height - 16 || c.nearPath || c.nearPoi || c.river > 0.01f) continue;
             if (t.id != 1 && c.top > 37) continue;
             Rng rng(hash2(x, z, seed_ + 505));
-            placeTree(sink, t.tree, x, c.top, z, rng);
+            TreeKind kind = pickTreeKind(t, x, z, seed_, c.top <= sea_ + 4);
+            placeTree(sink, kind, x, c.top, z, rng);
         }
     }
 
@@ -575,7 +585,7 @@ uint32_t IslandGenerator::mapColor(int x, int z) {
         col = shadeColor(col, clampf(0.84f + (c.top - sea_) * 0.011f + clampf(slope * 0.06f, -0.18f, 0.18f), 0.5f, 1.3f));
     }
     if (p.exists && distXZ(p.center, Vec3(x + 0.5f, 0, z + 0.5f)) < p.radius) {
-        col = p.role == ROLE_NEST ? 0x8E2A6A : (p.role == ROLE_PORTAL ? 0x6A3FB0 : 0x9A7A4E);
+        col = p.role == ROLE_NEST ? 0x8E2A6A : (p.role == ROLE_PORTAL ? 0x6A3FB0 : (isBuildingKind(p.kind) ? 0xB0644A : 0x9A7A4E));
     }
     return col;
 }
