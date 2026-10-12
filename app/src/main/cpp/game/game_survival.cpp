@@ -134,10 +134,10 @@ void Game::updateWaves(float dt) {
         waveState_ = 2;
         waveTimer_ = kIntermission;
         score_ += 100 * wave_ + (waveBig_ ? 250 : 0);
-        health_ = std::min(maxHealth_, health_ + maxHealth_ * 0.15f);
+        health_ = std::min(maxHealth_, health_ + maxHealth_ * 0.08f);
         emit(EV_WAVE, wave_, waveBig_ ? 1 : 0, 2);
         emitSound(SND_CHEST, player_.position, 1.0f);
-        static const int kReward[] = {IT_BANDAGE, IT_GRENADE, IT_MEDKIT, IT_MOLOTOV, IT_ADRENALINE, IT_FIRE_AMMO, IT_ARMOR, IT_ANTIDOTE};
+        static const int kReward[] = {IT_BANDAGE, IT_GRENADE, IT_GRENADE, IT_MOLOTOV, IT_ADRENALINE, IT_FIRE_AMMO, IT_ARMOR, IT_ANTIDOTE};
         Vec3 at = player_.position + forwardFromYaw(camYaw_) * 2.5f + Vec3(0, 1.5f, 0);
         dropItem(at, kReward[rng_.rangeInt(0, 7)], 1);
         if (waveBig_) {

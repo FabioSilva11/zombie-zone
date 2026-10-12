@@ -307,9 +307,11 @@ void Game::updateChests(float dt) {
             int left = addItem(IT_GRENADE, 1);
             if (left > 0) dropItem(c.pos + Vec3(0, 1.0f, 0), IT_GRENADE, left);
         }
-        static const int kChestLoot[] = {IT_BANDAGE, IT_BANDAGE, IT_MEDKIT, IT_MOLOTOV, IT_ADRENALINE, IT_ANTIDOTE, IT_FIRE_AMMO, IT_ARMOR};
-        int extra = rng_.chance(0.5f) ? 2 : 1;
+        // Cura é rara no baú: kit médico só às vezes e no máximo uma bandagem.
+        static const int kChestLoot[] = {IT_BANDAGE, IT_MOLOTOV, IT_GRENADE, IT_ADRENALINE, IT_ANTIDOTE, IT_FIRE_AMMO, IT_ARMOR, IT_MOLOTOV};
+        int extra = rng_.chance(0.25f) ? 2 : 1;
         for (int k = 0; k < extra; ++k) dropItem(c.pos + Vec3(0, 1.0f, 0), kChestLoot[rng_.rangeInt(0, 7)], 1);
+        if (rng_.chance(0.08f * config_.luck)) dropItem(c.pos + Vec3(0, 1.0f, 0), IT_MEDKIT, 1);
         if (rng_.chance(0.05f * config_.luck)) {
             static const int kWeaponsLoot[] = {IT_PISTOL, IT_SHOTGUN, IT_SMG, IT_SMG, IT_SHOTGUN, IT_SNIPER, IT_LMG, IT_FLAMER, IT_LAUNCHER};
             int wpn = kWeaponsLoot[rng_.rangeInt(0, 8)];
@@ -319,7 +321,7 @@ void Game::updateChests(float dt) {
         emitSound(SND_CHEST, c.pos, 1.0f);
         spawnBurst(c.pos + Vec3(0, 0.8f, 0), {1.0f, 0.85f, 0.3f, 1.0f}, 24, 4.0f, 0.14f, true, 4.0f);
         spawnBurst(c.pos + Vec3(0, 0.8f, 0), {0.35f, 0.95f, 1.0f, 1.0f}, 10, 3.0f, 0.12f, true, 4.0f);
-        if (rng_.chance(0.45f)) {
+        if (rng_.chance(0.15f)) {
             Pickup h;
             h.type = 1;
             h.position = c.pos + Vec3(0, 1.0f, 0);

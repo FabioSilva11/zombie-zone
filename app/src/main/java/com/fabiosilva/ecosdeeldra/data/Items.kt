@@ -46,9 +46,9 @@ object Items {
         ItemDef(LMG, "Metralhadora", "Pente de 90 balas que atravessam; pesada.", ItemKind.WEAPON, 0xFFC9D16A.toInt(), 900, 9, "17", "12/s", 90),
         ItemDef(FLAMER, "Lança-chamas", "Jato de fogo de curto alcance que incendeia tudo.", ItemKind.WEAPON, 0xFFFF7A3D.toInt(), 1100, 12, "9+fogo", "14/s", 80),
         ItemDef(LAUNCHER, "Lança-granadas", "Disparos explosivos em linha reta.", ItemKind.WEAPON, 0xFFB6FF5C.toInt(), 1500, 15, "160", "1/s", 3),
-        ItemDef(MEDKIT, "Kit médico", "Recupera 55% da vida e estanca sangramento.", ItemKind.HEAL, 0xFFFF6B6B.toInt(), 45),
-        ItemDef(BANDAGE, "Bandagem", "Recupera 20% da vida e estanca sangramento.", ItemKind.HEAL, 0xFFF2DDB8.toInt(), 15),
-        ItemDef(ANTIDOTE, "Antídoto", "Cura veneno, lentidão e fogo (+10% de vida).", ItemKind.HEAL, 0xFF8CFF6B.toInt(), 20),
+        ItemDef(MEDKIT, "Kit médico", "Recupera 40% da vida e estanca sangramento. Espera de 8 s entre curas.", ItemKind.HEAL, 0xFFFF6B6B.toInt(), 90),
+        ItemDef(BANDAGE, "Bandagem", "Recupera 12% da vida e estanca sangramento. Espera de 8 s entre curas.", ItemKind.HEAL, 0xFFF2DDB8.toInt(), 30),
+        ItemDef(ANTIDOTE, "Antídoto", "Cura veneno, lentidão e fogo (não recupera vida).", ItemKind.HEAL, 0xFF8CFF6B.toInt(), 30),
         ItemDef(ADRENALINE, "Adrenalina", "20 s: +30% de velocidade, recarga e tiro mais rápidos.", ItemKind.BUFF, 0xFF4CE8FF.toInt(), 35),
         ItemDef(FIRE_AMMO, "Munição incendiária", "45 s de tiros com +50% de dano.", ItemKind.BUFF, 0xFFFFA53D.toInt(), 30),
         ItemDef(ARMOR, "Colete", "Absorve 70% do dano até se desgastar.", ItemKind.BUFF, 0xFF9DB0D8.toInt(), 60),
@@ -66,9 +66,9 @@ object Items {
 
     /** Igual a itemMaxStack() no C++. */
     fun maxStack(id: Int, explosives: Int = 0): Int = when (id) {
-        MEDKIT -> 5
-        BANDAGE -> 10
-        ANTIDOTE -> 5
+        MEDKIT -> 3
+        BANDAGE -> 5
+        ANTIDOTE -> 3
         ADRENALINE -> 5
         FIRE_AMMO -> 5
         ARMOR -> 3
@@ -219,7 +219,7 @@ class Inventory {
             add(Items.RIFLE, 1)
             add(Items.PISTOL, 1)
             add(Items.GRENADE, 3)
-            add(Items.BANDAGE, 3)
+            add(Items.BANDAGE, 2)
             add(Items.MEDKIT, 1)
             weaponSlot = 0
         }

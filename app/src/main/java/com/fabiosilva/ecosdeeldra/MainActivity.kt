@@ -25,8 +25,7 @@ import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
 import com.fabiosilva.ecosdeeldra.data.SaveStore
-import com.fabiosilva.ecosdeeldra.data.SkinDef
-import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.Cosmetic
 import com.fabiosilva.ecosdeeldra.data.SurvivalResult
 import com.fabiosilva.ecosdeeldra.data.Upgrades
 import com.fabiosilva.ecosdeeldra.data.ZombieKinds
@@ -43,6 +42,7 @@ import com.fabiosilva.ecosdeeldra.notify.Reminders
 import com.fabiosilva.ecosdeeldra.ui.DefeatOverlay
 import com.fabiosilva.ecosdeeldra.ui.HomeScreen
 import com.fabiosilva.ecosdeeldra.ui.HudEditorScreen
+import com.fabiosilva.ecosdeeldra.ui.CharacterScreen
 import com.fabiosilva.ecosdeeldra.ui.HudView
 import com.fabiosilva.ecosdeeldra.ui.InventoryScreen
 import com.fabiosilva.ecosdeeldra.ui.LoadingOverlay
@@ -55,7 +55,6 @@ import com.fabiosilva.ecosdeeldra.ui.PvpResultOverlay
 import com.fabiosilva.ecosdeeldra.ui.PvpScreen
 import com.fabiosilva.ecosdeeldra.ui.Popup
 import com.fabiosilva.ecosdeeldra.ui.SettingsScreen
-import com.fabiosilva.ecosdeeldra.ui.SkinsScreen
 import com.fabiosilva.ecosdeeldra.ui.StagesScreen
 import com.fabiosilva.ecosdeeldra.ui.StoryOverlay
 import com.fabiosilva.ecosdeeldra.ui.SurvivalDefeatOverlay
@@ -175,7 +174,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         })
 
         val newDay = Rules.onAppOpen(progress, today())
-        Rules.refreshSkinUnlocks(progress)
+        Rules.refreshCosmeticUnlocks(progress)
         store.save(progress)
         AdConsent.gather(this) {
             ads.load()
@@ -332,19 +331,19 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         }
     }
 
-    /** Libera skins por objetivo e celebra cada uma. */
+    /** Libera visuais por objetivo e celebra cada um. */
     fun checkUnlocks() {
-        val unlocked = Rules.refreshSkinUnlocks(progress)
+        val unlocked = Rules.refreshCosmeticUnlocks(progress)
         if (unlocked.isEmpty()) return
         save()
         announceUnlocks(unlocked)
     }
 
-    private fun announceUnlocks(list: List<SkinDef>) {
+    private fun announceUnlocks(list: List<Cosmetic>) {
         if (list.isEmpty()) return
         audio.playUi("unlock", 1f)
         val names = list.joinToString(", ") { it.name }
-        Popup.show(this, "Nova skin liberada!", "$names agora faz parte do seu esquadrão. Equipe na tela de Heróis.", "VER HERÓIS", "DEPOIS") { ok ->
+        Popup.show(this, "Novo visual liberado!", "$names já pode ser usado no editor de PERSONAGEM.", "VER PERSONAGEM", "DEPOIS") { ok ->
             if (ok && !inMission) showSkins()
         }
     }
@@ -361,8 +360,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         closeOverlay()
         hud.visibility = View.GONE
         audio.setMusic(GameAudio.Music.MENU)
-        val skin = progress.selectedSkin
-        engine { NativeBridge.enterLobby(skin, 0) }
+        val look = progress.lookCode
+        engine { NativeBridge.enterLobby(look, 0) }
         showScreen(HomeScreen(this))
     }
 
@@ -370,15 +369,18 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         closeOverlay()
         hud.visibility = View.GONE
         audio.setMusic(GameAudio.Music.MENU)
-        val skin = progress.selectedSkin
-        engine { NativeBridge.enterLobby(skin, 0) }
+        val look = progress.lookCode
+        engine { NativeBridge.enterLobby(look, 0) }
         showScreen(StagesScreen(this))
     }
 
+    /** Editor de personagem (estilo Minecraft). */
     fun showSkins() {
-        val skin = progress.selectedSkin
-        engine { NativeBridge.enterLobby(skin, 1) }
-        showScreen(SkinsScreen(this))
+        closeOverlay()
+        hud.visibility = View.GONE
+        val look = progress.lookCode
+        engine { NativeBridge.enterLobby(look, 1) }
+        showScreen(CharacterScreen(this))
     }
 
     fun showMissions() = showScreen(MissionsScreen(this))
@@ -387,8 +389,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         closeOverlay()
         hud.visibility = View.GONE
         audio.setMusic(GameAudio.Music.MENU)
-        val skin = progress.selectedSkin
-        engine { NativeBridge.enterLobby(skin, 0) }
+        val look = progress.lookCode
+        engine { NativeBridge.enterLobby(look, 0) }
         showScreen(SurvivalScreen(this))
     }
 
@@ -396,14 +398,14 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     fun showInventory(tab: Int, back: () -> Unit = { showHome() }) {
         closeOverlay()
         hud.visibility = View.GONE
-        val skin = progress.selectedSkin
-        engine { NativeBridge.enterLobby(skin, 2) }
+        val look = progress.lookCode
+        engine { NativeBridge.enterLobby(look, 0) }
         showScreen(InventoryScreen(this, progress.inventory, inMatch = false, initialTab = tab) { back() })
     }
     fun showUpgrades() = showScreen(UpgradesScreen(this))
     fun showSettings() = showScreen(SettingsScreen(this, fromPause = false))
 
-    fun previewSkin(index: Int) = engine { NativeBridge.setPreviewSkin(index) }
+    fun previewLook(code: Int) = engine { NativeBridge.setPreviewSkin(code) }
     fun rotatePreview(dx: Float) = NativeBridge.rotatePreview(dx)
 
     fun showDailyReward(onDone: (() -> Unit)? = null) {
@@ -412,7 +414,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val day = progress.calendarClaims % 7 + 1
         Popup.show(
             this, "Prêmio diário • Dia $day",
-            "Volte todos os dias para ganhar mais! Hoje: ◆ $reward diamantes.\nEntrar em 2, 5 e 7 dias diferentes libera skins exclusivas.",
+            "Volte todos os dias para ganhar mais! Hoje: ◆ $reward diamantes.\nEntrar em 2, 5 e 7 dias diferentes libera visuais exclusivos para o seu personagem.",
             "RESGATAR",
         ) {
             val got = Rules.claimCalendar(progress, today())
@@ -457,7 +459,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val diff = if (survivalMode) Campaign.survivalDifficulty(p) else Campaign.difficulty(stage.number, p)
         val config = FloatArray(Cfg.COUNT)
         config[Cfg.STAGE] = stage.number.toFloat()
-        config[Cfg.SKIN] = p.selectedSkin.toFloat()
+        config[Cfg.SKIN] = 0f  // a aparência vai à parte (32 bits não cabem num float)
+        val look = p.lookCode
         config[Cfg.ZOMBIES] = diff.zombieCount.toFloat()
         config[Cfg.ZOMBIE_HP] = diff.zombieHealth
         config[Cfg.ZOMBIE_DMG] = diff.zombieDamage
@@ -503,13 +506,13 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         homeScreen = null
         loading = (if (survivalMode) LoadingOverlay(this, "SOBREVIVÊNCIA • ONDAS INFINITAS", "Ilha aleatória", Palette.gold, stage.number) else LoadingOverlay(this, stage)).also { showOverlay(it) }
         hud.reset()
-        hud.playerName = Skins.get(p.selectedSkin).name
+        hud.playerName = p.currentHero.name
         hud.applySettings(p.settings.leftHanded, p.settings.vibration, p.settings.showFps, p.settings.hudLayout, p.settings.hudOpacity)
         audio.setMusic(GameAudio.Music.BATTLE)
         // Deixa a tela de carregamento aparecer antes de gerar o mundo.
         surface.postDelayed({
             engine {
-                NativeBridge.startMission(config)
+                NativeBridge.startMission(config, look)
                 NativeBridge.setInventory(inventory)
             }
         }, 120)
@@ -629,7 +632,9 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             }
             Ev.ITEM_USED -> {
                 val def = Items.get(a)
-                if (b == 0) {
+                if (b == 2) {
+                    hud.message("AGUARDE ${c}s PARA SE CURAR DE NOVO", Palette.muted)
+                } else if (b == 0) {
                     hud.message(
                         when (a) {
                             Items.ARMOR -> "O COLETE JÁ ESTÁ INTEIRO"
@@ -750,7 +755,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val stage = Campaign.stage(missionStage)
         val result = readResult(victory)
         val summary = Rules.applyResult(progress, stage, result)
-        val unlocked = Rules.refreshSkinUnlocks(progress)
+        val unlocked = Rules.refreshCosmeticUnlocks(progress)
         progress.missionsSinceInterstitial += 1
         save()
         audio.playUi(if (victory) "victory" else "defeat", 1f)
@@ -928,7 +933,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         missionEnded = true
         syncInventoryFromEngine()
         val result = readSurvivalResult()
-        val name = progress.settings.playerName.ifBlank { Skins.get(progress.selectedSkin).name }
+        val name = progress.currentHero.name
         val summary = Rules.applySurvivalResult(progress, name, today(), result)
         progress.missionsSinceInterstitial += 1
         save()
@@ -937,7 +942,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     fun finishSurvival() {
         val (result, summary) = recordSurvival() ?: return
-        val unlocked = Rules.refreshSkinUnlocks(progress)
+        val unlocked = Rules.refreshCosmeticUnlocks(progress)
         save()
         defeatShown = false
         hud.visibility = View.GONE
@@ -1040,13 +1045,13 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         }
         hud.visibility = View.GONE
         audio.setMusic(GameAudio.Music.MENU)
-        val skin = progress.selectedSkin
-        engine { NativeBridge.enterLobby(skin, 0) }
+        val look = progress.lookCode
+        engine { NativeBridge.enterLobby(look, 0) }
         showScreen(PvpScreen(this, lanLobby!!))
     }
 
     fun closePvp() {
-        if (inPvp) engine { NativeBridge.enterLobby(progress.selectedSkin, 0) }
+        if (inPvp) engine { NativeBridge.enterLobby(progress.lookCode, 0) }
         inPvp = false
         pvpEnded = false
         lanLobby?.close()
@@ -1069,8 +1074,13 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         cfg[PvpCfg.TIME_LIMIT] = info.rules.timeMinutes * 60f
         cfg[PvpCfg.SENSITIVITY] = progress.settings.sensitivity
         cfg[PvpCfg.INVERT_Y] = if (progress.settings.invertY) 1f else 0f
+        // Vagas ocupadas (255 = vazia) e a aparência de cada jogador.
         for (i in 0 until 8) cfg[PvpCfg.SKINS + i] = 255f
-        info.players.forEach { cfg[PvpCfg.SKINS + it.id] = it.skin.toFloat() }
+        val looks = IntArray(8)
+        info.players.forEach {
+            cfg[PvpCfg.SKINS + it.id] = 0f
+            looks[it.id] = it.skin
+        }
 
         uiLayer.removeAllViews()
         currentScreen = null
@@ -1084,7 +1094,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         hud.applySettings(progress.settings.leftHanded, progress.settings.vibration, progress.settings.showFps, progress.settings.hudLayout, progress.settings.hudOpacity)
         audio.setMusic(GameAudio.Music.BATTLE)
         val host = info.hostAddress
-        surface.postDelayed({ engine { NativeBridge.startPvp(cfg, host) } }, 120)
+        surface.postDelayed({ engine { NativeBridge.startPvp(cfg, host, looks) } }, 120)
     }
 
     private fun pvpName(id: Int): String = pvpInfo?.players?.firstOrNull { it.id == id }?.name ?: "Jogador ${id + 1}"
@@ -1170,7 +1180,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         } else {
             lobby?.leaveRoom()
             lastLobbyState = null
-            engine { NativeBridge.enterLobby(progress.selectedSkin, 0) }
+            engine { NativeBridge.enterLobby(progress.lookCode, 0) }
             showPvp()
         }
     }

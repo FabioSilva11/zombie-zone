@@ -40,20 +40,20 @@ JNIEXPORT void JNICALL ZZ_FN(surfaceChanged)(JNIEnv*, jobject, jint width, jint 
 
 JNIEXPORT void JNICALL ZZ_FN(drawFrame)(JNIEnv*, jobject, jlong nanos) { game().frame(static_cast<double>(nanos) * 1e-9); }
 
-JNIEXPORT void JNICALL ZZ_FN(enterLobby)(JNIEnv*, jobject, jint skin, jint screen) { game().enterLobby(skin, screen); }
+JNIEXPORT void JNICALL ZZ_FN(enterLobby)(JNIEnv*, jobject, jint look, jint screen) { game().enterLobby(static_cast<uint32_t>(look), screen); }
 
-JNIEXPORT void JNICALL ZZ_FN(setPreviewSkin)(JNIEnv*, jobject, jint skin) { game().setPreviewSkin(skin); }
+JNIEXPORT void JNICALL ZZ_FN(setPreviewSkin)(JNIEnv*, jobject, jint look) { game().setPreviewSkin(static_cast<uint32_t>(look)); }
 
 JNIEXPORT void JNICALL ZZ_FN(rotatePreview)(JNIEnv*, jobject, jfloat dx) { game().rotatePreview(dx); }
 
-JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray values) {
+JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray values, jint look) {
     using namespace zz::proto;
     float c[C_COUNT] = {0};
     jsize n = std::min<jsize>(env->GetArrayLength(values), C_COUNT);
     env->GetFloatArrayRegion(values, 0, n, c);
     MissionConfig cfg;
     cfg.stage = static_cast<int>(c[C_STAGE]);
-    cfg.skin = static_cast<int>(c[C_SKIN]);
+    cfg.skin = static_cast<uint32_t>(look);
     cfg.zombieCount = static_cast<int>(c[C_ZOMBIES]);
     cfg.zombieHealth = c[C_ZOMBIE_HP];
     cfg.zombieDamage = c[C_ZOMBIE_DMG];
@@ -82,7 +82,7 @@ JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray val
     game().startMission(cfg);
 }
 
-JNIEXPORT void JNICALL ZZ_FN(startPvp)(JNIEnv* env, jobject, jfloatArray values, jstring hostIp) {
+JNIEXPORT void JNICALL ZZ_FN(startPvp)(JNIEnv* env, jobject, jfloatArray values, jstring hostIp, jintArray looks) {
     using namespace zz::proto;
     float c[P_COUNT] = {0};
     jsize n = std::min<jsize>(env->GetArrayLength(values), P_COUNT);
@@ -96,6 +96,12 @@ JNIEXPORT void JNICALL ZZ_FN(startPvp)(JNIEnv* env, jobject, jfloatArray values,
     cfg.sensitivity = c[P_SENSITIVITY];
     cfg.invertY = c[P_INVERT_Y] > 0.5f;
     for (int i = 0; i < zz::kMaxNetPlayers; ++i) cfg.skins[i] = static_cast<uint8_t>(c[P_SKINS + i]);
+    if (looks) {
+        jint l[zz::kMaxNetPlayers] = {0};
+        jsize ln = std::min<jsize>(env->GetArrayLength(looks), zz::kMaxNetPlayers);
+        env->GetIntArrayRegion(looks, 0, ln, l);
+        for (int i = 0; i < ln; ++i) cfg.looks[i] = static_cast<uint32_t>(l[i]);
+    }
     if (hostIp) {
         const char* ip = env->GetStringUTFChars(hostIp, nullptr);
         cfg.hostIp = ip ? ip : "";

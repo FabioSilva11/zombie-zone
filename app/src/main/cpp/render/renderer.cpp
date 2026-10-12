@@ -236,8 +236,12 @@ void main() {
 #else
     float sh = 1.0;
 #endif
-    vec3 light = u_ambient + u_sunColor * ndl * sh + vec3(0.06) * max(-n.y, 0.0) + pointLights(v_world);
+    // Luzes pontuais mais fracas nos modelos (eles ficam colados nas lanternas) e um teto suave
+    // para roupas claras não estourarem nem acenderem o bloom do modo cinematográfico.
+    vec3 light = u_ambient + u_sunColor * ndl * sh + vec3(0.06) * max(-n.y, 0.0) + pointLights(v_world) * 0.7;
+    light = min(light, vec3(1.25));
     vec3 color = base.rgb * light;
+    color = mix(min(color, vec3(0.9)), color, step(0.05, u_emissive + u_flash));
     color = mix(color, base.rgb, u_emissive);
     color = mix(color, u_flashColor, u_flash);
     float fog = smoothstep(u_fogRange.x, u_fogRange.y, distance(v_world, u_camPos));
@@ -412,7 +416,8 @@ void main() {
            + texture(u_tex, v_uv + u_texel * vec2(-1.0, 1.0)).rgb + texture(u_tex, v_uv + u_texel * vec2(1.0, 1.0)).rgb;
     c *= 0.25;
     float l = max(c.r, max(c.g, c.b));
-    o_color = vec4(c * smoothstep(0.62, 0.96, l), 1.0);
+    // Só o que é realmente brilhante (fogo, lanternas, disparos) gera bloom.
+    o_color = vec4(c * smoothstep(0.82, 1.0, l), 1.0);
 }
 )";
 
@@ -745,12 +750,26 @@ void Renderer::ensureCharacter(CharacterAsset& asset) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, asset.image.width, asset.image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, asset.image.rgba.data());
         glGenerateMipmap(GL_TEXTURE_2D);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        // Os UVs dos modelos Kenney saem de [0,1] e dependem de repetição.
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        // Pixel art: de perto cada pixel da pele fica nítido (estilo Minecraft).
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, asset.pixelArt ? GL_NEAREST : GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, asset.pixelArt ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, asset.pixelArt ? GL_CLAMP_TO_EDGE : GL_REPEAT);
     }
     asset.contextId = contextId_;
+}
+
+void Renderer::releaseCharacter(CharacterAsset& asset) {
+    if (asset.contextId == contextId_) {
+        for (auto& m : asset.meshes) {
+            glDeleteVertexArrays(1, &m.vao);
+            glDeleteBuffers(1, &m.vbo);
+            glDeleteBuffers(1, &m.ibo);
+        }
+        if (asset.texture) glDeleteTextures(1, &asset.texture);
+    }
+    asset.meshes.clear();
+    asset.texture = 0;
+    asset.contextId = -1;
 }
 
 void Renderer::syncChunks(World& world) {

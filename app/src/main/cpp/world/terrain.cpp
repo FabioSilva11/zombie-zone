@@ -81,7 +81,7 @@ MapShape makeShape(MapStyle style, int size, Rng& rng) {
     s.nx = std::cos(a);
     s.nz = std::sin(a);
     s.offset = rng.range(-0.08f, 0.08f) * size;
-    s.terrace = rng.range(2.0f, 2.8f);  // degraus escaláveis
+    s.terrace = 1.0f;  // degraus de um bloco: nada de paredes mais altas que o jogador
     return s;
 }
 

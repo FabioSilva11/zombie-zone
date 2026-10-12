@@ -20,7 +20,6 @@ constexpr float kGravity = 28.0f;
 constexpr float kJumpVelocity = 8.6f;
 constexpr float kStepHeight = 1.05f;
 constexpr float kPlayerSpeed = 4.5f;
-constexpr int kSkinCount = 18;
 
 bool rayBox(const Vec3& o, const Vec3& d, const Vec3& mn, const Vec3& mx, float& tHit) {
     float tmin = 0, tmax = 1e9f;
@@ -59,22 +58,25 @@ void Game::onSurfaceCreated() {
 
 void Game::onSurfaceChanged(int width, int height) { renderer_.onSurfaceChanged(width, height); }
 
-CharacterAsset* Game::character(int skin) {
-    skin = std::max(0, std::min(kSkinCount - 1, skin));
-    auto it = characters_.find(skin);
+// Personagem de blocos gerado a partir da aparência (cache por código).
+CharacterAsset* Game::character(uint32_t look) {
+    auto it = characters_.find(look);
     if (it != characters_.end()) return it->second.get();
-    auto asset = std::make_unique<CharacterAsset>();
-    char path[64];
-    std::snprintf(path, sizeof(path), "characters/character-%c.glb", 'a' + skin);
-    std::vector<uint8_t> data;
-    if (!platform::readAsset(path, data) || !asset->model.loadGlb(data)) {
-        LOGE("Falha ao carregar %s", path);
-        return nullptr;
+    // No editor cada ajuste cria uma aparência nova: limpa o cache no lobby (sem zumbis em cena).
+    if (characters_.size() > 40 && mode_ == Mode::Lobby) {
+        for (auto i = characters_.begin(); i != characters_.end();) {
+            if (i->second.get() == playerAsset_) {
+                ++i;
+                continue;
+            }
+            renderer_.releaseCharacter(*i->second);
+            i = characters_.erase(i);
+        }
     }
-    asset->texturePath = "characters/" + asset->model.textureUri();
-    if (!platform::decodeAssetImage(asset->texturePath, 512, asset->image)) LOGW("Textura ausente: %s", asset->texturePath.c_str());
+    auto asset = std::make_unique<CharacterAsset>();
+    buildBlockyCharacter(look, *asset);
     CharacterAsset* raw = asset.get();
-    characters_[skin] = std::move(asset);
+    characters_[look] = std::move(asset);
     return raw;
 }
 
@@ -97,7 +99,7 @@ void Game::emitSound(int sound, const Vec3& at, float volume) {
 
 // ----------------------------------------------------------------------------- comandos
 
-void Game::enterLobby(int skin, int screen) {
+void Game::enterLobby(uint32_t skin, int screen) {
     stopPvp();
     bool regenerate = mode_ != Mode::Lobby;
     mode_ = Mode::Lobby;
@@ -132,15 +134,17 @@ void Game::enterLobby(int skin, int screen) {
     playerAnim_ = Animator();
     if (playerAsset_) playerAnim_.play(playerAsset_->model.clipIndex("idle"), true, 0);
     dead_ = false;
-    lobbyEmoteTimer_ = 4.0f;
+    lobbyEmoteTimer_ = 1.2f;
+    lobbyEmoteCount_ = 0;
 }
 
-void Game::setPreviewSkin(int skin) {
+void Game::setPreviewSkin(uint32_t skin) {
     playerAsset_ = character(skin);
     playerAnim_ = Animator();
     if (playerAsset_) {
-        playerAnim_.play(playerAsset_->model.clipIndex("emote-yes"), false, 0);
+        playerAnim_.play(playerAsset_->model.clipIndex("wave"), false, 0);
         lobbyEmoteTimer_ = 6.0f;
+        lobbyEmoteCount_ = 1;  // depois do aceno vem a dança
     }
 }
 
@@ -321,9 +325,11 @@ void Game::updateLobby(float dt) {
         lobbyEmoteTimer_ -= dt;
         if (playerAnim_.finished(playerAsset_->model)) playerAnim_.play(playerAsset_->model.clipIndex("idle"), true, 0.25f);
         if (lobbyEmoteTimer_ <= 0) {
-            const char* emotes[] = {"emote-yes", "interact-right", "pick-up"};
-            playerAnim_.play(playerAsset_->model.clipIndex(emotes[rng_.rangeInt(0, 2)]), false, 0.2f);
-            lobbyEmoteTimer_ = rng_.range(7.0f, 11.0f);
+            // Sem arma no menu: o herói alterna entre acenar e dançar, com pausas curtas.
+            int clip = playerAsset_->model.clipIndex(lobbyEmoteCount_++ % 2 == 0 ? "wave" : "dance");
+            playerAnim_.play(clip, false, 0.25f);
+            float length = clip >= 0 ? playerAsset_->model.clips()[static_cast<size_t>(clip)].duration : 3.0f;
+            lobbyEmoteTimer_ = length + rng_.range(2.5f, 4.5f);
         }
     }
     updateEffects(dt);
@@ -331,8 +337,9 @@ void Game::updateLobby(float dt) {
     Vec3 c = layout_.start;
     Vec3 target, eye;
     if (lobbyScreen_ == 1) {
-        target = c + Vec3(0.95f, 1.0f, 0);
-        eye = target + Vec3(0.0f, 0.35f, 3.5f);
+        // Editor de personagem: herói inteiro na área livre à esquerda do painel.
+        target = c + Vec3(2.35f, 0.95f, 0);
+        eye = target + Vec3(0.0f, 0.3f, 4.4f);
     } else if (lobbyScreen_ == 2) {
         // Inventário: o herói aparece no painel "Personagem" à esquerda da tela.
         target = c + Vec3(5.0f, 0.62f, 0);
@@ -658,10 +665,16 @@ void Game::updatePlayer(float dt, const InputState& in) {
     }
 
     float mx = dead_ || victory_ ? 0 : in.moveX, my = dead_ || victory_ ? 0 : in.moveY;
+    // Botão CORRER: o personagem sai correndo para a frente sozinho; o joystick ainda dirige,
+    // e puxá-lo para trás (ou tocar de novo no botão) encerra a corrida.
+    if (dead_ || victory_ || (my < -0.5f && -my > std::fabs(mx))) sprintLock_ = false;
+    if (sprintLock_ && mx * mx + my * my < 0.01f) {
+        mx = 0;
+        my = 1;
+    }
     float mag = std::min(1.0f, std::sqrt(mx * mx + my * my));
     // Curva do analógico: precisão em toques leves, velocidade total no fim do curso.
     float response = mag > 1e-3f ? std::pow(mag, 1.25f) : 0.0f;
-    if (mag < 0.1f) sprintLock_ = false;
     bool wantSprint = mag > 0.9f || (sprintLock_ && mag > 0.35f);
     sprinting_ = wantSprint && !crouching_ && aimBlend_ < 0.3f && !in.fire && !firingNow_ && slowed_ <= 0 && meleeTime_ < 0;
     if (sprinting_ && sprintLock_) response = 1.0f;
@@ -766,6 +779,10 @@ void Game::updatePlayer(float dt, const InputState& in) {
     float lean = clampf(turnRate * horizontal * 0.012f, -0.16f, 0.16f) * (crouching_ ? 0.3f : 1.0f);
     leanRoll_ = lerpf(leanRoll_, player_.onGround ? lean : 0.0f, damp(8.0f, dt));
 
+    // Correndo a arma vai para as costas; parar, mirar ou atirar a traz de volta.
+    const bool holster = sprinting_ && meleeTime_ < 0 && reloadTimer_ <= 0 && !player_.inWater;
+    armedBlend_ = lerpf(armedBlend_, holster ? 0.0f : 1.0f, damp(holster ? 7.0f : 16.0f, dt));
+    airBlend_ = lerpf(airBlend_, (!player_.onGround && !player_.inWater) ? 1.0f : 0.0f, damp(player_.onGround ? 16.0f : 7.0f, dt));
     if (playerAsset_) {
         const CharacterModel& m = playerAsset_->model;
         if (dead_) {
@@ -1207,7 +1224,7 @@ void Game::updatePickups(float dt) {
                 emitSound(SND_PICKUP, p.position, 1.0f);
                 spawnBurst(p.position, {0.4f, 1.0f, 0.95f, 1.0f}, 16, 3.0f, 0.12f, true, -2.0f);
             } else if (p.type == 1) {
-                float heal = maxHealth_ * 0.3f;
+                float heal = maxHealth_ * 0.12f;
                 health_ = std::min(maxHealth_, health_ + heal);
                 labels_.push_back({p.position, static_cast<int>(std::lround(heal)), 3, 0.9f});
                 emit(EV_HEAL, static_cast<int>(heal));
@@ -1215,7 +1232,7 @@ void Game::updatePickups(float dt) {
                 spawnBurst(p.position, {1.0f, 0.4f, 0.4f, 1.0f}, 12, 2.5f, 0.12f, true, -2.0f);
             } else {
                 // Caixa de suprimentos (anúncio): munição, vida e munição incendiária.
-                float heal = maxHealth_ * 0.5f;
+                float heal = maxHealth_ * 0.3f;
                 health_ = std::min(maxHealth_, health_ + heal);
                 ammo_ = magazineFor(weaponId());
                 for (int w = IT_RIFLE; w <= IT_LAUNCHER; ++w) clipsInit_[w] = false;
@@ -1353,14 +1370,36 @@ void Game::addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float
     draw.alpha = 1.0f;
 }
 
+// Agachado (estilo Minecraft): tronco inclinado para a frente, cabeça olhando adiante,
+// pernas um pouco atrás e passos curtos.
 void Game::poseCrouch(Pose& pose, const CharacterModel& m, float blend, float moving) {
     if (blend <= 0.01f) return;
-    // Joelho no chão: uma perna à frente, outra atrás, tronco levemente inclinado.
-    int legL = m.nodeIndex("leg-left"), legR = m.nodeIndex("leg-right"), torso = m.nodeIndex("torso");
-    float step = std::sin(time_ * 7.0f) * 0.25f * moving;
-    if (legL >= 0) pose.r[legL] = slerp(pose.r[legL], Quat::axisAngle({1, 0, 0}, -0.95f + step), blend);
-    if (legR >= 0) pose.r[legR] = slerp(pose.r[legR], Quat::axisAngle({1, 0, 0}, 0.8f - step), blend);
-    if (torso >= 0) pose.r[torso] = slerp(pose.r[torso], pose.r[torso] * Quat::axisAngle({1, 0, 0}, 0.12f), blend);
+    const int legL = m.nodeIndex("leg-left"), legR = m.nodeIndex("leg-right"), torso = m.nodeIndex("torso"), head = m.nodeIndex("head");
+    const float px = kBlockyPixel;
+    if (torso >= 0) pose.r[torso] = slerp(pose.r[torso], pose.r[torso] * Quat::axisAngle({1, 0, 0}, 0.45f), blend);
+    if (head >= 0) pose.r[head] = slerp(pose.r[head], pose.r[head] * Quat::axisAngle({1, 0, 0}, -0.4f), blend);
+    for (int leg : {legL, legR}) {
+        if (leg < 0) continue;
+        // Passada menor e pernas recuadas sob o corpo inclinado.
+        pose.r[leg] = slerp(pose.r[leg], Quat(), blend * (0.45f - 0.15f * moving));
+        pose.t[leg].z -= 2.0f * px * blend;
+    }
+}
+
+// No ar: uma perna dobrada à frente, a outra atrás; braços livres se abrem para equilibrar.
+void Game::poseAir(Pose& pose, const CharacterModel& m, float blend, bool armsFree) {
+    if (blend <= 0.01f) return;
+    const int legL = m.nodeIndex("leg-left"), legR = m.nodeIndex("leg-right"), torso = m.nodeIndex("torso");
+    const int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left");
+    const bool falling = player_.velocity.y < -2.0f;
+    if (legR >= 0) pose.r[legR] = slerp(pose.r[legR], Quat::axisAngle({1, 0, 0}, falling ? -0.25f : -0.75f), blend);
+    if (legL >= 0) pose.r[legL] = slerp(pose.r[legL], Quat::axisAngle({1, 0, 0}, falling ? 0.2f : 0.4f), blend);
+    if (torso >= 0) pose.r[torso] = slerp(pose.r[torso], pose.r[torso] * Quat::axisAngle({1, 0, 0}, 0.1f), blend);
+    if (armsFree) {
+        float up = falling ? -1.6f : -0.5f;
+        if (armR >= 0) pose.r[armR] = slerp(pose.r[armR], Quat::axisAngle({0, 0, 1}, -0.55f) * Quat::axisAngle({1, 0, 0}, up), blend);
+        if (armL >= 0) pose.r[armL] = slerp(pose.r[armL], Quat::axisAngle({0, 0, 1}, 0.55f) * Quat::axisAngle({1, 0, 0}, up), blend);
+    }
 }
 
 void Game::posePlayer(Pose& pose, bool armed) {
@@ -1377,9 +1416,11 @@ void Game::posePlayer(Pose& pose, bool armed) {
         if (armL >= 0) pose.r[armL] = Quat::axisAngle({0, 0, 1}, 0.15f) * Quat::axisAngle({1, 0, 0}, reach);
         return;
     }
-    if (!armed) return;
+    const float armedW = playing ? armedBlend_ : 1.0f;
+    if (playing) poseAir(pose, m, airBlend_, !armed || armedW < 0.5f);
+    if (!armed || armedW <= 0.01f) return;
     float pitch = playing ? camPitch_ : -0.3f;
-    poseArmed(pose, m, pitch, playing);
+    poseArmedBlend(pose, m, pitch, playing, 0.45f * (playing ? crouchBlend_ : 0.0f), armedW);
     if (!playing) return;
     int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left");
     if (reloadTimer_ > 0) {
@@ -1397,34 +1438,32 @@ void Game::posePlayer(Pose& pose, bool armed) {
 }
 
 void Game::poseArmed(Pose& pose, const CharacterModel& m, float pitch, bool moveHead) {
+    poseArmedBlend(pose, m, pitch, moveHead, 0.0f, 1.0f);
+}
+
+// Braços apontando a arma para onde a câmera mira. `lean` compensa o tronco inclinado (agachado);
+// `weight` mistura com a pose da animação (sacar/guardar a arma ao parar/começar a correr).
+void Game::poseArmedBlend(Pose& pose, const CharacterModel& m, float pitch, bool moveHead, float lean, float weight) {
     int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left"), head = m.nodeIndex("head");
-    float armPitch = pitch * 0.85f;
-    Quat aimX = Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch);
-    if (armR >= 0) pose.r[armR] = Quat::axisAngle({0, 1, 0}, 0.08f) * aimX;
-    if (armL >= 0) pose.r[armL] = Quat::axisAngle({0, 1, 0}, -0.5f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch + 0.1f);
-    if (head >= 0 && moveHead) pose.r[head] = Quat::axisAngle({1, 0, 0}, -pitch * 0.5f);
+    float armPitch = pitch * 0.85f + lean;
+    Quat aimR = Quat::axisAngle({0, 1, 0}, 0.08f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch);
+    Quat aimL = Quat::axisAngle({0, 1, 0}, -0.5f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch + 0.1f);
+    if (armR >= 0) pose.r[armR] = slerp(pose.r[armR], aimR, weight);
+    if (armL >= 0) pose.r[armL] = slerp(pose.r[armL], aimL, weight);
+    if (head >= 0 && moveHead) pose.r[head] = slerp(pose.r[head], Quat::axisAngle({1, 0, 0}, -pitch * 0.5f - lean), weight);
+}
+
+// Arma pendurada nas costas (correndo): cano para cima, na diagonal.
+void Game::addWeaponOnBack(const CharacterDraw& draw, int torso, int weapon) {
+    const float px = kBlockyPixel;
+    Mat4 frame = draw.world * draw.nodes[static_cast<size_t>(torso)] * Mat4::translation({0.0f, 6.5f * px, -2.7f * px}) *
+                 Mat4::rotationZ(0.62f) * Mat4::rotationX(-kPi * 0.5f) * Mat4::translation({0.0f, 0.0f, -0.35f});
+    addWeaponParts(frame, weapon, nullptr);
 }
 
 void Game::addRifle(const CharacterDraw& draw, int armR, Vec3* muzzle) {
-    Mat4 frame = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({-0.2f, -0.9f, 0.0f}) * Mat4::rotationX(kPi * 0.5f);
-    struct Part { Vec3 c, size; Vec4 color; float emissive; };
-    static const Part parts[] = {
-        {{0, 0.05f, 0.25f}, {0.16f, 0.22f, 0.9f}, {0.22f, 0.24f, 0.27f, 1}, 0.0f},
-        {{0, 0.1f, 0.9f}, {0.08f, 0.08f, 0.6f}, {0.1f, 0.1f, 0.11f, 1}, 0.0f},
-        {{0, 0.0f, -0.36f}, {0.14f, 0.2f, 0.42f}, {0.45f, 0.3f, 0.17f, 1}, 0.0f},
-        {{0, -0.2f, 0.32f}, {0.1f, 0.3f, 0.14f}, {0.16f, 0.17f, 0.19f, 1}, 0.0f},
-        {{0, 0.21f, 0.2f}, {0.06f, 0.07f, 0.22f}, {0.12f, 0.12f, 0.13f, 1}, 0.0f},
-        {{0, 0.12f, 0.62f}, {0.13f, 0.06f, 0.1f}, {0.55f, 0.95f, 0.25f, 1}, 0.5f},
-    };
-    for (const Part& p : parts) {
-        BoxDraw box;
-        box.world = frame * Mat4::translation(p.c) * Mat4::scale(p.size);
-        box.color = p.color;
-        box.emissive = p.emissive;
-        if (damageBoost_ > 0 && &p == &parts[5]) box.color = {1.0f, 0.5f, 0.15f, 1};
-        scene_.boxes.push_back(box);
-    }
-    if (muzzle) *muzzle = frame.transformPoint({0, 0.1f, 1.25f});
+    Mat4 frame = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -0.9f, 0.0f}) * Mat4::rotationX(kPi * 0.5f);
+    addWeaponParts(frame, IT_RIFLE, muzzle);
 }
 
 void Game::buildScene() {
@@ -1456,7 +1495,9 @@ void Game::buildScene() {
     static std::vector<Cand> cands;
     cands.clear();
     const Vec3 warm(1.0f, 0.72f, 0.42f);
-    if (theme_.sky.night > 0.5f && mode_ != Mode::Lobby) s.lights.push_back({player_.position + Vec3(0, 2.2f, 0), 11.0f, Vec3(0.95f, 0.9f, 0.8f)});
+    // Lanterna noturna: alta, à frente e suave (perto da cabeça ela "estourava" o personagem).
+    if (theme_.sky.night > 0.5f && mode_ != Mode::Lobby)
+        s.lights.push_back({player_.position + Vec3(0, 4.6f, 0) + forwardFromYaw(camYaw_) * 2.0f, 14.0f, Vec3(0.55f, 0.53f, 0.47f)});
     for (const FlashLight& f : flashes_) {
         float a = f.life / f.maxLife;
         cands.push_back({length(f.pos - camPos_) * 0.3f, {f.pos, f.radius * (0.5f + 0.5f * a), f.color * a}});
@@ -1491,17 +1532,19 @@ void Game::buildScene() {
     // Jogador.
     if (playerAsset_) {
         playerAnim_.evaluate(playerAsset_->model, scratchPose_);
-        bool armed = mode_ == Mode::Mission || mode_ == Mode::Pvp || lobbyScreen_ == 0;
+        bool armed = mode_ == Mode::Mission || mode_ == Mode::Pvp;  // no menu o herói fica sem arma
         posePlayer(scratchPose_, armed);
         bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
-        Vec3 pos = player_.position + Vec3(0, visualStep_ - (playing ? 0.22f * crouchBlend_ : 0.0f), 0);
+        Vec3 pos = player_.position + Vec3(0, visualStep_ - (playing ? 0.12f * crouchBlend_ : 0.0f), 0);
         // No inventário a câmera fica de lado: o herói vira de frente para ela.
-        float yaw = mode_ == Mode::Lobby ? kPi + previewYaw_ - (lobbyScreen_ == 2 ? 0.6f : 0.0f) : playerModelYaw_;
+        float facing = lobbyScreen_ == 2 ? 0.6f : (lobbyScreen_ == 1 ? 0.49f : 0.0f);
+        float yaw = mode_ == Mode::Lobby ? kPi + previewYaw_ - facing : playerModelYaw_;
         float flash = invulnerable_ > 0 && damageFlash_ > 0.6f ? 0.45f : 0.0f;
         addCharacter(playerAsset_, pos, yaw, 1.0f, scratchPose_, {1, 1, 1}, flash, Vec3(1, 1, 1), playing ? leanRoll_ : 0.0f);
         CharacterDraw& draw = scene_.characters[scene_.characterCount - 1];
         s.shadows.push_back({player_.position, 0.55f, 0.32f});
         int armR = playerAsset_->model.nodeIndex("arm-right");
+        int torsoNode = playerAsset_->model.nodeIndex("torso");
         if (armed && armR >= 0 && !dead_) {
             if (meleeTime_ >= 0) {
                 // Durante o golpe a mão direita segura a faca.
@@ -1515,6 +1558,9 @@ void Game::buildScene() {
                 blade.color = {0.85f, 0.88f, 0.92f, 1};
                 blade.emissive = 0.2f;
                 s.boxes.push_back(blade);
+            } else if (playing && armedBlend_ < 0.5f && torsoNode >= 0) {
+                // Correndo: a arma vai para as costas e os braços balançam livres.
+                addWeaponOnBack(draw, torsoNode, weaponId());
             } else {
                 if (mode_ == Mode::Pvp) addRifle(draw, armR, &muzzlePos_);
                 else addWeaponModel(draw, armR, weaponId(), &muzzlePos_);
@@ -1531,12 +1577,16 @@ void Game::buildScene() {
             r.anim.evaluate(r.asset->model, scratchPose_);
             bool crouched = r.alive && (r.flags & NF_CROUCH);
             if (crouched) poseCrouch(scratchPose_, r.asset->model, 1.0f, clampf(r.speed / 2.0f, 0.0f, 1.0f));
-            if (r.alive) poseArmed(scratchPose_, r.asset->model, r.renderPitch, true);
+            const bool holster = (r.flags & NF_SPRINT) && !(r.flags & NF_FIRING);
+            if (r.alive && !holster) poseArmed(scratchPose_, r.asset->model, r.renderPitch, true);
             float flash = net_.player(i).invulnerable > 0 && std::fmod(time_, 0.3f) < 0.15f ? 0.25f : 0.0f;
             addCharacter(r.asset, r.renderPos - Vec3(0, crouched ? 0.22f : 0.0f, 0), r.renderYaw, 1.0f, scratchPose_, {1, 1, 1}, flash);
             CharacterDraw& draw = scene_.characters[scene_.characterCount - 1];
             int armR = r.asset->model.nodeIndex("arm-right");
-            if (r.alive && armR >= 0) {
+            int torsoNode = r.asset->model.nodeIndex("torso");
+            if (r.alive && holster && torsoNode >= 0) {
+                addWeaponOnBack(draw, torsoNode, IT_RIFLE);
+            } else if (r.alive && armR >= 0) {
                 Vec3 muzzle;
                 addRifle(draw, armR, &muzzle);
                 if (r.fireFlash > 0) {
@@ -1900,7 +1950,7 @@ void Game::startPvp(const PvpConfig& c) {
     paused_ = false;
     config_ = MissionConfig{};
     config_.stage = 0;
-    config_.skin = c.skins[c.localId] == 255 ? 0 : c.skins[c.localId];
+    config_.skin = c.looks[c.localId];
     config_.playerHealth = 100;
     config_.magazine = 30;
     config_.crystalTotal = 0;
@@ -1945,7 +1995,7 @@ void Game::startPvp(const PvpConfig& c) {
         if (i == c.localId || c.skins[i] == 255) continue;
         RemotePlayer& r = remotes_[i];
         r.present = true;
-        r.asset = character(c.skins[i]);
+        r.asset = character(c.looks[i]);
         if (r.asset) r.anim.play(r.asset->model.clipIndex("idle"), true, 0);
         if (!layout_.spawnPoints.empty()) r.renderPos = layout_.spawnPoints[static_cast<size_t>(i) % layout_.spawnPoints.size()];
     }

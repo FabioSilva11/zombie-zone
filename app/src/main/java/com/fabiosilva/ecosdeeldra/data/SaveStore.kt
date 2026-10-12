@@ -20,8 +20,9 @@ class SaveStore(context: Context) {
     private fun encode(p: Progress): JSONObject = JSONObject().apply {
         put("version", 3)
         put("diamonds", p.diamonds)
-        put("selectedSkin", p.selectedSkin)
-        put("ownedSkins", JSONArray(p.ownedSkins.toList()))
+        put("ownedSkins", JSONArray(p.ownedCosmetics.toList()))  // nome antigo mantido: visuais liberados
+        put("selectedHero", p.selectedHero)
+        put("heroes", JSONArray().apply { p.heroes.forEach { put(JSONObject().put("name", it.name).put("look", it.look)) } })
         put("stages", JSONObject().apply {
             p.stages.forEach { (n, r) ->
                 put(n.toString(), JSONObject().apply {
@@ -103,12 +104,21 @@ class SaveStore(context: Context) {
     private fun decode(o: JSONObject): Progress {
         val p = Progress()
         p.diamonds = o.optInt("diamonds", 0).coerceAtLeast(0)
-        p.selectedSkin = o.optInt("selectedSkin", 0).coerceIn(0, Skins.all.size - 1)
         o.optJSONArray("ownedSkins")?.let { arr ->
-            for (i in 0 until arr.length()) arr.optInt(i, -1).takeIf { it in Skins.all.indices }?.let { p.ownedSkins.add(it) }
+            for (i in 0 until arr.length()) arr.optInt(i, -1).takeIf { it in Cosmetics.all.indices }?.let { p.ownedCosmetics.add(it) }
         }
-        p.ownedSkins.add(0)
-        if (p.selectedSkin !in p.ownedSkins) p.selectedSkin = 0
+        p.ownedCosmetics.add(0)
+        o.optJSONArray("heroes")?.let { arr ->
+            val list = (0 until arr.length()).mapNotNull { i ->
+                val h = arr.optJSONObject(i) ?: return@mapNotNull null
+                Hero(Rules.sanitizeName(h.optString("name", "Herói")), h.optInt("look", Look().encode()))
+            }
+            if (list.isNotEmpty()) {
+                p.heroes.clear()
+                p.heroes.addAll(list.take(Rules.MAX_HEROES))
+            }
+        }
+        p.selectedHero = o.optInt("selectedHero", 0).coerceIn(0, p.heroes.size - 1)
         o.optJSONObject("stages")?.let { stages ->
             stages.keys().forEach { key ->
                 val n = key.toIntOrNull() ?: return@forEach

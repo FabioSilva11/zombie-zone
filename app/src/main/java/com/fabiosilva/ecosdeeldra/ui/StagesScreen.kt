@@ -24,7 +24,8 @@ import android.widget.TextView
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Campaign
 import com.fabiosilva.ecosdeeldra.data.Rules
-import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.Look
+import com.fabiosilva.ecosdeeldra.data.LookPainter
 import com.fabiosilva.ecosdeeldra.data.ZombieKinds
 import kotlin.math.abs
 import kotlin.math.sin
@@ -168,8 +169,7 @@ class StageMapView(private val app: MainActivity, private val onSelect: (Int) ->
     private val rect = RectF()
     private val skyShaders = HashMap<Int, LinearGradient>()
     private val hero: Bitmap? = runCatching {
-        val skin = Skins.get(app.progress.selectedSkin)
-        BitmapFactory.decodeResource(resources, resources.getIdentifier("skin_${skin.letter}", "drawable", app.packageName))
+        LookPainter.face(Look.decode(app.progress.lookCode))
     }.getOrNull()
 
     private val skyTop = intArrayOf(0xFF3A6FC8.toInt(), 0xFF5A62B4.toInt(), 0xFF6F86AE.toInt(), 0xFF1C1430.toInt())

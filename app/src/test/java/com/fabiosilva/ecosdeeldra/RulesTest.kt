@@ -4,7 +4,7 @@ import com.fabiosilva.ecosdeeldra.data.Campaign
 import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
-import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -50,18 +50,18 @@ class RulesTest {
     fun objectiveSkinsUnlockWhenGoalReached() {
         val p = Progress()
         p.stats.kills = 39
-        assertTrue(Rules.refreshSkinUnlocks(p).isEmpty())
+        assertTrue(Rules.refreshCosmeticUnlocks(p).isEmpty())
         p.stats.kills = 40
-        val unlocked = Rules.refreshSkinUnlocks(p)
-        assertTrue(unlocked.any { it.name == "Brann" })
-        assertTrue(2 in p.ownedSkins)
+        val unlocked = Rules.refreshCosmeticUnlocks(p)
+        assertTrue(unlocked.any { it.name == "Colete tático" })
+        assertTrue(2 in p.ownedCosmetics)
     }
 
     @Test
     fun adSkinsUnlockByWatchingAds() {
         val p = Progress()
         repeat(3) { Rules.registerAdWatched(p) }
-        assertTrue(Rules.refreshSkinUnlocks(p).any { it.index == 5 })
+        assertTrue(Rules.refreshCosmeticUnlocks(p).any { it.index == 5 })
     }
 
     @Test
@@ -71,7 +71,7 @@ class RulesTest {
         assertFalse(Rules.onAppOpen(p, "2026-10-02"))
         assertTrue(Rules.onAppOpen(p, "2026-10-03"))
         assertEquals(2, p.stats.loginDays)
-        assertTrue(Rules.refreshSkinUnlocks(p).any { it.name == "Nyla" })
+        assertTrue(Rules.refreshCosmeticUnlocks(p).any { it.name == "Boné" })
     }
 
     @Test
@@ -129,9 +129,9 @@ class RulesTest {
     fun buyingSkinsAndUpgradesSpendsDiamonds() {
         val p = Progress()
         p.diamonds = 200
-        assertTrue(Rules.buySkin(p, 1))
+        assertTrue(Rules.buyCosmetic(p, 1))
         assertEquals(50, p.diamonds)
-        assertFalse(Rules.buySkin(p, 3)) // skin de login não se compra
+        assertFalse(Rules.buyCosmetic(p, 3)) // visual de login não se compra
         assertFalse(Rules.buyUpgrade(p, "power"))
         p.diamonds = 60
         assertTrue(Rules.buyUpgrade(p, "power"))
@@ -196,6 +196,6 @@ class RulesTest {
         assertTrue(hard.zombieHealth > easy.zombieHealth)
         // 5 níveis de poder (+75%) e o bônus da zona 4 (+12% de zona x 0,8).
         assertEquals(1.75f * (1f + 0.12f * 0.8f), hard.power, 0.001f)
-        assertEquals(18, Skins.all.size)
+        assertEquals(18, Cosmetics.all.size)
     }
 }

@@ -1,7 +1,6 @@
 package com.fabiosilva.ecosdeeldra.ui
 
 import android.annotation.SuppressLint
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.text.InputFilter
@@ -14,7 +13,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.fabiosilva.ecosdeeldra.MainActivity
-import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.Look
+import com.fabiosilva.ecosdeeldra.data.LookPainter
 import com.fabiosilva.ecosdeeldra.net.LanLobby
 
 /** PvP em Wi-Fi local: procurar/criar sala, sala de espera e regras da partida. */
@@ -48,7 +48,7 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
     fun playerName(): String {
         val s = app.progress.settings
         if (s.playerName.isBlank()) {
-            s.playerName = Skins.get(app.progress.selectedSkin).name + (10..99).random()
+            s.playerName = app.progress.currentHero.name
             app.save()
         }
         return s.playerName
@@ -78,16 +78,15 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
             if (!focused) saveName(name.text.toString())
         }
         left.addView(name, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(4) })
-        val skin = Skins.get(app.progress.selectedSkin)
-        left.addView(Ui.text(app, "Skin: ${skin.name}  •  Seu IP: ${LanLobby.localIp() ?: "sem Wi-Fi"}", 11f, Palette.muted).apply { setPadding(0, app.dpi(8), 0, app.dpi(10)) })
+        left.addView(Ui.text(app, "Personagem: ${app.progress.currentHero.name}  •  Seu IP: ${LanLobby.localIp() ?: "sem Wi-Fi"}", 11f, Palette.muted).apply { setPadding(0, app.dpi(8), 0, app.dpi(10)) })
         left.addView(Ui.button(app, "CRIAR SALA", Palette.lime, Palette.dark, 16f) {
             saveName(name.text.toString())
-            lobby.host(playerName(), app.progress.selectedSkin, LanLobby.Rules(10, 5))
+            lobby.host(playerName(), app.progress.lookCode, LanLobby.Rules(10, 5))
         }, Ui.lp(Ui.MATCH, app.dpi(50)))
         // Acha a sala sozinho, sem ninguém precisar passar o IP (conectar por IP continua abaixo).
         val auto = Ui.button(app, if (lobby.autoJoining) "✕ PARAR BUSCA AUTOMÁTICA" else "🔍 ENTRAR AUTOMATICAMENTE", Palette.cyan, Palette.dark, 14f) {
             saveName(name.text.toString())
-            if (lobby.autoJoining) lobby.cancelAutoJoin() else lobby.autoJoin(playerName(), app.progress.selectedSkin)
+            if (lobby.autoJoining) lobby.cancelAutoJoin() else lobby.autoJoin(playerName(), app.progress.lookCode)
             showBrowse()
         }
         left.addView(auto, Ui.lp(Ui.MATCH, app.dpi(48)).apply { topMargin = app.dpi(8) })
@@ -144,7 +143,7 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
             texts.addView(Ui.title(app, "Sala de ${room.name}", 15f))
             texts.addView(Ui.text(app, "${room.players}/${room.max} jogadores • ${room.address}" + if (room.inMatch) " • EM PARTIDA" else "", 11f, if (room.inMatch) Palette.gold else Palette.muted))
             r.addView(texts, Ui.lp(0, Ui.WRAP, 1f))
-            val join = Ui.button(app, "ENTRAR", Palette.lime, Palette.dark, 13f) { lobby.join(room.address, playerName(), app.progress.selectedSkin) }
+            val join = Ui.button(app, "ENTRAR", Palette.lime, Palette.dark, 13f) { lobby.join(room.address, playerName(), app.progress.lookCode) }
             Ui.setEnabledLook(join, !room.inMatch && room.players < room.max)
             r.addView(join, Ui.lp(app.dpi(110), app.dpi(44)))
             card.addView(r)
@@ -186,7 +185,7 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
         buttons.addView(Ui.button(app, "CONECTAR", Palette.lime, Palette.dark, 13f) {
             val ip = input.text.toString().trim()
             removeView(layer)
-            if (ip.isNotEmpty()) lobby.join(ip, playerName(), app.progress.selectedSkin)
+            if (ip.isNotEmpty()) lobby.join(ip, playerName(), app.progress.lookCode)
         }, Ui.lp(0, app.dpi(46), 1f))
         panel.addView(buttons, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(10) })
         layer.addView(panel, Ui.frame(app.dpi(380), Ui.WRAP, Gravity.CENTER))
@@ -206,7 +205,7 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
         val list = Ui.column(app)
         for (p in players.sortedBy { it.id }) {
             val r = Ui.row(app).apply { setPadding(0, app.dpi(6), 0, 0) }
-            val bitmap = BitmapFactory.decodeResource(resources, resources.getIdentifier("skin_${'a' + p.skin}", "drawable", app.packageName))
+            val bitmap = LookPainter.face(Look.decode(p.skin))
             r.addView(ImageView(app).apply { setImageDrawable(BitmapDrawable(resources, bitmap).apply { isFilterBitmap = false }) }, Ui.lp(app.dpi(34), app.dpi(34)))
             val tag = buildString {
                 if (p.id == 0) append("  • anfitrião")

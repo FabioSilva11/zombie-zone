@@ -17,7 +17,7 @@ import android.widget.LinearLayout
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.RewardSummary
-import com.fabiosilva.ecosdeeldra.data.SkinDef
+import com.fabiosilva.ecosdeeldra.data.Cosmetic
 import com.fabiosilva.ecosdeeldra.data.Stage
 import com.fabiosilva.ecosdeeldra.engine.Hud
 import com.fabiosilva.ecosdeeldra.engine.NativeBridge
@@ -111,17 +111,17 @@ class LoadingOverlay(app: MainActivity, zoneLabel: String, title: String, zoneCo
     constructor(app: MainActivity, stage: Stage) : this(app, "ZONA ${stage.zone.index + 1} • ${stage.zone.name.uppercase()}", "Fase ${stage.number} · ${stage.title}", stage.zone.color, stage.number)
 
     private val tips = listOf(
-        "Empurre o joystick até o fim para correr.",
+        "Toque em CORRER para sair correndo; toque de novo ou puxe o joystick para trás para parar.",
         "Tiros na cabeça causam dano em dobro.",
         "Destrua o núcleo roxo dos ninhos para soltar os cristais.",
         "O Inchado explode ao morrer: acerte-o perto de outros zumbis!",
         "Viu um anel laranja no chão? Um molotov vai cair ali. Saia!",
         "Suba nas torres de vigia: lá em cima sempre tem um baú.",
         "Fogo e ácido grudam no chão por alguns segundos — desvie.",
-        "Zumbis com aura colorida são elite: mais fortes, mas sempre deixam vida.",
+        "Zumbis com aura colorida são elite: mais fortes e deixam itens com mais frequência.",
         "Pule na água para apagar o fogo do corpo.",
         "Use SUPRIMENTOS: munição incendiária, vida e munição cheia.",
-        "Volte amanhã: o calendário libera skins exclusivas.",
+        "Volte amanhã: o calendário libera visuais exclusivos para o seu personagem.",
     )
 
     init {
@@ -184,7 +184,7 @@ class VictoryOverlay(
     stage: Stage,
     result: MissionResult,
     summary: RewardSummary,
-    unlocked: List<SkinDef>,
+    unlocked: List<Cosmetic>,
 ) : FrameLayout(app) {
     init {
         setBackgroundColor(Color.argb(190, 4, 7, 14))
@@ -234,7 +234,7 @@ class VictoryOverlay(
         totalRow.addView(totalText)
         right.addView(totalRow, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
         if (unlocked.isNotEmpty()) {
-            right.addView(Ui.text(app, "NOVA SKIN: ${unlocked.joinToString { it.name }}!", 14f, Palette.gold, Fonts.title).apply { setPadding(0, app.dpi(6), 0, 0) })
+            right.addView(Ui.text(app, "NOVO VISUAL: ${unlocked.joinToString { it.name }}!", 14f, Palette.gold, Fonts.title).apply { setPadding(0, app.dpi(6), 0, 0) })
         }
         top.addView(right, Ui.lp(0, Ui.WRAP, 1.3f).apply { marginStart = app.dpi(16) })
         panel.addView(top)

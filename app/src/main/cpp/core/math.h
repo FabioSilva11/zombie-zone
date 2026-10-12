@@ -261,7 +261,7 @@ inline Mat4 Mat4::inverse() const {
 inline Vec3 forwardFromYaw(float yaw) { return {std::sin(yaw), 0.0f, -std::cos(yaw)}; }
 inline Vec3 rightFromYaw(float yaw) { return {std::cos(yaw), 0.0f, std::sin(yaw)}; }
 inline float yawFromDirection(float dx, float dz) { return std::atan2(dx, -dz); }
-// Os modelos Kenney olham para +Z; converte yaw de jogo para rotação do modelo.
+// Os personagens de blocos olham para +Z; converte yaw de jogo para rotação do modelo.
 inline float modelRotationFromYaw(float yaw) { return kPi - yaw; }
 
 struct AABB {

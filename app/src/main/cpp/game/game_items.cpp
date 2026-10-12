@@ -12,6 +12,7 @@ using namespace proto;
 namespace {
 
 constexpr float kThrowGravity = 22.0f;
+constexpr float kHealCooldown = 8.0f;  // segundos entre kits médicos e bandagens
 
 // clang-format off
 const WeaponDef kWeapons[] = {
@@ -115,9 +116,9 @@ const std::vector<Part>& weaponParts(int id) {
 
 int itemMaxStack(int id, int explosivesLevel) {
     switch (id) {
-        case IT_MEDKIT: return 5;
-        case IT_BANDAGE: return 10;
-        case IT_ANTIDOTE: return 5;
+        case IT_MEDKIT: return 3;
+        case IT_BANDAGE: return 5;
+        case IT_ANTIDOTE: return 3;
         case IT_ADRENALINE: return 5;
         case IT_FIRE_AMMO: return 5;
         case IT_ARMOR: return 3;
@@ -198,6 +199,7 @@ void Game::resetInventory() {
     swapTimer_ = 0;
     armor_ = armorMax_ = 0;
     adrenaline_ = 0;
+    healCooldown_ = 0;
     sinceHurt_ = 10;
     throwAiming_ = false;
     throwArc_.clear();
@@ -315,13 +317,14 @@ void Game::dropItem(const Vec3& at, int id, int count) {
 
 void Game::rollZombieDrop(const Zombie& z) {
     if (!inventoryEnabled()) return;
-    float chance = (z.mutations ? 0.85f : 0.075f) * config_.luck;
-    if (z.kind == ZombieKind::Brute) chance += 0.15f;
+    // Itens de cura são raros: a maior parte dos drops é de ataque.
+    float chance = (z.mutations ? 0.45f : 0.05f) * config_.luck;
+    if (z.kind == ZombieKind::Brute) chance += 0.1f;
     if (!rng_.chance(std::min(1.0f, chance))) return;
     struct W { int id; float w; };
     static const W table[] = {
-        {IT_BANDAGE, 30}, {IT_GRENADE, 22}, {IT_MEDKIT, 11}, {IT_MOLOTOV, 12},
-        {IT_FIRE_AMMO, 8}, {IT_ADRENALINE, 7}, {IT_ANTIDOTE, 7}, {IT_ARMOR, 3},
+        {IT_BANDAGE, 12}, {IT_GRENADE, 26}, {IT_MEDKIT, 3}, {IT_MOLOTOV, 16},
+        {IT_FIRE_AMMO, 12}, {IT_ADRENALINE, 9}, {IT_ANTIDOTE, 5}, {IT_ARMOR, 4},
     };
     float total = 0;
     for (const W& e : table) total += e.w;
@@ -341,7 +344,7 @@ void Game::rollZombieDrop(const Zombie& z) {
 
 // Caixa de suprimentos (anúncio): consumíveis variados; o que não couber fica no chão.
 void Game::giveSupplyBundle() {
-    const int bundle[][2] = {{IT_MEDKIT, 1}, {IT_GRENADE, 2}, {IT_MOLOTOV, 1}, {IT_ADRENALINE, 1}, {IT_ARMOR, 1}, {IT_BANDAGE, 2}};
+    const int bundle[][2] = {{IT_BANDAGE, 1}, {IT_GRENADE, 2}, {IT_MOLOTOV, 1}, {IT_ADRENALINE, 1}, {IT_ARMOR, 1}};
     for (const auto& b : bundle) {
         int left = addItem(b[0], b[1]);
         if (left < b[1]) emit(EV_ITEM, b[0], b[1] - left, 0);
@@ -390,29 +393,34 @@ void Game::useItemSlot(int slot) {
         handleSlotTap(slot);
         return;
     }
+    // Curas seguidas têm intervalo: não dá para encher a vida no meio de um ataque.
+    if ((s.id == IT_MEDKIT || s.id == IT_BANDAGE) && healCooldown_ > 0 && (health_ < maxHealth_ - 0.5f || bleeding_ > 0)) {
+        emit(EV_ITEM_USED, s.id, 2, static_cast<int>(std::ceil(healCooldown_)));
+        return;
+    }
     bool used = true;
     float heal = 0;
     switch (s.id) {
         case IT_MEDKIT:
             if (health_ >= maxHealth_ - 0.5f && bleeding_ <= 0) used = false;
             else {
-                heal = maxHealth_ * 0.55f;
+                heal = maxHealth_ * 0.4f;
                 bleeding_ = 0;
+                healCooldown_ = kHealCooldown;
             }
             break;
         case IT_BANDAGE:
             if (health_ >= maxHealth_ - 0.5f && bleeding_ <= 0) used = false;
             else {
-                heal = maxHealth_ * 0.2f;
+                heal = maxHealth_ * 0.12f;
                 bleeding_ = 0;
+                healCooldown_ = kHealCooldown;
             }
             break;
         case IT_ANTIDOTE:
-            if (poisoned_ <= 0 && slowed_ <= 0 && burning_ <= 0 && health_ >= maxHealth_ - 0.5f) used = false;
-            else {
-                poisoned_ = slowed_ = burning_ = 0;
-                heal = maxHealth_ * 0.1f;
-            }
+            // Só trata veneno, lentidão e fogo; não recupera vida.
+            if (poisoned_ <= 0 && slowed_ <= 0 && burning_ <= 0) used = false;
+            else poisoned_ = slowed_ = burning_ = 0;
             break;
         case IT_ADRENALINE:
             adrenaline_ = 20.0f;
@@ -448,6 +456,7 @@ void Game::useItemSlot(int slot) {
 
 void Game::updateItemStatus(float dt) {
     adrenaline_ = std::max(0.0f, adrenaline_ - dt);
+    healCooldown_ = std::max(0.0f, healCooldown_ - dt);
     swapTimer_ = std::max(0.0f, swapTimer_ - dt);
     invFullTimer_ = std::max(0.0f, invFullTimer_ - dt);
     sinceHurt_ += dt;
@@ -643,7 +652,11 @@ void Game::fireLauncher() {
 void Game::addWeaponModel(const CharacterDraw& draw, int armR, int weapon, Vec3* muzzle) {
     // Ao trocar de arma ela desce e volta.
     float dip = swapTimer_ > 0 ? std::sin(clampf(swapTimer_ / 0.35f, 0.0f, 1.0f) * kPi) * 0.6f : 0.0f;
-    Mat4 frame = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({-0.2f, -0.9f, 0.0f}) * Mat4::rotationX(kPi * 0.5f + dip);
+    Mat4 frame = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -0.9f, 0.0f}) * Mat4::rotationX(kPi * 0.5f + dip);
+    addWeaponParts(frame, weapon, muzzle);
+}
+
+void Game::addWeaponParts(const Mat4& frame, int weapon, Vec3* muzzle) {
     for (const Part& p : weaponParts(weapon)) {
         BoxDraw box;
         box.world = frame * Mat4::translation(p.c) * Mat4::scale(p.size);

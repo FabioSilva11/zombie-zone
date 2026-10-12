@@ -12,6 +12,7 @@
 
 #include "../core/math.h"
 #include "../core/random.h"
+#include "../render/blocky.h"
 #include "../render/character.h"
 #include "../render/renderer.h"
 #include "../world/island.h"
@@ -27,7 +28,7 @@ namespace zz {
 
 struct MissionConfig {
     int stage = 1;
-    int skin = 0;
+    uint32_t skin = 0;  // aparência do personagem (Look codificado)
     int zombieCount = 10;     // população de zumbis mantida ao redor do jogador
     float zombieHealth = 70;
     float zombieDamage = 8;
@@ -64,7 +65,8 @@ struct PvpConfig {
     float timeLimit = 300;
     float sensitivity = 1.0f;
     bool invertY = false;
-    uint8_t skins[kMaxNetPlayers] = {255, 255, 255, 255, 255, 255, 255, 255};
+    uint8_t skins[kMaxNetPlayers] = {255, 255, 255, 255, 255, 255, 255, 255};  // 255 = vaga vazia
+    uint32_t looks[kMaxNetPlayers] = {};  // aparência de cada jogador
 };
 
 struct RemoteSample {
@@ -299,8 +301,8 @@ public:
     void frame(double nowSeconds);
 
     // Comandos (thread GL)
-    void enterLobby(int skin, int screen);
-    void setPreviewSkin(int skin);
+    void enterLobby(uint32_t look, int screen);
+    void setPreviewSkin(uint32_t look);
     void startMission(const MissionConfig& config);
     void startPvp(const PvpConfig& config);
     void stopPvp();
@@ -348,7 +350,7 @@ private:
     static constexpr int kMinimapSize = 160;
     static constexpr int kBigMapSize = 256;
 
-    CharacterAsset* character(int skin);
+    CharacterAsset* character(uint32_t look);
     void emit(int type, int a = 0, int b = 0, int c = 0);
     void emitSound(int sound, const Vec3& at, float volume = 1.0f);
 
@@ -359,7 +361,11 @@ private:
     void resetPlayerState(const Vec3& position, float yaw, float health, int magazine);
     void addRifle(const CharacterDraw& draw, int armRight, Vec3* muzzle);
     void addWeaponModel(const CharacterDraw& draw, int armRight, int weapon, Vec3* muzzle);
+    void addWeaponParts(const Mat4& frame, int weapon, Vec3* muzzle);
+    void addWeaponOnBack(const CharacterDraw& draw, int torso, int weapon);
     void poseArmed(Pose& pose, const CharacterModel& model, float pitch, bool moveHead);
+    void poseArmedBlend(Pose& pose, const CharacterModel& model, float pitch, bool moveHead, float lean, float weight);
+    void poseAir(Pose& pose, const CharacterModel& model, float blend, bool armsFree);
     void updatePlayer(float dt, const InputState& in);
     void updateCamera(float dt, const InputState& in);
     void updateWeapon(float dt, const InputState& in);
@@ -433,6 +439,7 @@ private:
     uint8_t rollMutations();
     void spawnZombie(const Vec3& pos, bool alerted, int nest = -1, bool forceElite = false);
     void updateZombies(float dt);
+    void separateBodies();
     void updateZombie(Zombie& z, size_t index, float dt);
     void zombieAbility(Zombie& z, float dist, float dt);
     void damageZombie(Zombie& z, float amount, bool headshot, const Vec3& dir, const Vec3& hitPoint);
@@ -464,7 +471,7 @@ private:
     Mode mode_ = Mode::None;
     bool paused_ = false;
     MissionConfig config_;
-    std::map<int, std::unique_ptr<CharacterAsset>> characters_;
+    std::map<uint32_t, std::unique_ptr<CharacterAsset>> characters_;
     std::vector<Vec3> layerColors_;
     int viewRadius_ = 8;
 
@@ -502,6 +509,7 @@ private:
     float stepTimer_ = 0;
     bool wasInWater_ = false;
     float lobbyEmoteTimer_ = 5;
+    int lobbyEmoteCount_ = 0;
     float previewYaw_ = 0;
     int lobbyScreen_ = 0;
     float burning_ = 0, bleeding_ = 0, poisoned_ = 0, slowed_ = 0;
@@ -526,6 +534,8 @@ private:
     float sprintFov_ = 0;
     float bobPhase_ = 0;
     float mantleTime_ = -1, mantleDuration_ = 0.4f;
+    float armedBlend_ = 1.0f;  // 1 = arma nas mãos, 0 = nas costas (correndo)
+    float airBlend_ = 0;       // pose de pulo/queda
     Vec3 mantleFrom_, mantleTo_;
     float wallPush_ = 0;
     float stuckTimer_ = 0, stuckCheck_ = 1.0f;
@@ -540,6 +550,7 @@ private:
     float swapTimer_ = 0;
     float armor_ = 0, armorMax_ = 0;
     float adrenaline_ = 0;
+    float healCooldown_ = 0;  // intervalo entre kits médicos e bandagens
     float sinceHurt_ = 0;
     float flameSoundTimer_ = 0;
     float invFullTimer_ = 0;
@@ -593,7 +604,7 @@ private:
     std::unordered_set<int> visitedPois_;
     std::unordered_set<int> announcedPois_;
     std::vector<const IslandPoi*> poiScratch_;
-    std::vector<int> zombieSkins_;
+    std::vector<uint32_t> zombieLooks_;
     std::vector<Vec3> pendingSpawns_;
     SupplyDrop supply_;
     int suppliesLeft_ = 0;

@@ -391,7 +391,7 @@ class LanLobby(context: Context, private val listener: Listener) {
             send("REJECT|$joinNonce|Sala cheia.", from, port)
             return
         }
-        members[id] = Member(id, skin.coerceIn(0, 17), name, from, port, joinNonce, now)
+        members[id] = Member(id, skin, name, from, port, joinNonce, now)
         send("ACCEPT|$joinNonce|$id", from, port)
         broadcastRoom()
         notifyLobby()
@@ -580,7 +580,7 @@ class LanLobby(context: Context, private val listener: Listener) {
             if (f.size < 3) return@mapNotNull null
             val id = f[0].toIntOrNull() ?: return@mapNotNull null
             if (id !in 0 until MAX) return@mapNotNull null
-            LobbyPlayer(id, (f[1].toIntOrNull() ?: 0).coerceIn(0, 17), f[2])
+            LobbyPlayer(id, f[1].toIntOrNull() ?: 0, f[2])  // skin = aparência (Look codificado)
         }
 
         /** IPv4 desta rede local (para mostrar ao jogador e conectar manualmente). */

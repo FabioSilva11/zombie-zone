@@ -18,11 +18,11 @@
 
 namespace zz {
 
-// Personagem (modelo + textura de skin) com recursos de GPU recriáveis após perda de contexto.
+// Personagem (modelo + textura de pele) com recursos de GPU recriáveis após perda de contexto.
 struct CharacterAsset {
     CharacterModel model;
     Image image;
-    std::string texturePath;
+    bool pixelArt = false;  // pele em pixel art: ampliação sem suavizar
     struct MeshGpu {
         GLuint vao = 0, vbo = 0, ibo = 0;
         GLsizei count = 0;
@@ -118,6 +118,8 @@ public:
     int contextId() const { return contextId_; }
     // Prepara GPU de um personagem (textura e malhas) se necessário.
     void ensureCharacter(CharacterAsset& asset);
+    // Libera a GPU de um personagem que saiu do cache.
+    void releaseCharacter(CharacterAsset& asset);
 
 private:
     struct Target {

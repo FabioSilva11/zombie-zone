@@ -1,5 +1,6 @@
 package com.fabiosilva.ecosdeeldra
 
+import com.fabiosilva.ecosdeeldra.data.Look
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
 import com.fabiosilva.ecosdeeldra.net.LanLobby
@@ -35,11 +36,18 @@ class PvpTest {
     }
 
     @Test
+    fun characterLookSurvivesLobbyEncoding() {
+        val look = Look(skin = 6, hairStyle = 5, top = 6, topColor = 15, hat = 7, shorts = true).encode()
+        val decoded = LanLobby.decodePlayers(LanLobby.encodePlayers(listOf(LanLobby.LobbyPlayer(1, look, "Rex"))))
+        assertEquals(look, decoded.single().skin)
+    }
+
+    @Test
     fun invalidLobbyEntriesAreIgnored() {
         val decoded = LanLobby.decodePlayers("9,1,Fora;x,1,Ruim;2,99,Ok")
         assertEquals(1, decoded.size)
         assertEquals(2, decoded[0].id)
-        assertEquals(17, decoded[0].skin)
+        assertEquals(99, decoded[0].skin)  // skin = aparência codificada do personagem
         assertTrue(LanLobby.sanitize("   ").isNotEmpty())
     }
 }

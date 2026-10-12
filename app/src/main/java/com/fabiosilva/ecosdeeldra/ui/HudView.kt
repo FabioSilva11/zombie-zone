@@ -31,8 +31,9 @@ import kotlin.math.tan
  * - joystick dinâmico (surge onde o polegar toca; empurrar até o fim = correr);
  * - arrastar na metade direita = girar a câmera;
  * - botão ATIRAR (segurar) também gira a câmera ao arrastar;
- * - MIRAR, PULAR, RECARREGAR, AGACHAR, CORRER (trava), FACA, GRANADA, TROCAR OMBRO,
- *   PAUSA, MINIMAPA e SUPRIMENTOS (anúncio); empurrar o joystick bem para cima trava a corrida.
+ * - MIRAR, PULAR, RECARREGAR, AGACHAR, CORRER (corrida automática), FACA, GRANADA, TROCAR OMBRO,
+ *   PAUSA, MINIMAPA e SUPRIMENTOS (anúncio); um toque em CORRER faz o personagem sair correndo
+ *   sozinho para a frente (o joystick ainda dirige; puxar para trás ou tocar de novo para).
  * Todos os controles podem ser movidos/redimensionados no editor (modo [editing]).
  * Na ilha mostra ninhos, portal, efeitos (fogo, sangramento, veneno) e zumbis elite.
  */
@@ -88,8 +89,8 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         private set
 
     private var aiming = false
-    private var autoRun = false        // trava de corrida: o personagem segue correndo sozinho
-    private var autoRunArmed = false
+    /** Corrida automática ligada pelo botão CORRER (o estado vem do motor). */
+    private val autoRun get() = hud[Hud.SPRINT_LOCK] > 0.5f
     private var stickBaseX = 0f
     private var stickBaseY = 0f
     private var stickX = 0f
@@ -161,7 +162,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         g(HudControl.HOTBAR).let { hotbarX = it.x; hotbarY = it.y; slotSize = it.r * 2f }
         if (!stickActive) {
             stickBaseX = stickHomeX; stickBaseY = stickHomeY; stickX = stickBaseX; stickY = stickBaseY
-            if (autoRun) stickY = stickBaseY - stickRadius
         }
     }
 
@@ -178,8 +178,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         touches.clear()
         aiming = false
         stickActive = false
-        autoRun = false
-        autoRunArmed = false
         feed.clear()
         tip = null
         lastHealth = -1f
@@ -342,8 +340,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                 touches[id] = touch
                 when (role) {
                     Role.JOYSTICK -> {
-                        autoRun = false
-                        autoRunArmed = false
                         stickActive = true
                         stickBaseX = x; stickBaseY = y; stickX = x; stickY = y
                     }
@@ -389,8 +385,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                                 stickBaseX += dx * k; stickBaseY += dy * k
                                 dx = x - stickBaseX; dy = y - stickBaseY
                             }
-                            // Empurrar bem para cima arma a trava de corrida (solte para travar).
-                            autoRunArmed = dy < -stickRadius * 1.3f && abs(dx) < stickRadius * 0.7f
                             val l2 = hypot(dx, dy)
                             val clamped = min(l2, stickRadius)
                             val nx = if (l2 > 0) dx / l2 * clamped else 0f
@@ -427,15 +421,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                         Role.JOYSTICK -> {
                             stickActive = false
                             stickBaseX = stickHomeX; stickBaseY = stickHomeY; stickX = stickBaseX; stickY = stickBaseY
-                            if (autoRunArmed && event.actionMasked != MotionEvent.ACTION_CANCEL) {
-                                autoRun = true
-                                stickY = stickBaseY - stickRadius
-                                NativeBridge.setMove(0f, 1f)
-                                haptic(true)
-                            } else {
-                                NativeBridge.setMove(0f, 0f)
-                            }
-                            autoRunArmed = false
+                            NativeBridge.setMove(0f, 0f)
                         }
                         Role.FIRE, Role.FIRE_LEFT -> if (touches.values.none { it.role == Role.FIRE || it.role == Role.FIRE_LEFT }) NativeBridge.setFire(false)
                         Role.GRENADE -> NativeBridge.setThrowAim(false, t.cancel || event.actionMasked == MotionEvent.ACTION_CANCEL)
@@ -1434,11 +1420,12 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.drawCircle(stickBaseX, stickBaseY, r, p)
         p.style = Paint.Style.FILL
         p.color = if (autoRun) Palette.gold else Color.argb(if (lit) 220 else 120, 168, 255, 62)
-        canvas.drawCircle(stickX, stickY, r * 0.41f, p)
+        // Corrida automática sem o polegar no joystick: a bolinha fica empurrada para a frente.
+        canvas.drawCircle(stickX, if (autoRun && !stickActive) stickBaseY - r * 0.6f else stickY, r * 0.41f, p)
         val ks = k(HudControl.JOYSTICK)
         when {
-            autoRunArmed || autoRun -> {
-                val text = if (autoRun) "🔒 CORRIDA TRAVADA" else "🔒 SOLTE PARA TRAVAR"
+            autoRun -> {
+                val text = "» CORRIDA AUTOMÁTICA"
                 textPaint.textSize = d(12f) * ks
                 val tw = textPaint.measureText(text) + d(16f)
                 val ty = stickBaseY - r - d(18f)
@@ -1448,7 +1435,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                 label(canvas, text, stickBaseX, ty, 12f * ks, Palette.gold)
             }
             hud[Hud.SPRINTING] > 0.5f -> label(canvas, "» CORRENDO", stickBaseX, stickBaseY - r - d(10f), 13f * ks, Palette.lime)
-            stickActive && stickY < stickBaseY - r * 0.9f -> label(canvas, "⇡ suba mais para travar", stickBaseX, stickBaseY - r - d(10f), 10f * ks, Color.argb(200, 255, 230, 140))
             !stickActive -> label(canvas, if (hud[Hud.SLOWED] > 0f) "LENTO (ÁCIDO)" else "MOVER", stickBaseX, stickBaseY + r + d(14f), 10f * ks, Color.argb(140, 255, 255, 255))
         }
     }

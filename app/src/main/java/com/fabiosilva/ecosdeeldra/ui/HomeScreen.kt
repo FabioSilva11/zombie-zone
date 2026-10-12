@@ -10,7 +10,7 @@ import android.widget.TextView
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Campaign
 import com.fabiosilva.ecosdeeldra.data.Rules
-import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.Cosmetics
 
 /** Cabeçalho padrão: botão voltar, título e recursos (estrelas/diamantes). */
 object Header {
@@ -91,7 +91,7 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         stats.addView(View(app), Ui.lp(app.dpi(6), 1))
         stats.addView(stat("ESTRELAS", starsValue), Ui.lp(0, Ui.WRAP, 1f))
         stats.addView(View(app), Ui.lp(app.dpi(6), 1))
-        stats.addView(stat("HERÓIS", heroesValue), Ui.lp(0, Ui.WRAP, 1f))
+        stats.addView(stat("VISUAIS", heroesValue), Ui.lp(0, Ui.WRAP, 1f))
         card.addView(stats)
         val play = Ui.button(app, "JOGAR  ▶", Palette.lime, Palette.dark, 20f) { app.startStage(current.number) }
         card.addView(play, Ui.lp(Ui.MATCH, app.dpi(52)).apply { topMargin = app.dpi(8) })
@@ -107,15 +107,14 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         addView(card, Ui.frame(app.dpi(330), Ui.WRAP, Gravity.END or Gravity.BOTTOM).apply { setMargins(0, 0, app.dpi(22), app.dpi(80)) })
 
         // Herói ativo (o modelo 3D aparece à esquerda, renderizado pelo motor)
-        val skin = Skins.get(p.selectedSkin)
-        val heroTag = Ui.chip(app, "♦", "${skin.name.uppercase()} • ${skin.role}", Palette.lime)
+        val heroTag = Ui.chip(app, "♦", "${p.currentHero.name.uppercase()} • PERSONAGEM", Palette.lime)
         addView(heroTag, Ui.frame(Ui.WRAP, Ui.WRAP, Gravity.BOTTOM or Gravity.START).apply { setMargins(app.dpi(22), 0, 0, app.dpi(86)) })
 
         // Navegação inferior
         val nav = Ui.row(app)
         fun navButton(label: String, fill: Int, textColor: Int, onClick: () -> Unit) =
             Ui.button(app, label, fill, textColor, 12f, onClick).apply { setPadding(app.dpi(10), app.dpi(6), app.dpi(10), app.dpi(10)) }
-        nav.addView(navButton("⚔ HERÓIS", Palette.stone, Color.WHITE) { app.showSkins() }, Ui.lp(0, app.dpi(54), 1f))
+        nav.addView(navButton("🧍 PERSONAGEM", Palette.stone, Color.WHITE) { app.showSkins() }, Ui.lp(0, app.dpi(54), 1f))
         nav.addView(View(app), Ui.lp(app.dpi(8), 1))
         val missions = FrameLayout(app)
         missions.addView(navButton("✔ MISSÕES", Palette.stone, Color.WHITE) { app.showMissions() }, Ui.frame(Ui.MATCH, Ui.MATCH))
@@ -153,7 +152,7 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         val p = app.progress
         stagesValue.text = p.completedStages().toString()
         starsValue.text = p.totalStars().toString()
-        heroesValue.text = "${p.ownedSkins.size}/${Skins.all.size}"
+        heroesValue.text = "${p.ownedCosmetics.size}/${Cosmetics.all.size}"
         missionsBadge.setCount(Rules.claimableDailyCount(app.progress) + if (Rules.canClaimCalendar(app.progress, app.today())) 1 else 0)
         val remaining = Rules.adsRemaining(app.progress, app.today())
         adButton.text = if (remaining > 0) "▶ +${Rules.AD_DIAMONDS} ◆  ($remaining)" else "▶ VOLTE AMANHÃ"

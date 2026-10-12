@@ -63,8 +63,14 @@ class Settings {
 /** Todo o progresso salvo do jogador. A lógica fica em [Rules] para ser testável sem Android. */
 class Progress {
     var diamonds = 0
-    var selectedSkin = 0
-    val ownedSkins: MutableSet<Int> = sortedSetOf(0)
+    /** Visuais especiais liberados para o editor de personagem (índices de [Cosmetics]). */
+    val ownedCosmetics: MutableSet<Int> = sortedSetOf(0)
+    /** Personagens criados pelo jogador (estilo Minecraft); sempre há pelo menos um. */
+    val heroes: MutableList<Hero> = mutableListOf(Hero("Herói", Look().encode()))
+    var selectedHero = 0
+    val currentHero: Hero get() = heroes.getOrElse(selectedHero) { heroes.first() }
+    /** Aparência codificada do personagem em uso (enviada ao motor). */
+    val lookCode: Int get() = currentHero.look
     val stages: MutableMap<Int, StageRecord> = mutableMapOf()
     /** Nível de cada melhoria (chaves em [Upgrades]). */
     val upgrades: MutableMap<String, Int> = mutableMapOf()
@@ -343,18 +349,35 @@ object Rules {
             p.missionsSinceInterstitial >= INTERSTITIAL_EVERY &&
             now - p.lastAdAt >= INTERSTITIAL_GAP_MS
 
-    /** Libera skins cujo objetivo foi cumprido; retorna as recém-liberadas. */
-    fun refreshSkinUnlocks(p: Progress): List<SkinDef> {
-        val unlocked = Skins.all.filter { it.index !in p.ownedSkins && Skins.objectiveMet(it, p) }
-        unlocked.forEach { p.ownedSkins.add(it.index) }
+    /** Libera visuais cujo objetivo foi cumprido; retorna os recém-liberados. */
+    fun refreshCosmeticUnlocks(p: Progress): List<Cosmetic> {
+        val unlocked = Cosmetics.all.filter { it.index !in p.ownedCosmetics && Cosmetics.objectiveMet(it, p) }
+        unlocked.forEach { p.ownedCosmetics.add(it.index) }
         return unlocked
     }
 
-    fun buySkin(p: Progress, index: Int): Boolean {
-        val skin = Skins.get(index)
-        if (index in p.ownedSkins || skin.price <= 0 || p.diamonds < skin.price) return false
-        p.diamonds -= skin.price
-        p.ownedSkins.add(index)
+    fun buyCosmetic(p: Progress, index: Int): Boolean {
+        val c = Cosmetics.get(index)
+        if (index in p.ownedCosmetics || c.price <= 0 || p.diamonds < c.price) return false
+        p.diamonds -= c.price
+        p.ownedCosmetics.add(index)
+        return true
+    }
+
+    const val MAX_HEROES = 6
+
+    /** Cria um personagem novo (aleatório, só com peças livres) e já o seleciona. */
+    fun createHero(p: Progress, look: Look, name: String): Boolean {
+        if (p.heroes.size >= MAX_HEROES) return false
+        p.heroes.add(Hero(sanitizeName(name), Cosmetics.sanitize(p, look).encode()))
+        p.selectedHero = p.heroes.size - 1
+        return true
+    }
+
+    fun deleteHero(p: Progress, index: Int): Boolean {
+        if (p.heroes.size <= 1 || index !in p.heroes.indices) return false
+        p.heroes.removeAt(index)
+        if (p.selectedHero >= index) p.selectedHero = (p.selectedHero - 1).coerceAtLeast(0)
         return true
     }
 

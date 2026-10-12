@@ -2,33 +2,21 @@ package com.fabiosilva.ecosdeeldra.ui
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorFilter
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.PixelFormat
 import android.graphics.RectF
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.TextView
 import com.fabiosilva.ecosdeeldra.MainActivity
-import com.fabiosilva.ecosdeeldra.data.Campaign
 import com.fabiosilva.ecosdeeldra.data.Inventory
 import com.fabiosilva.ecosdeeldra.data.ItemKind
 import com.fabiosilva.ecosdeeldra.data.Items
 import com.fabiosilva.ecosdeeldra.data.Rules
-import com.fabiosilva.ecosdeeldra.data.Skins
-import com.fabiosilva.ecosdeeldra.data.Upgrades
-import com.fabiosilva.ecosdeeldra.engine.Hud
-import com.fabiosilva.ecosdeeldra.engine.NativeBridge
 
 /**
  * Grade do inventário estilo Minecraft: 3 fileiras de mochila e a barra rápida embaixo.
@@ -144,20 +132,14 @@ class InventoryScreen(
     private var selected = -1
     private val explosives get() = app.progress.upgrade("explosives")
 
-    // Fundo próprio e opaco; fora da partida deixa uma "janela" onde o motor desenha o herói em 3D.
+    // Fundo próprio e opaco: a tela mostra só os itens (sem o personagem).
     private val bgPaint = Paint().apply { color = Color.rgb(9, 14, 26) }
     private val gridPaint = Paint().apply { color = Color.argb(14, 168, 255, 62) }
-    private val holePath = Path()
-    private val holeRect = RectF()
-    private val myLoc = IntArray(2)
-    private val holeLoc = IntArray(2)
-    private var heroWindow: View? = null
-    private val statsBox = Ui.column(app)
 
     init {
         isClickable = true
         Ui.blockTouches(this)
-        background = ScreenBackground()
+        setWillNotDraw(false)
         val column = Ui.column(app)
 
         // Barra superior: voltar, título, abas e diamantes.
@@ -179,130 +161,22 @@ class InventoryScreen(
         }, Ui.lp(Ui.WRAP, Ui.WRAP).apply { marginStart = app.dpi(4) })
         column.addView(header)
 
-        // Corpo: painel do personagem à esquerda e o conteúdo da aba à direita.
-        val body = Ui.row(app, Gravity.TOP)
-        body.addView(heroPanel(), Ui.lp(app.dpi(196), Ui.MATCH).apply { marginEnd = app.dpi(10) })
-        body.addView(content, Ui.lp(0, Ui.MATCH, 1f))
-        column.addView(body, Ui.lp(Ui.MATCH, 0, 1f).apply { setMargins(app.dpi(16), app.dpi(10), app.dpi(16), app.dpi(10)) })
+        // Corpo: só o conteúdo da aba, ocupando a largura toda.
+        column.addView(content, Ui.lp(Ui.MATCH, 0, 1f).apply { setMargins(app.dpi(16), app.dpi(10), app.dpi(16), app.dpi(10)) })
         addView(column, Ui.frame(Ui.MATCH, Ui.MATCH))
         selectTab(initialTab)
     }
 
-    /** Fundo da tela inteira, com a janela do herói recortada (fora da partida). */
-    private inner class ScreenBackground : Drawable() {
-        override fun draw(canvas: Canvas) {
-            val w = bounds.width().toFloat()
-            val h = bounds.height().toFloat()
-            val hole = heroWindow
-            if (!inMatch && hole != null && hole.width > 0) {
-                getLocationInWindow(myLoc)
-                hole.getLocationInWindow(holeLoc)
-                val l = (holeLoc[0] - myLoc[0]).toFloat()
-                val t = (holeLoc[1] - myLoc[1]).toFloat()
-                holeRect.set(l, t, l + hole.width, t + hole.height)
-                canvas.drawRect(0f, 0f, w, holeRect.top, bgPaint)
-                canvas.drawRect(0f, holeRect.bottom, w, h, bgPaint)
-                canvas.drawRect(0f, holeRect.top, holeRect.left, holeRect.bottom, bgPaint)
-                canvas.drawRect(holeRect.right, holeRect.top, w, holeRect.bottom, bgPaint)
-                // Cantos arredondados da janela.
-                val r = app.dp(10f)
-                holePath.reset()
-                holePath.addRect(holeRect, Path.Direction.CW)
-                holePath.addRoundRect(holeRect, r, r, Path.Direction.CCW)
-                canvas.drawPath(holePath, bgPaint)
-            } else {
-                canvas.drawRect(0f, 0f, w, h, bgPaint)
-            }
-            // Textura discreta de blocos.
-            val step = app.dp(32f)
-            var x = 0f
-            while (x < w) { canvas.drawRect(x, 0f, x + 1f, h, gridPaint); x += step }
-            var y = 0f
-            while (y < h) { canvas.drawRect(0f, y, w, y + 1f, gridPaint); y += step }
-        }
-
-        override fun setAlpha(alpha: Int) = Unit
-        override fun setColorFilter(colorFilter: ColorFilter?) = Unit
-        @Deprecated("Deprecated in Java")
-        override fun getOpacity() = PixelFormat.TRANSLUCENT
-    }
-
-    /** Painel "Personagem": herói (3D fora da partida, retrato durante a partida) e atributos. */
-    private fun heroPanel(): View {
-        // Sem preenchimento: o fundo da tela já é escuro e a janela do herói fica transparente.
-        val panel = Ui.panel(app, if (inMatch) Palette.panel else Color.TRANSPARENT)
-        val skin = Skins.get(app.progress.selectedSkin)
-        panel.addView(Ui.text(app, "PERSONAGEM", 10f, Palette.lime, Fonts.title))
-        panel.addView(Ui.title(app, skin.name, 15f).apply { setPadding(0, app.dpi(2), 0, app.dpi(4)) })
-        val window = FrameLayout(app)
-        if (inMatch) {
-            val id = resources.getIdentifier("skin_${'a' + app.progress.selectedSkin}", "drawable", app.packageName)
-            if (id != 0) {
-                val bitmap = BitmapFactory.decodeResource(resources, id)
-                window.addView(ImageView(app).apply {
-                    setImageDrawable(BitmapDrawable(resources, bitmap).apply { isFilterBitmap = false })
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                }, Ui.frame(Ui.MATCH, Ui.MATCH))
-            }
-            window.background = PanelDrawable(app, Color.argb(120, 0, 0, 0), Color.argb(60, 255, 255, 255), 10f)
-        } else {
-            // Área transparente: o motor desenha o herói atrás; arrastar gira o modelo.
-            val frame = object : View(app) {
-                private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.STROKE
-                    strokeWidth = app.dp(1.5f)
-                    color = Color.argb(90, 168, 255, 62)
-                }
-                private val r = RectF()
-                override fun onDraw(canvas: Canvas) {
-                    r.set(1f, 1f, width - 1f, height - 1f)
-                    canvas.drawRoundRect(r, app.dp(10f), app.dp(10f), stroke)
-                }
-            }
-            var lastX = 0f
-            frame.setOnTouchListener { _, e ->
-                when (e.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> lastX = e.x
-                    MotionEvent.ACTION_MOVE -> {
-                        app.rotatePreview((e.x - lastX) / resources.displayMetrics.density)
-                        lastX = e.x
-                    }
-                }
-                true
-            }
-            window.addView(frame, Ui.frame(Ui.MATCH, Ui.MATCH))
-            window.addView(Ui.text(app, "arraste para girar", 9f, Color.argb(150, 255, 255, 255)), Ui.frame(Ui.WRAP, Ui.WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = app.dpi(4) })
-            heroWindow = window
-            window.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> this@InventoryScreen.background?.invalidateSelf(); this@InventoryScreen.invalidate() }
-        }
-        panel.addView(window, Ui.lp(Ui.MATCH, 0, 1f))
-        panel.addView(statsBox, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
-        refreshStats()
-        return panel
-    }
-
-    private fun refreshStats() {
-        statsBox.removeAllViews()
-        val p = app.progress
-        val maxHealth = if (inMatch) {
-            val h = FloatArray(Hud.SIZE)
-            NativeBridge.copyHud(h)
-            h[Hud.MAX_HEALTH]
-        } else {
-            Campaign.difficulty(p.highestUnlockedStage(), p).playerHealth
-        }
-        fun stat(icon: String, label: String, value: String, color: Int) {
-            val row = Ui.row(app).apply { setPadding(0, app.dpi(1), 0, app.dpi(1)) }
-            row.addView(Ui.text(app, "$icon $label", 11f, Palette.muted, Fonts.bold), Ui.lp(0, Ui.WRAP, 1f))
-            row.addView(Ui.text(app, value, 11f, color, Fonts.title))
-            statsBox.addView(row)
-        }
-        val weapon = Items.get(inventory.slots.getOrNull(inventory.weaponSlot)?.id ?: Items.RIFLE)
-        stat("✋", "Na mão", weapon?.name ?: "—", weapon?.color ?: Palette.text)
-        stat("❤", "Vida máx.", "${maxHealth.toInt()}", Palette.red)
-        stat("⚔", "Dano", "+${((Upgrades.power(p.power) - 1f) * 100).toInt()}%", Color.rgb(255, 165, 61))
-        stat("🛡", "Blindagem", "${(Upgrades.armor(p.upgrade("armor")) * 100).toInt()}%", Color.rgb(157, 176, 216))
-        stat("👟", "Velocidade", "+${((Upgrades.agility(p.upgrade("agility")) - 1f) * 100).toInt()}%", Palette.cyan)
+    override fun onDraw(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        canvas.drawRect(0f, 0f, w, h, bgPaint)
+        // Textura discreta de blocos.
+        val step = app.dp(32f)
+        var x = 0f
+        while (x < w) { canvas.drawRect(x, 0f, x + 1f, h, gridPaint); x += step }
+        var y = 0f
+        while (y < h) { canvas.drawRect(0f, y, w, y + 1f, gridPaint); y += step }
     }
 
     /** Fecha a tela (volta ao jogo ou ao menu). */
@@ -322,7 +196,6 @@ class InventoryScreen(
             t.setTextColor(if (k == i) Palette.dark else Color.WHITE)
         }
         refreshDiamonds()
-        refreshStats()
         content.removeAllViews()
         content.addView(
             when (i) {
@@ -371,7 +244,6 @@ class InventoryScreen(
                     inventory.weaponSlot = selected
                     commit()
                     grid.invalidate()
-                    refreshStats()
                     showDetails()
                 }
                 Ui.setEnabledLook(equip, !inHand)

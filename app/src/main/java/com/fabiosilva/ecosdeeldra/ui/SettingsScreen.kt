@@ -62,7 +62,7 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
         if (AdConsent.privacyOptionsRequired(app)) {
             right.addView(Ui.button(app, "PRIVACIDADE DOS ANÚNCIOS", Palette.stone, Color.WHITE, 12f) { AdConsent.showPrivacyOptions(app) }, Ui.lp(Ui.MATCH, app.dpi(42)).apply { topMargin = app.dpi(4) })
         }
-        right.addView(Ui.text(app, "Personagens: Kenney Blocky Characters (CC0). Mundo, texturas, sons e músicas gerados para o Zombie Zone.", 10f, Palette.muted).apply { setPadding(0, app.dpi(10), 0, 0) })
+        right.addView(Ui.text(app, "Personagens, mundo, texturas, sons e músicas gerados para o Zombie Zone.", 10f, Palette.muted).apply { setPadding(0, app.dpi(10), 0, 0) })
 
         val columns = Ui.row(app, Gravity.TOP)
         columns.addView(left, Ui.lp(0, Ui.WRAP, 1f).apply { marginEnd = app.dpi(16) })

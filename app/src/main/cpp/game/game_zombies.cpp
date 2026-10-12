@@ -77,9 +77,10 @@ bool nodeBounds(const CharacterAsset* asset, int node, Vec3& mn, Vec3& mx) {
 }  // namespace
 
 void Game::loadZombieAssets() {
-    // Modelos infectados: os personagens Kenney com tons doentios variados.
-    zombieSkins_ = {11, 14, 2, 4, 6, 7, 9, 12, 13, 16};
-    for (int s : zombieSkins_) character(s);
+    // Zumbis de blocos: pele esverdeada, roupas rasgadas e variações por partida.
+    zombieLooks_.clear();
+    for (int i = 0; i < 12; ++i) zombieLooks_.push_back(zombieLook(i, config_.seed));
+    for (uint32_t look : zombieLooks_) character(look);
 }
 
 ZombieKind Game::rollKind() {
@@ -125,7 +126,7 @@ Zombie Game::makeZombie(ZombieKind kind, uint8_t mutations, const Vec3& pos) {
     z.kind = kind;
     z.mutations = mutations;
     const KindInfo& info = kKinds[static_cast<int>(kind)];
-    if (!zombieSkins_.empty()) z.asset = character(zombieSkins_[static_cast<size_t>(rng_.rangeInt(0, static_cast<int>(zombieSkins_.size()) - 1))]);
+    if (!zombieLooks_.empty()) z.asset = character(zombieLooks_[static_cast<size_t>(rng_.rangeInt(0, static_cast<int>(zombieLooks_.size()) - 1))]);
     // Tom de pele: cor do tipo com variação (esverdeado, acinzentado ou azulado nos comuns).
     Vec3 tint = info.tint;
     if (kind == ZombieKind::Walker || kind == ZombieKind::Runner) {
@@ -181,9 +182,51 @@ void Game::spawnZombie(const Vec3& pos, bool alerted, int nest, bool forceElite)
 
 void Game::updateZombies(float dt) {
     for (size_t i = 0; i < zombies_.size(); ++i) updateZombie(zombies_[i], i, dt);
+    separateBodies();
     // Chamados do grito (fora do laço: push_back invalidaria as referências).
     for (const Vec3& p : pendingSpawns_) spawnZombie(p, true);
     pendingSpawns_.clear();
+}
+
+// Colisão: zumbis não atravessam o jogador nem se empilham uns dentro dos outros.
+// O empurrão respeita as paredes (moveBody) e não mexe no estado de chão/água.
+void Game::separateBodies() {
+    auto push = [&](BodyState& b, const Vec3& d) {
+        bool ground = b.onGround, water = b.inWater;
+        moveBody(world_, b, d, 0.0f);
+        b.onGround = ground;
+        b.inWater = water;
+    };
+    for (Zombie& z : zombies_) {
+        if (z.state == ZState::Dead) continue;
+        Vec3 d(z.body.position.x - player_.position.x, 0, z.body.position.z - player_.position.z);
+        float dist = lengthXZ(d);
+        float minDist = player_.halfWidth + z.body.halfWidth;
+        if (dist >= minDist || std::fabs(z.body.position.y - player_.position.y) > 1.7f) continue;
+        Vec3 n = dist > 1e-3f ? d / dist : forwardFromYaw(z.yaw);
+        float pen = minDist - dist;
+        bool heavy = z.kind == ZombieKind::Brute || (z.mutations & MUT_GIANT);
+        float share = heavy ? 0.35f : 0.7f;  // quanto o zumbi recua (o resto empurra o jogador)
+        push(z.body, n * (pen * share));
+        if (!dead_ && mantleTime_ < 0) push(player_, n * (-pen * (1.0f - share)));
+    }
+    for (size_t i = 0; i < zombies_.size(); ++i) {
+        Zombie& a = zombies_[i];
+        if (a.state == ZState::Dead) continue;
+        for (size_t j = i + 1; j < zombies_.size(); ++j) {
+            Zombie& b = zombies_[j];
+            if (b.state == ZState::Dead) continue;
+            Vec3 d(b.body.position.x - a.body.position.x, 0, b.body.position.z - a.body.position.z);
+            float minDist = a.body.halfWidth + b.body.halfWidth;
+            if (std::fabs(d.x) >= minDist || std::fabs(d.z) >= minDist) continue;
+            float dist = lengthXZ(d);
+            if (dist >= minDist || std::fabs(a.body.position.y - b.body.position.y) > 1.7f) continue;
+            Vec3 n = dist > 1e-3f ? d / dist : Vec3(1, 0, 0);
+            float pen = (minDist - dist) * 0.5f;
+            push(a.body, n * -pen);
+            push(b.body, n * pen);
+        }
+    }
 }
 
 void Game::alertNear(const Vec3& at, float radius) {
@@ -871,7 +914,7 @@ void Game::killZombie(Zombie& z, bool headshot) {
     rollZombieDrop(z);
     if (survival()) score_ += headshot ? 15 : 10;
     Vec3 drop = z.body.position + Vec3(0, 1.0f, 0);
-    float healChance = z.mutations ? 1.0f : (health_ / maxHealth_ < 0.4f ? 0.3f : 0.1f);
+    float healChance = z.mutations ? 0.3f : (health_ / maxHealth_ < 0.3f ? 0.08f : 0.02f);
     if (rng_.chance(healChance)) {
         Pickup p;
         p.type = 1;

@@ -29,8 +29,9 @@ class InventoryTest {
     fun itemsStackUpToTheLimitAndOverflowIsReturned() {
         val inv = Inventory()
         assertEquals(0, inv.add(Items.MEDKIT, 7))
-        assertEquals(5, inv[0].count)
-        assertEquals(2, inv[1].count)
+        assertEquals(3, inv[0].count)
+        assertEquals(3, inv[1].count)
+        assertEquals(1, inv[2].count)
         // Granadas crescem com a melhoria de explosivos (+1 a cada 3 níveis).
         assertEquals(8, Items.maxStack(Items.GRENADE, 0))
         assertEquals(10, Items.maxStack(Items.GRENADE, 6))
@@ -58,12 +59,12 @@ class InventoryTest {
         assertEquals(Items.PISTOL, inv[10].id)
         assertEquals(10, inv.weaponSlot)
         // Juntar pilhas iguais.
-        inv.add(Items.BANDAGE, 2)
+        inv.add(Items.BANDAGE, 1)
         val first = inv.slots.indexOfFirst { it.id == Items.BANDAGE }
         inv.slots[15].id = Items.BANDAGE
-        inv.slots[15].count = 4
+        inv.slots[15].count = 2
         inv.moveOrSwap(15, first)
-        assertEquals(9, inv[first].count)
+        assertEquals(5, inv[first].count)
         assertTrue(inv[15].empty)
     }
 

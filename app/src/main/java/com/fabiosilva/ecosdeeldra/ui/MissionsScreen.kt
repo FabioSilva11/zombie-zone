@@ -9,7 +9,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Rules
-import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import com.fabiosilva.ecosdeeldra.data.UnlockKind
 import com.fabiosilva.ecosdeeldra.data.Upgrades
 import java.util.Calendar
@@ -26,7 +26,7 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
         setBackgroundColor(Color.argb(170, 6, 10, 20))
         Ui.blockTouches(this)
         val column = Ui.column(app)
-        header = Header.build(app, "MISSÕES", "VOLTE TODO DIA • LIBERE SKINS") { app.showHome() }
+        header = Header.build(app, "MISSÕES", "VOLTE TODO DIA • LIBERE VISUAIS") { app.showHome() }
         column.addView(header)
         val tabRow = Ui.row(app)
         listOf("DIÁRIAS", "CALENDÁRIO", "CONQUISTAS").forEachIndexed { i, label ->
@@ -54,7 +54,7 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
     private fun refresh() {
         val parent = header.parent as LinearLayout
         val index = parent.indexOfChild(header)
-        val fresh = Header.build(app, "MISSÕES", "VOLTE TODO DIA • LIBERE SKINS") { app.showHome() }
+        val fresh = Header.build(app, "MISSÕES", "VOLTE TODO DIA • LIBERE VISUAIS") { app.showHome() }
         parent.removeViewAt(index)
         parent.addView(fresh, index)
         header = fresh
@@ -117,7 +117,7 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
     private fun calendarView(): View {
         val p = app.progress
         val column = Ui.column(app)
-        column.addView(Ui.text(app, "Entre no jogo todo dia para resgatar prêmios crescentes. Dias de login liberam skins: 2 dias = Nyla • 5 dias = Elara • 7 dias = Kiro.", 12f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(10)) })
+        column.addView(Ui.text(app, "Entre no jogo todo dia para resgatar prêmios crescentes. Dias de login liberam visuais: 2 dias = Boné • 5 dias = Black power • 7 dias = Coroa dourada.", 12f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(10)) })
         val row = Ui.row(app)
         val cycleStart = p.calendarClaims - p.calendarClaims % 7
         val canClaim = Rules.canClaimCalendar(p, app.today())
@@ -146,15 +146,15 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
         val list = Ui.column(app)
         val s = p.stats
         list.addView(Ui.text(app, "Abates ${s.kills} • Tiros na cabeça ${s.headshots} • Vitórias ${s.wins} • Cristais ${s.crystals} • Tempo ${s.playSeconds / 60} min • Anúncios ${s.adsWatched}", 12f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(8)) })
-        for (skin in Skins.all.filter { it.unlock != UnlockKind.FREE && it.unlock != UnlockKind.DIAMONDS }) {
-            val owned = skin.index in p.ownedSkins
-            val (value, goal) = Skins.progressOf(skin, p)
+        for (skin in Cosmetics.all.filter { it.unlock != UnlockKind.FREE && it.unlock != UnlockKind.DIAMONDS }) {
+            val owned = skin.index in p.ownedCosmetics
+            val (value, goal) = Cosmetics.progressOf(skin, p)
             val color = when (skin.unlock) { UnlockKind.ADS -> Palette.cyan; UnlockKind.LOGIN_DAYS -> Palette.gold; else -> Palette.lime }
             val button = if (owned) Ui.button(app, "LIBERADA ✓", Palette.limeDark, Palette.dark, 12f) {}.also { Ui.setEnabledLook(it, false) }
             else if (skin.unlock == UnlockKind.ADS) Ui.button(app, "▶ ANÚNCIO", Palette.cyan, Palette.dark, 12f) { app.watchAd { refresh() } }
             else null
             list.addView(
-                rowCard("Skin ${skin.name}", Skins.requirementText(skin), if (owned) 1f else value.toFloat() / goal.coerceAtLeast(1), if (owned) "✓" else "${value.coerceAtMost(goal)}/$goal", color, button),
+                rowCard("Visual: ${skin.name}", Cosmetics.requirementText(skin), if (owned) 1f else value.toFloat() / goal.coerceAtLeast(1), if (owned) "✓" else "${value.coerceAtMost(goal)}/$goal", color, button),
                 Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(8) },
             )
         }

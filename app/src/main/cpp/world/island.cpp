@@ -126,10 +126,9 @@ float IslandGenerator::naturalHeight(float x, float z) const {
     float ridge = fbm(x / 420.0f, z / 420.0f, seed_ + 5, 4);
     float m = smoothstepf(0.55f, 0.8f, ridge);
     float h = static_cast<float>(sea_) + 6.5f + hills + m * m * 32.0f * hill;
-    // Mesetas em terraços nas áreas de deserto.
+    // Deserto: dunas mais baixas e suaves (sem terraços — paredes de areia mais altas que o jogador).
     float desert = (primary_.id == 1 ? 1.0f - sw : 0.0f) + (secondary_.id == 1 ? sw : 0.0f);
-    // Degraus de até ~2,5 blocos: dá para escalar (o jogador agarra bordas de até 3 blocos).
-    if (desert > 0.01f) h = lerpf(h, std::floor(h / 2.5f) * 2.5f, desert * 0.85f);
+    if (desert > 0.01f) h = lerpf(h, static_cast<float>(sea_) + 6.5f + (h - sea_ - 6.5f) * 0.7f, desert);
     if (h > 40.0f) h = 40.0f + (h - 40.0f) * 0.55f;
     h = lerpf(static_cast<float>(sea_) - 12.0f, h, land);
     // Rios: margens rebaixadas e leito abaixo do mar.

@@ -63,7 +63,7 @@ void placeSpruce(BlockSink& w, int x, int y, int z, Rng& rng) {
 }
 
 void placeCactus(BlockSink& w, int x, int y, int z, Rng& rng) {
-    int h = rng.rangeInt(2, 4);
+    int h = rng.chance(0.4f) ? 2 : 1;  // nunca mais alto que o jogador
     for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_CACTUS);
 }
 
@@ -276,7 +276,7 @@ void decorateCamp(BlockSink& w, const Camp& camp, const Theme& theme, Rng& rng, 
             for (int i = 0; i < pillars; ++i) {
                 int x, z;
                 ringPos(base + i * kTwoPi / pillars, camp.radius - rng.range(0.8f, 2.0f), x, z);
-                int h = rng.rangeInt(1, 4);
+                int h = rng.rangeInt(1, 2);
                 for (int k = 0; k < h; ++k) w.set(x, y + k, z, rng.chance(0.3f) ? B_STONE : B_COBBLE);
             }
             for (int i = 0; i < 2; ++i) {
@@ -308,7 +308,7 @@ void decorateCamp(BlockSink& w, const Camp& camp, const Theme& theme, Rng& rng, 
             for (int i = 0; i < stacks; ++i) {
                 int x, z;
                 ringPos(base + i * kTwoPi / stacks + rng.range(-0.2f, 0.2f), rng.range(2.5f, camp.radius - 1.0f), x, z);
-                int h = rng.rangeInt(1, 3);
+                int h = rng.rangeInt(1, 2);
                 for (int k = 0; k < h; ++k) w.set(x, y + k, z, rng.chance(0.25f) ? B_HAY : B_CRATE);
                 if (rng.chance(0.5f)) w.set(x + 1, y, z, B_CRATE);
             }
@@ -440,7 +440,7 @@ void buildNest(BlockSink& w, const Camp& camp, Rng& rng, DecorOut& out, Vec3& co
         float dist = camp.radius - rng.range(1.5f, 3.0f);
         int x = cx + static_cast<int>(std::lround(std::cos(ang) * dist));
         int z = cz + static_cast<int>(std::lround(std::sin(ang) * dist));
-        int h = rng.rangeInt(2, 5);
+        int h = rng.rangeInt(1, 2);
         for (int k = 0; k < h; ++k) w.set(x, y + k, z, k == h - 1 && rng.chance(0.5f) ? B_MAGMA : B_OBSIDIAN);
     }
     // Pedestal central.

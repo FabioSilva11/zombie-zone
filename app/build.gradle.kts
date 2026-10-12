@@ -12,8 +12,8 @@ android {
         applicationId = "com.fabiosilva.ecosdeeldra"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.5.1"
+        versionCode = 8
+        versionName = "0.6.1"
 
         // AdMob (IDs reais do app). O aparelho de desenvolvimento recebe anúncios de teste
         // via ADMOB_TEST_DEVICES para não gerar tráfego inválido (políticas do AdMob).
@@ -57,9 +57,6 @@ android {
         buildConfig = true
     }
 
-    androidResources {
-        noCompress += listOf("glb")
-    }
 }
 
 kotlin {
