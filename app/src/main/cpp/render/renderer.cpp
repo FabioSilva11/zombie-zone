@@ -15,6 +15,7 @@ constexpr int kShadowSize = 2048;
 constexpr float kShadowHalf = 46.0f;   // metade do lado da área de sombras (m)
 constexpr int kBillboardFloats = 9;    // pos(3) cor(4) uv(2)
 constexpr float kExposure = 0.8f;      // evita superexposição das cores das texturas
+constexpr float kCinematicExposure = 0.62f; // preserva detalhe antes da textura LDR do pós-processamento
 
 std::string shaderSource(const char* defines, const char* body) {
     std::string s = "#version 300 es\n";
@@ -159,7 +160,7 @@ void main() {
         vec3 h = normalize(u_sunDir + v);
         float spec = pow(max(dot(wn, h), 0.0), 140.0) * sh;
         float fres = pow(1.0 - max(dot(wn, v), 0.0), 3.0);
-        color = mix(color, u_fogColor * 1.05, fres * 0.45) + u_sunColor * spec * 2.2;
+        color = mix(color, u_fogColor * 1.05, fres * 0.45) + u_sunColor * spec;
     }
 #endif
     float fog = smoothstep(u_fogRange.x, u_fogRange.y, dist);
@@ -417,7 +418,7 @@ void main() {
     c *= 0.25;
     float l = max(c.r, max(c.g, c.b));
     // Só o que é realmente brilhante (fogo, lanternas, disparos) gera bloom.
-    o_color = vec4(c * smoothstep(0.82, 1.0, l), 1.0);
+    o_color = vec4(c * smoothstep(0.90, 1.05, l), 1.0);
 }
 )";
 
@@ -475,13 +476,13 @@ vec3 aces(vec3 x) {
 }
 void main() {
     vec3 c = texture(u_scene, v_uv).rgb;
-    c += texture(u_bloom, v_uv).rgb * 0.6;
+    c += texture(u_bloom, v_uv).rgb * 0.28;
     c += texture(u_rays, v_uv).rgb;
-    c = aces(c * 1.08);
+    c = aces(c * 0.95);
     // Correção de cor: sombras frias, luzes quentes, um pouco mais de saturação.
     float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
     c = mix(c * vec3(0.92, 0.99, 1.08), c * vec3(1.06, 1.0, 0.92), smoothstep(0.12, 0.72, l));
-    c = mix(vec3(l), c, 1.14);
+    c = mix(vec3(l), c, 1.08);
     vec2 d = v_uv - 0.5;
     c *= clamp(1.0 - dot(d, d) * 0.85, 0.0, 1.0);
     float g = fract(sin(dot(v_uv * 913.0 + vec2(u_time * 7.0, u_time * 3.0), vec2(12.9898, 78.233))) * 43758.5453);
@@ -851,10 +852,11 @@ void Renderer::setVoxelUniforms(const FrameScene& scene, const ShaderProgram& p,
     glUseProgram(p.id);
     glUniformMatrix4fv(p.uniform("u_viewProj"), 1, GL_FALSE, viewProj.m);
     glUniform1f(p.uniform("u_time"), scene.time);
-    Vec3 day = (sky.ambient + sky.sunColor * sky.sunIntensity) * kExposure;
+    const float exposure = cinematic_ ? (sky.night > 0.5f ? 0.70f : kCinematicExposure) : kExposure;
+    Vec3 day = (sky.ambient + sky.sunColor * sky.sunIntensity) * exposure;
     glUniform3f(p.uniform("u_dayLight"), day.x, day.y, day.z);
-    Vec3 amb = sky.ambient * (kExposure * 1.05f);
-    Vec3 sun = sky.sunColor * (sky.sunIntensity * kExposure * 1.2f);
+    Vec3 amb = sky.ambient * (exposure * 1.05f);
+    Vec3 sun = sky.sunColor * (sky.sunIntensity * exposure * 1.2f);
     glUniform3f(p.uniform("u_ambient"), amb.x, amb.y, amb.z);
     glUniform3f(p.uniform("u_sunColor"), sun.x, sun.y, sun.z);
     Vec3 sd = normalize(sky.sunDirection);
@@ -910,7 +912,7 @@ void Renderer::drawSky(const FrameScene& scene, const Mat4& viewProj) {
     glUniform3f(sky_.uniform("u_sunColor"), sky.sunColor.x, sky.sunColor.y, sky.sunColor.z);
     glUniform1f(sky_.uniform("u_night"), sky.night);
     glUniform1f(sky_.uniform("u_time"), scene.time);
-    glUniform1f(sky_.uniform("u_glow"), cinematic_ ? 0.35f : 0.0f);
+    glUniform1f(sky_.uniform("u_glow"), cinematic_ ? 0.14f : 0.0f);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glBindVertexArray(skyVao_);
@@ -953,10 +955,11 @@ void Renderer::setModelUniforms(const FrameScene& scene, const ShaderProgram& p,
     Vec3 sd = normalize(sky.sunDirection);
     glUniform3f(p.uniform("u_sunDir"), sd.x, sd.y, sd.z);
     bool lit = &p == &modelLit_;
-    Vec3 sun = sky.sunColor * (sky.sunIntensity * kExposure * (lit ? 1.15f : 1.0f));
+    const float exposure = cinematic_ ? (sky.night > 0.5f ? 0.70f : kCinematicExposure) : kExposure;
+    Vec3 sun = sky.sunColor * (sky.sunIntensity * exposure * (lit ? 1.15f : 1.0f));
     glUniform3f(p.uniform("u_sunColor"), sun.x, sun.y, sun.z);
     float extra = lit ? 0.03f : 0.06f;
-    glUniform3f(p.uniform("u_ambient"), sky.ambient.x * kExposure + extra, sky.ambient.y * kExposure + extra, sky.ambient.z * kExposure + extra);
+    glUniform3f(p.uniform("u_ambient"), sky.ambient.x * exposure + extra, sky.ambient.y * exposure + extra, sky.ambient.z * exposure + extra);
     glUniform3f(p.uniform("u_fogColor"), sky.fog.x, sky.fog.y, sky.fog.z);
     glUniform2f(p.uniform("u_fogRange"), sky.fogStart, sky.fogEnd);
     glUniform3f(p.uniform("u_camPos"), scene.cameraPos.x, scene.cameraPos.y, scene.cameraPos.z);
@@ -1256,7 +1259,7 @@ void Renderer::postProcess(const FrameScene& scene, const Mat4& viewProj) {
     if (clip.w > 0.01f && sunDir.y > -0.05f) {
         sx = clip.x / clip.w * 0.5f + 0.5f;
         sy = clip.y / clip.w * 0.5f + 0.5f;
-        strength = smoothstepf(0.1f, 0.75f, facing) * (scene.sky.night > 0.5f ? 0.35f : 0.75f);
+        strength = smoothstepf(0.1f, 0.75f, facing) * (scene.sky.night > 0.5f ? 0.16f : 0.32f);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, bloomB_.fbo);
     glViewport(0, 0, bloomB_.w, bloomB_.h);
