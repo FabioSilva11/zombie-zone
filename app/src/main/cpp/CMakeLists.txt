@@ -22,6 +22,7 @@ add_library(zombiezone SHARED
     render/character.cpp
     render/gl_util.cpp
     render/renderer.cpp
+    render/weapon_asset.cpp
     game/game.cpp
     game/game_items.cpp
     game/game_mission.cpp

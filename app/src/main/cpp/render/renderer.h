@@ -23,6 +23,7 @@ struct CharacterAsset {
     CharacterModel model;
     Image image;
     bool pixelArt = false;  // pele em pixel art: ampliação sem suavizar
+    bool doubleSided = false;
     struct MeshGpu {
         GLuint vao = 0, vbo = 0, ibo = 0;
         GLsizei count = 0;

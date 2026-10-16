@@ -36,6 +36,7 @@ object Items {
     const val ARMOR = 25
     const val GRENADE = 26
     const val MOLOTOV = 27
+    const val SMOKE = 28
 
     val all = listOf(
         ItemDef(RIFLE, "Fuzil de assalto", "Equilibrado: rajada rápida e boa precisão.", ItemKind.WEAPON, 0xFF8FD46B.toInt(), 0, 1, "18", "10/s", 30),
@@ -54,13 +55,14 @@ object Items {
         ItemDef(ARMOR, "Colete", "Absorve 70% do dano até se desgastar.", ItemKind.BUFF, 0xFF9DB0D8.toInt(), 60),
         ItemDef(GRENADE, "Granada", "Segure o botão para ver onde cai; solte para lançar.", ItemKind.THROWABLE, 0xFFA8C46A.toInt(), 25),
         ItemDef(MOLOTOV, "Molotov", "Fogo no chão que queima os zumbis (não você).", ItemKind.THROWABLE, 0xFFFF8A3D.toInt(), 25),
+        ItemDef(SMOKE, "Granada de fumaça", "Cria uma cortina de fumaça que bloqueia a visão e os tiros.", ItemKind.THROWABLE, 0xFFB8C2C9.toInt(), 35),
     )
 
     private val byId = all.associateBy { it.id }
 
     fun get(id: Int): ItemDef? = byId[id]
     fun isWeapon(id: Int) = id in RIFLE..LAUNCHER
-    fun isThrowable(id: Int) = id == GRENADE || id == MOLOTOV
+    fun isThrowable(id: Int) = id == GRENADE || id == MOLOTOV || id == SMOKE
     val weapons: List<ItemDef> get() = all.filter { it.kind == ItemKind.WEAPON }
     val consumables: List<ItemDef> get() = all.filter { it.kind != ItemKind.WEAPON }
 
@@ -72,7 +74,7 @@ object Items {
         ADRENALINE -> 5
         FIRE_AMMO -> 5
         ARMOR -> 3
-        GRENADE, MOLOTOV -> 8 + explosives / 3
+        GRENADE, MOLOTOV, SMOKE -> 8 + explosives / 3
         else -> if (isWeapon(id)) 1 else 0
     }
 }
@@ -219,6 +221,7 @@ class Inventory {
             add(Items.RIFLE, 1)
             add(Items.PISTOL, 1)
             add(Items.GRENADE, 3)
+            add(Items.SMOKE, 2)
             add(Items.BANDAGE, 2)
             add(Items.MEDKIT, 1)
             weaponSlot = 0

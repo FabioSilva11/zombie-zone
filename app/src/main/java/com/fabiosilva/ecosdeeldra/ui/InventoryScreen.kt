@@ -35,6 +35,8 @@ class InventoryGridView(context: Context, private val inventory: Inventory, priv
     private val rect = RectF()
     private val d = resources.displayMetrics.density
 
+    init { ItemIcons.initialize(context) }
+
     private fun cell(): Float = minOf(width / 6f, (height - 34f * d) / 4f)
 
     /** Posição do espaço [i]: fileiras 0..2 = mochila (6..23), fileira 3 = barra rápida (0..5). */

@@ -89,6 +89,8 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         private set
 
     private var aiming = false
+    private var aimStage = 0
+    private var aimWeapon = -1
     /** Corrida automática ligada pelo botão CORRER (o estado vem do motor). */
     private val autoRun get() = hud[Hud.SPRINT_LOCK] > 0.5f
     private var stickBaseX = 0f
@@ -118,6 +120,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
 
     init {
         isClickable = true
+        ItemIcons.initialize(context)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -177,13 +180,15 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     fun reset() {
         touches.clear()
         aiming = false
+        aimStage = 0
+        aimWeapon = -1
         stickActive = false
         feed.clear()
         tip = null
         lastHealth = -1f
         NativeBridge.setMove(0f, 0f)
         NativeBridge.setFire(false)
-        NativeBridge.setAim(false)
+        NativeBridge.setAimStage(0)
         NativeBridge.setThrowAim(false, true)
         lastWeapon = -1
         if (width > 0) layoutControls()
@@ -344,7 +349,12 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                         stickBaseX = x; stickBaseY = y; stickX = x; stickY = y
                     }
                     Role.FIRE, Role.FIRE_LEFT -> { NativeBridge.setFire(true); haptic(false) }
-                    Role.AIM -> { aiming = !aiming; NativeBridge.setAim(aiming); haptic(false) }
+                    Role.AIM -> {
+                        aimStage = if (hud[Hud.WEAPON].toInt() == Items.SNIPER) (aimStage + 1) % 3 else if (aimStage == 0) 1 else 0
+                        aiming = aimStage > 0
+                        NativeBridge.setAimStage(aimStage)
+                        haptic(false)
+                    }
                     Role.JUMP -> { NativeBridge.pressJump(); haptic(false) }
                     Role.RELOAD -> { NativeBridge.pressReload(); haptic(false) }
                     Role.CROUCH -> { NativeBridge.toggleCrouch(); haptic(false) }
@@ -447,6 +457,13 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             return
         }
         NativeBridge.copyHud(hud)
+        val currentWeapon = hud[Hud.WEAPON].toInt()
+        if (aimWeapon != currentWeapon) {
+            aimWeapon = currentWeapon
+            aimStage = 0
+            aiming = false
+            NativeBridge.setAimStage(0)
+        }
         val w = width.toFloat()
         val h = height.toFloat()
         val health = hud[Hud.HEALTH]
@@ -1252,8 +1269,15 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.drawLine(cx - r * 0.4f, cy - r * 0.4f, cx + r * 0.4f, cy + r * 0.4f, p)
         canvas.drawLine(cx + r * 0.4f, cy - r * 0.4f, cx - r * 0.4f, cy + r * 0.4f, p)
         p.style = Paint.Style.FILL
-        val molotov = hud[Hud.THROW_KIND].toInt() == Items.MOLOTOV
-        val text = if (over) "SOLTE PARA CANCELAR" else "SOLTE PARA ${if (molotov) "LANÇAR O MOLOTOV" else "LANÇAR A GRANADA"} • ARRASTE ATÉ ✕ PARA CANCELAR"
+        val kind = hud[Hud.THROW_KIND].toInt()
+        val molotov = kind == Items.MOLOTOV
+        val smoke = kind == Items.SMOKE
+        val itemName = when {
+            molotov -> "O MOLOTOV"
+            smoke -> "A FUMAÇA"
+            else -> "A GRANADA"
+        }
+        val text = if (over) "SOLTE PARA CANCELAR" else "SOLTE PARA LANÇAR $itemName • ARRASTE ATÉ ✕ PARA CANCELAR"
         textPaint.textSize = d(13f)
         val tw = textPaint.measureText(text) + d(24f)
         rect.set(w / 2 - tw / 2, h * 0.64f - d(18f), w / 2 + tw / 2, h * 0.64f + d(8f))
@@ -1268,14 +1292,18 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             textPaint.textSize = d(14f)
             textPaint.color = Color.argb(160, 0, 0, 0)
             canvas.drawText(label, x + d(1.5f), y - d(10f) + d(1.5f), textPaint)
-            textPaint.color = if (molotov) Color.rgb(255, 170, 80) else Color.rgb(255, 230, 120)
+            textPaint.color = when {
+                molotov -> Color.rgb(255, 170, 80)
+                smoke -> Color.rgb(205, 220, 230)
+                else -> Color.rgb(255, 230, 120)
+            }
             canvas.drawText(label, x, y - d(10f), textPaint)
         }
     }
 
     /** Luneta do rifle de precisão: tudo escuro fora do círculo, com retícula fina. */
     private fun drawScope(canvas: Canvas, w: Float, h: Float) {
-        if (hud[Hud.WEAPON].toInt() != Items.SNIPER || hud[Hud.AIM] < 0.85f) return
+        if (hud[Hud.WEAPON].toInt() != Items.SNIPER || aimStage == 0 || hud[Hud.AIM] < 0.85f) return
         val r = h * 0.42f
         path.reset()
         path.fillType = Path.FillType.EVEN_ODD
@@ -1285,13 +1313,25 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.drawPath(path, p)
         path.fillType = Path.FillType.WINDING
         p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2f)
-        p.color = Color.argb(220, 10, 10, 10)
+        p.strokeWidth = d(2.2f)
+        p.color = Color.argb(235, 10, 10, 10)
         canvas.drawCircle(w / 2, h / 2, r, p)
-        p.strokeWidth = d(1.2f)
+        p.strokeWidth = d(1.1f)
         canvas.drawLine(w / 2 - r, h / 2, w / 2 + r, h / 2, p)
         canvas.drawLine(w / 2, h / 2 - r, w / 2, h / 2 + r, p)
+        val tick = if (aimStage >= 2) d(15f) else d(11f)
+        for (i in -3..3) {
+            if (i == 0) continue
+            val offset = i * tick
+            canvas.drawLine(w / 2 + offset, h / 2 - d(4f), w / 2 + offset, h / 2 + d(4f), p)
+            canvas.drawLine(w / 2 - d(4f), h / 2 + offset, w / 2 + d(4f), h / 2 + offset, p)
+        }
         p.style = Paint.Style.FILL
+        p.color = Color.rgb(220, 38, 38)
+        canvas.drawCircle(w / 2, h / 2, d(2.2f), p)
+        textPaint.textSize = d(13f)
+        textPaint.color = Color.WHITE
+        canvas.drawText(if (aimStage >= 2) "8×" else "4×", w / 2, h / 2 + r - d(18f), textPaint)
     }
 
     /** Sobrevivência: direções de onde a horda está vindo (setas vermelhas numa faixa). */
@@ -1576,7 +1616,12 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         p.color = if (count > 0) Palette.gold else Palette.stone
         canvas.drawCircle(bx, by, d(8f) * s, p)
         label(canvas, "$count", bx, by + d(3.5f) * s, 10f * s, Palette.dark)
-        label(canvas, if (kind == Items.MOLOTOV) "MOLOTOV" else "GRANADA", gc.x, gc.y + d(18f) * s, 7.5f * s, Color.WHITE)
+        val itemLabel = when (kind) {
+            Items.MOLOTOV -> "MOLOTOV"
+            Items.SMOKE -> "FUMAÇA"
+            else -> "GRANADA"
+        }
+        label(canvas, itemLabel, gc.x, gc.y + d(18f) * s, 7.5f * s, Color.WHITE)
     }
 
     private fun drawPause(canvas: Canvas) {

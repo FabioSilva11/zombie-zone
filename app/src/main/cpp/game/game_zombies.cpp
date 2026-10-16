@@ -293,7 +293,7 @@ void Game::updateZombie(Zombie& z, size_t index, float dt) {
         float sight = theme_.sky.night > 0.5f ? 14.0f : 21.0f;
         if (isRanged(z.kind)) sight += 6.0f;
         if (crouching_) sight *= 0.6f;  // agachado: furtivo
-        z.canSee = dist < sight + 10.0f && world_.lineOfSight(pos + Vec3(0, 1.5f * z.scale, 0), player_.position + Vec3(0, 1.5f, 0));
+        z.canSee = dist < sight + 10.0f && clearLineOfSight(pos + Vec3(0, 1.5f * z.scale, 0), player_.position + Vec3(0, 1.5f, 0));
         if (!z.alerted && !dead_ && ((z.canSee && dist < sight) || dist < (crouching_ ? 3.5f : 6.5f))) {
             z.alerted = true;
             z.lostSight = 0;
@@ -622,6 +622,7 @@ void Game::throwProjectile(Zombie& z, ProjectileKind kind) {
         case ProjectileKind::Acid: p.damage = z.damage * 0.6f; break;
         case ProjectileKind::Knife: p.damage = z.damage * 0.9f; break;
         case ProjectileKind::Grenade: p.damage = z.damage; break;  // zumbis não usam granadas
+        case ProjectileKind::Smoke: p.damage = 0.0f; break;
     }
     projectiles_.push_back(p);
     emitSound(kind == ProjectileKind::Acid ? SND_SPIT : SND_THROW, hand, 0.8f);
@@ -742,6 +743,17 @@ void Game::impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer)
         case ProjectileKind::Grenade:
             explode(at + Vec3(0, 0.3f, 0), p.radius, 28.0f, p.damage, false);
             break;
+        case ProjectileKind::Smoke: {
+            SmokeCloud cloud;
+            cloud.pos = ground;
+            cloud.radius = 5.2f;
+            cloud.life = cloud.maxLife = 11.0f;
+            cloud.fxTimer = 0.0f;
+            if (smokeClouds_.size() >= 8) smokeClouds_.erase(smokeClouds_.begin());
+            smokeClouds_.push_back(cloud);
+            emitSound(SND_THROW, at, 0.65f);
+            break;
+        }
         case ProjectileKind::Acid: {
             Hazard h;
             h.kind = 1;

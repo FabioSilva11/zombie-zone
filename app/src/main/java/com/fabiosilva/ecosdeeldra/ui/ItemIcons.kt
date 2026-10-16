@@ -3,20 +3,81 @@ package com.fabiosilva.ecosdeeldra.ui
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.util.Xml
 import android.view.View
+import androidx.core.graphics.PathParser
 import com.fabiosilva.ecosdeeldra.data.Items
+import org.xmlpull.v1.XmlPullParser
 
 /** Ícones dos itens desenhados em Canvas (sem imagens): usados no HUD, na mochila e no arsenal. */
 object ItemIcons {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val rect = RectF()
+    private data class SvgIcon(val path: Path, val left: Float, val top: Float, val width: Float, val height: Float)
+    private val sourceIcons = HashMap<Int, SvgIcon>()
+    private var sourceIconsLoaded = false
+
+    /** Carrega os SVG originais do repositório de referência uma vez por processo. */
+    fun initialize(context: Context) {
+        if (sourceIconsLoaded) return
+        sourceIconsLoaded = true
+        listOf(
+            Items.RIFLE to "icons/ak47.svg",
+            Items.PISTOL to "icons/pistol.svg",
+            Items.SNIPER to "icons/sniper.svg",
+        ).forEach { (id, asset) ->
+            runCatching { parseSvg(context, asset) }.getOrNull()?.let { sourceIcons[id] = it }
+        }
+    }
+
+    private fun parseSvg(context: Context, file: String): SvgIcon? {
+        val parser = Xml.newPullParser()
+        var viewBox: FloatArray? = null
+        var pathData: String? = null
+        context.assets.open(file).use { input ->
+            parser.setInput(input, "UTF-8")
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                if (event == XmlPullParser.START_TAG) {
+                    when (parser.name) {
+                        "svg" -> {
+                            val raw = parser.getAttributeValue(null, "viewBox")
+                            val values = raw?.trim()?.split(Regex("[ ,]+"))?.mapNotNull { it.toFloatOrNull() }
+                            if (values?.size == 4) viewBox = values.toFloatArray()
+                        }
+                        "path" -> if (pathData == null) pathData = parser.getAttributeValue(null, "d")
+                    }
+                }
+                event = parser.next()
+            }
+        }
+        val box = viewBox ?: return null
+        val data = pathData ?: return null
+        return SvgIcon(PathParser.createPathFromPathData(data), box[0], box[1], box[2], box[3])
+    }
 
     /** Desenha o item [id] centrado em (cx, cy) num quadrado de lado [size]. */
     fun draw(canvas: Canvas, id: Int, cx: Float, cy: Float, size: Float, alpha: Int = 255) {
+        sourceIcons[id]?.let { icon ->
+            val scale = minOf(size / icon.width, size / icon.height) * 0.86f
+            val matrix = Matrix().apply {
+                setScale(scale, scale)
+                postTranslate(cx - (icon.left + icon.width * 0.5f) * scale, cy - (icon.top + icon.height * 0.5f) * scale)
+            }
+            val scaledPath = Path()
+            icon.path.transform(matrix, scaledPath)
+            paint.style = Paint.Style.FILL
+            paint.color = Color.rgb(226, 232, 240)
+            paint.alpha = alpha
+            canvas.drawPath(scaledPath, paint)
+            paint.alpha = 255
+            return
+        }
         val s = size / 32f
         val p = paint
         p.style = Paint.Style.FILL
@@ -177,6 +238,21 @@ object ItemIcons {
                 p.alpha = alpha
                 canvas.drawCircle(cx, cy - 14f * s, 1.8f * s, p)
             }
+            Items.SMOKE -> {
+                box(-7f, -8f, 7f, 10f, Color.rgb(150, 160, 166), 3f)
+                box(-5f, -11f, 5f, -8f, Color.rgb(96, 106, 112))
+                box(-7f, -2f, 7f, 1f, Color.rgb(210, 218, 222))
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = 2f * s
+                p.color = Color.rgb(220, 228, 232)
+                p.alpha = alpha
+                canvas.drawCircle(cx + 7f * s, cy - 10f * s, 3.5f * s, p)
+                p.style = Paint.Style.FILL
+                p.color = Color.rgb(186, 196, 202)
+                p.alpha = alpha
+                canvas.drawCircle(cx - 10f * s, cy - 11f * s, 3.0f * s, p)
+                canvas.drawCircle(cx + 11f * s, cy - 16f * s, 4.0f * s, p)
+            }
             else -> Unit
         }
         p.alpha = 255
@@ -185,6 +261,8 @@ object ItemIcons {
 
 /** View simples com o ícone de um item (para listas do arsenal). */
 class ItemIconView(context: Context, var itemId: Int) : View(context) {
+    init { ItemIcons.initialize(context) }
+
     override fun onDraw(canvas: Canvas) {
         ItemIcons.draw(canvas, itemId, width / 2f, height / 2f, minOf(width, height) * 0.9f)
     }

@@ -989,6 +989,8 @@ void Renderer::drawCharacters(const FrameScene& scene, const ShaderProgram& p, b
             glUniform1f(uFlash, draw.flash);
             glUniform3f(uFlashColor, draw.flashColor.x, draw.flashColor.y, draw.flashColor.z);
         }
+        const bool restoreCull = draw.asset->doubleSided && glIsEnabled(GL_CULL_FACE);
+        if (draw.asset->doubleSided) glDisable(GL_CULL_FACE);
         const auto& nodes = draw.asset->model.nodes();
         for (size_t i = 0; i < nodes.size() && i < draw.nodes.size(); ++i) {
             int mesh = nodes[i].mesh;
@@ -999,6 +1001,7 @@ void Renderer::drawCharacters(const FrameScene& scene, const ShaderProgram& p, b
             glBindVertexArray(gpu.vao);
             glDrawElements(GL_TRIANGLES, gpu.count, GL_UNSIGNED_SHORT, nullptr);
         }
+        if (restoreCull) glEnable(GL_CULL_FACE);
     }
     glBindVertexArray(0);
 }

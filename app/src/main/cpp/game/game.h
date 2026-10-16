@@ -85,6 +85,7 @@ struct RemotePlayer {
     int sampleCount = 0;
     uint32_t lastVersion = 0;
     Vec3 renderPos;
+    Vec3 moveVelocity;
     float renderYaw = 0, renderPitch = 0, speed = 0;
     uint8_t flags = 0;
     float fireFlash = 0;
@@ -98,6 +99,7 @@ struct InputState {
     float lookX = 0, lookY = 0;  // acumulado em dp
     bool fire = false;
     bool aim = false;
+    int aimStage = 0;  // 0 = fora da mira, 1 = ADS, 2 = segundo nível da luneta
     int jumps = 0;
     int reloads = 0;
     float previewRotate = 0;
@@ -206,7 +208,7 @@ struct Pickup {
     bool taken = false;
 };
 
-enum class ProjectileKind { Rock, Molotov, Acid, Knife, Grenade };
+enum class ProjectileKind { Rock, Molotov, Acid, Knife, Grenade, Smoke };
 
 struct Projectile {
     ProjectileKind kind = ProjectileKind::Rock;
@@ -245,6 +247,13 @@ struct FlashLight {
     float radius;
     Vec3 color;
     float life, maxLife;
+};
+
+struct SmokeCloud {
+    Vec3 pos;
+    float radius = 5.0f;
+    float life = 11.0f, maxLife = 11.0f;
+    float fxTimer = 0;
 };
 
 struct Nest {
@@ -316,6 +325,7 @@ public:
     void addLook(float dx, float dy);
     void setFire(bool held);
     void setAim(bool on);
+    void setAimStage(int stage);
     void pressJump();
     void pressReload();
     void rotatePreview(float dx);
@@ -351,6 +361,7 @@ private:
     static constexpr int kBigMapSize = 256;
 
     CharacterAsset* character(uint32_t look);
+    void addImportedAk47(const Mat4& frame, Vec3* muzzle);
     void emit(int type, int a = 0, int b = 0, int c = 0);
     void emitSound(int sound, const Vec3& at, float volume = 1.0f);
 
@@ -363,8 +374,9 @@ private:
     void addWeaponModel(const CharacterDraw& draw, int armRight, int weapon, Vec3* muzzle);
     void addWeaponParts(const Mat4& frame, int weapon, Vec3* muzzle);
     void addWeaponOnBack(const CharacterDraw& draw, int torso, int weapon);
+    void addThrowableModel(const CharacterDraw& draw, int armRight, int item);
     void poseArmed(Pose& pose, const CharacterModel& model, float pitch, bool moveHead);
-    void poseArmedBlend(Pose& pose, const CharacterModel& model, float pitch, bool moveHead, float lean, float weight);
+    void poseArmedBlend(Pose& pose, const CharacterModel& model, float pitch, bool moveHead, float lean, float weight, int weapon = IT_RIFLE);
     void poseAir(Pose& pose, const CharacterModel& model, float blend, bool armsFree);
     void updatePlayer(float dt, const InputState& in);
     void updateCamera(float dt, const InputState& in);
@@ -410,6 +422,8 @@ private:
     void updateEffects(float dt);
     void spawnBurst(const Vec3& at, const Vec4& color, int count, float speed, float size, bool additive, float gravity);
     void addFlash(const Vec3& at, float radius, const Vec3& color, float life);
+    bool smokeObscures(const Vec3& from, const Vec3& to) const;
+    bool clearLineOfSight(const Vec3& from, const Vec3& to) const;
     void finishResult();
 
     // Ilha (game_mission.cpp)
@@ -472,6 +486,8 @@ private:
     bool paused_ = false;
     MissionConfig config_;
     std::map<uint32_t, std::unique_ptr<CharacterAsset>> characters_;
+    CharacterAsset ak47Asset_;
+    bool ak47Loaded_ = false;
     std::vector<Vec3> layerColors_;
     int viewRadius_ = 8;
 
@@ -479,6 +495,7 @@ private:
     std::mutex inputMutex_;
     InputState input_;
     bool aimToggle_ = false;
+    int aimStage_ = 0;
 
     // Saídas
     std::mutex outMutex_;
@@ -560,6 +577,8 @@ private:
     Vec3 throwLanding_;
     bool throwLandingValid_ = false;
     float throwAimTime_ = 0;
+    float throwAnimTime_ = -1;
+    int throwAnimItem_ = 0;
 
     // Arma
     int ammo_ = 30;
@@ -572,6 +591,7 @@ private:
     float hitMark_ = 0;
     bool headshotMark_ = false;
     float muzzleTimer_ = 0;
+    float weaponKick_ = 0;
     Vec3 muzzlePos_;
     bool firingNow_ = false;
     bool targetLocked_ = false;
@@ -597,6 +617,7 @@ private:
     std::vector<Tracer> tracers_;
     std::vector<Projectile> projectiles_;
     std::vector<Hazard> hazards_;
+    std::vector<SmokeCloud> smokeClouds_;
     std::vector<Explosion> explosions_;
     std::vector<FlashLight> flashes_;
     std::vector<Nest> nests_;

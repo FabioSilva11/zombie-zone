@@ -465,7 +465,7 @@ object Rules {
         }
         if (p.supplyAdsToday >= SUPPLY_AD_CAP) return emptyList()
         p.supplyAdsToday += 1
-        val pool = listOf(Items.MEDKIT, Items.GRENADE, Items.MOLOTOV, Items.ADRENALINE, Items.ARMOR, Items.FIRE_AMMO, Items.BANDAGE, Items.ANTIDOTE)
+        val pool = listOf(Items.MEDKIT, Items.GRENADE, Items.MOLOTOV, Items.SMOKE, Items.ADRENALINE, Items.ARMOR, Items.FIRE_AMMO, Items.BANDAGE, Items.ANTIDOTE)
         val got = mutableListOf(Items.GRENADE to 2, Items.MEDKIT to 1)
         repeat(2) { got.add(pool[random.nextInt(pool.size)] to 1) }
         val explosives = p.upgrade("explosives")

@@ -123,7 +123,8 @@ int itemMaxStack(int id, int explosivesLevel) {
         case IT_FIRE_AMMO: return 5;
         case IT_ARMOR: return 3;
         case IT_GRENADE:
-        case IT_MOLOTOV: return 8 + explosivesLevel / 3;
+        case IT_MOLOTOV:
+        case IT_SMOKE: return 8 + explosivesLevel / 3;
         default: return isWeaponItem(id) ? 1 : 0;
     }
 }
@@ -203,6 +204,8 @@ void Game::resetInventory() {
     sinceHurt_ = 10;
     throwAiming_ = false;
     throwArc_.clear();
+    throwAnimTime_ = -1.0f;
+    throwAnimItem_ = 0;
 }
 
 int Game::weaponId() const {
@@ -323,7 +326,7 @@ void Game::rollZombieDrop(const Zombie& z) {
     if (!rng_.chance(std::min(1.0f, chance))) return;
     struct W { int id; float w; };
     static const W table[] = {
-        {IT_BANDAGE, 12}, {IT_GRENADE, 26}, {IT_MEDKIT, 3}, {IT_MOLOTOV, 16},
+        {IT_BANDAGE, 12}, {IT_GRENADE, 26}, {IT_MEDKIT, 3}, {IT_MOLOTOV, 16}, {IT_SMOKE, 12},
         {IT_FIRE_AMMO, 12}, {IT_ADRENALINE, 9}, {IT_ANTIDOTE, 5}, {IT_ARMOR, 4},
     };
     float total = 0;
@@ -344,7 +347,7 @@ void Game::rollZombieDrop(const Zombie& z) {
 
 // Caixa de suprimentos (anúncio): consumíveis variados; o que não couber fica no chão.
 void Game::giveSupplyBundle() {
-    const int bundle[][2] = {{IT_BANDAGE, 1}, {IT_GRENADE, 2}, {IT_MOLOTOV, 1}, {IT_ADRENALINE, 1}, {IT_ARMOR, 1}};
+    const int bundle[][2] = {{IT_BANDAGE, 1}, {IT_GRENADE, 2}, {IT_MOLOTOV, 1}, {IT_SMOKE, 1}, {IT_ADRENALINE, 1}, {IT_ARMOR, 1}};
     for (const auto& b : bundle) {
         int left = addItem(b[0], b[1]);
         if (left < b[1]) emit(EV_ITEM, b[0], b[1] - left, 0);
@@ -522,15 +525,17 @@ void Game::throwSelected() {
     if (id == 0 || grenadeCooldown_ > 0 || !takeItem(id, 1)) return;
     grenadeCooldown_ = 0.8f;
     Projectile p;
-    p.kind = id == IT_MOLOTOV ? ProjectileKind::Molotov : ProjectileKind::Grenade;
+    p.kind = id == IT_MOLOTOV ? ProjectileKind::Molotov : (id == IT_SMOKE ? ProjectileKind::Smoke : ProjectileKind::Grenade);
     p.friendly = true;
     throwVelocity(p.pos, p.vel, p.gravity);
     p.target = throwLandingValid_ ? throwLanding_ : p.pos + p.vel;
     p.life = 4.0f;
     float boom = 1.0f + config_.explosives * 0.08f;
-    p.damage = (id == IT_MOLOTOV ? 30.0f : 200.0f) * config_.power * config_.boostDamage * boom;
+    p.damage = id == IT_SMOKE ? 0.0f : (id == IT_MOLOTOV ? 30.0f : 200.0f) * config_.power * config_.boostDamage * boom;
     p.radius = id == IT_MOLOTOV ? 3.2f : 5.0f;
     projectiles_.push_back(p);
+    throwAnimTime_ = 0.0f;
+    throwAnimItem_ = id;
     playerYaw_ = camYaw_;
     emitSound(SND_THROW, p.pos, 0.8f);
     // Sem mais deste item: escolhe outro arremessável.
@@ -599,7 +604,7 @@ void Game::fireFlame() {
         float d = length(to);
         if (d > w.range + 0.4f * z.scale || d < 0.05f) continue;
         if (dot(to / d, dir) < 0.86f && d > 1.2f) continue;
-        if (!world_.lineOfSight(origin, c)) continue;
+        if (!clearLineOfSight(origin, c)) continue;
         z.burn = std::max(z.burn, 2.5f);
         z.burnDps = std::max(z.burnDps, 16.0f * power);
         damageZombie(z, w.damage * power, false, dir, c);
@@ -640,6 +645,7 @@ void Game::fireLauncher() {
     p.damage = w.damage * config_.power * config_.boostDamage * (damageBoost_ > 0 ? 1.5f : 1.0f) * boom;
     projectiles_.push_back(p);
     muzzleTimer_ = 0.08f;
+    weaponKick_ = std::max(weaponKick_, 0.9f);
     recoil_ += w.recoil;
     camPitch_ += w.recoil * 0.4f;
     spawnBurst(p.pos, {0.8f, 0.8f, 0.8f, 0.6f}, 8, 2.0f, 0.3f, false, -1.0f);
@@ -657,6 +663,10 @@ void Game::addWeaponModel(const CharacterDraw& draw, int armR, int weapon, Vec3*
 }
 
 void Game::addWeaponParts(const Mat4& frame, int weapon, Vec3* muzzle) {
+    if (weapon == IT_RIFLE && ak47Loaded_) {
+        addImportedAk47(frame, muzzle);
+        return;
+    }
     for (const Part& p : weaponParts(weapon)) {
         BoxDraw box;
         box.world = frame * Mat4::translation(p.c) * Mat4::scale(p.size);
@@ -666,6 +676,22 @@ void Game::addWeaponParts(const Mat4& frame, int weapon, Vec3* muzzle) {
         scene_.boxes.push_back(box);
     }
     if (muzzle) *muzzle = frame.transformPoint({0, 0.1f, weaponDef(weapon).length});
+}
+
+void Game::addImportedAk47(const Mat4& frame, Vec3* muzzle) {
+    // O GLB original tem o cano no eixo -Z; o espaço de armas do jogo usa +Z.
+    const Mat4 modelFrame = frame * Mat4::rotationY(kPi);
+    if (muzzle) *muzzle = modelFrame.transformPoint({-0.01814f, 0.10661f, 0.64570f});
+    if (scene_.characterCount >= scene_.characters.size()) scene_.characters.emplace_back();
+    CharacterDraw& draw = scene_.characters[scene_.characterCount++];
+    draw.asset = &ak47Asset_;
+    draw.world = modelFrame;
+    Pose bind;
+    ak47Asset_.model.bindPose(bind);
+    ak47Asset_.model.globals(bind, draw.nodes);
+    draw.tint = {1, 1, 1};
+    draw.flash = 0;
+    draw.alpha = 1;
 }
 
 }  // namespace zz

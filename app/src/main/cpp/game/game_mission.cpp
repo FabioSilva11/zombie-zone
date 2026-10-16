@@ -311,7 +311,7 @@ void Game::updateChests(float dt) {
             if (left > 0) dropItem(c.pos + Vec3(0, 1.0f, 0), IT_GRENADE, left);
         }
         // Cura é rara no baú: kit médico só às vezes e no máximo uma bandagem.
-        static const int kChestLoot[] = {IT_BANDAGE, IT_MOLOTOV, IT_GRENADE, IT_ADRENALINE, IT_ANTIDOTE, IT_FIRE_AMMO, IT_ARMOR, IT_MOLOTOV};
+        static const int kChestLoot[] = {IT_BANDAGE, IT_MOLOTOV, IT_GRENADE, IT_SMOKE, IT_ADRENALINE, IT_ANTIDOTE, IT_FIRE_AMMO, IT_ARMOR, IT_MOLOTOV};
         int extra = rng_.chance(0.25f) ? 2 : 1;
         for (int k = 0; k < extra; ++k) dropItem(c.pos + Vec3(0, 1.0f, 0), kChestLoot[rng_.rangeInt(0, 7)], 1);
         if (rng_.chance(0.08f * config_.luck)) dropItem(c.pos + Vec3(0, 1.0f, 0), IT_MEDKIT, 1);

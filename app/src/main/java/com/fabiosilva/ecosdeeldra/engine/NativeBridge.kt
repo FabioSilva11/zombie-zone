@@ -40,6 +40,7 @@ object NativeBridge {
     external fun addLook(dx: Float, dy: Float)
     external fun setFire(held: Boolean)
     external fun setAim(on: Boolean)
+    external fun setAimStage(stage: Int)
     external fun pressJump()
     external fun pressReload()
     external fun requestSupply()

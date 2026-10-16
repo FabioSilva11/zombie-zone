@@ -152,6 +152,7 @@ JNIEXPORT void JNICALL ZZ_FN(addLook)(JNIEnv*, jobject, jfloat dx, jfloat dy) { 
 JNIEXPORT void JNICALL ZZ_FN(setFire)(JNIEnv*, jobject, jboolean held) { game().setFire(held); }
 
 JNIEXPORT void JNICALL ZZ_FN(setAim)(JNIEnv*, jobject, jboolean on) { game().setAim(on); }
+JNIEXPORT void JNICALL ZZ_FN(setAimStage)(JNIEnv*, jobject, jint stage) { game().setAimStage(stage); }
 
 JNIEXPORT void JNICALL ZZ_FN(pressJump)(JNIEnv*, jobject) { game().pressJump(); }
 
