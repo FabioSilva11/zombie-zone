@@ -15,7 +15,6 @@ enum class HudControl(val key: String, val label: String, val optional: Boolean,
     SPRINT("sprint", "Correr", true, 27f),
     MELEE("melee", "Faca", true, 27f),
     GRENADE("grenade", "Granada", true, 27f),
-    SHOULDER("shoulder", "Trocar ombro", true, 20f),
     MAP("map", "Minimapa", true, 56f),
     SUPPLY("supply", "Suprimentos", true, 17f),
     PAUSE("pause", "Pausa", true, 20f),
@@ -47,7 +46,7 @@ class HudLayout(val controls: MutableMap<HudControl, ControlPos>) {
             fun put(c: HudControl, x: Float, y: Float, visible: Boolean = true) {
                 var fx = (if (x < 0) wDp + x else x) / wDp
                 val fy = (if (y < 0) hDp + y else y) / hDp
-                if (leftHanded && c != HudControl.MAP && c != HudControl.SUPPLY && c != HudControl.PAUSE && c != HudControl.SHOULDER && c != HudControl.BAG) fx = 1f - fx
+                if (leftHanded && c != HudControl.MAP && c != HudControl.SUPPLY && c != HudControl.PAUSE && c != HudControl.BAG) fx = 1f - fx
                 map[c] = ControlPos(fx, fy, 1f, visible)
             }
             // Barra de itens no centro de baixo, entre o joystick e os botões (encolhe em telas estreitas).
@@ -66,7 +65,6 @@ class HudLayout(val controls: MutableMap<HudControl, ControlPos>) {
             put(HudControl.SPRINT, 62f, -232f)
             put(HudControl.MELEE, -264f, -124f)
             put(HudControl.GRENADE, -170f, -226f)
-            put(HudControl.SHOULDER, -98f, 36f)
             put(HudControl.MAP, 84f, 70f)
             put(HudControl.SUPPLY, 84f, 152f)
             put(HudControl.PAUSE, -40f, 36f)

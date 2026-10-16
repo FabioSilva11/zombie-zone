@@ -31,7 +31,7 @@ import kotlin.math.tan
  * - joystick dinâmico (surge onde o polegar toca; empurrar até o fim = correr);
  * - arrastar na metade direita = girar a câmera;
  * - botão ATIRAR (segurar) também gira a câmera ao arrastar;
- * - MIRAR, PULAR, RECARREGAR, AGACHAR, CORRER (corrida automática), FACA, GRANADA, TROCAR OMBRO,
+ * - MIRAR, PULAR, RECARREGAR, AGACHAR, CORRER (corrida automática), FACA, GRANADA,
  *   PAUSA, MINIMAPA e SUPRIMENTOS (anúncio); um toque em CORRER faz o personagem sair correndo
  *   sozinho para a frente (o joystick ainda dirige; puxar para trás ou tocar de novo para).
  * Todos os controles podem ser movidos/redimensionados no editor (modo [editing]).
@@ -46,7 +46,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         fun onInventoryRequested() = Unit
     }
 
-    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, FIRE_LEFT, AIM, JUMP, RELOAD, CROUCH, SPRINT, MELEE, GRENADE, SHOULDER, PAUSE, MAP, SUPPLY, HOTBAR, BAG }
+    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, FIRE_LEFT, AIM, JUMP, RELOAD, CROUCH, SPRINT, MELEE, GRENADE, PAUSE, MAP, SUPPLY, HOTBAR, BAG }
     private class Touch(var role: Role, var x: Float, var y: Float, val startX: Float, val startY: Float, var slot: Int = -1, var cancel: Boolean = false)
     private class Geo(var x: Float = 0f, var y: Float = 0f, var r: Float = 0f, var visible: Boolean = true)
 
@@ -297,7 +297,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         HudControl.FIRE to Role.FIRE, HudControl.FIRE_LEFT to Role.FIRE_LEFT, HudControl.AIM to Role.AIM,
         HudControl.JUMP to Role.JUMP, HudControl.RELOAD to Role.RELOAD, HudControl.CROUCH to Role.CROUCH,
         HudControl.SPRINT to Role.SPRINT, HudControl.MELEE to Role.MELEE, HudControl.GRENADE to Role.GRENADE,
-        HudControl.SHOULDER to Role.SHOULDER, HudControl.PAUSE to Role.PAUSE,
+        HudControl.PAUSE to Role.PAUSE,
     )
 
     /** Espaço da barra rápida sob o toque (-1 se nenhum). */
@@ -362,7 +362,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                         haptic(false)
                     }
                     Role.BAG -> listener.onInventoryRequested()
-                    Role.SHOULDER -> { NativeBridge.swapShoulder(); haptic(false) }
                     Role.PAUSE -> listener.onPauseRequested()
                     Role.MAP -> listener.onMapRequested()
                     Role.SUPPLY -> if (supplyReady) listener.onSupplyRequested()
@@ -1155,7 +1154,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         if (available(HudControl.SPRINT)) drawSprint(canvas)
         if (available(HudControl.MELEE)) drawMelee(canvas)
         if (available(HudControl.GRENADE)) drawGrenade(canvas)
-        if (available(HudControl.SHOULDER)) drawShoulder(canvas)
         if (available(HudControl.PAUSE)) drawPause(canvas)
         if (available(HudControl.HOTBAR)) drawHotbar(canvas)
         if (available(HudControl.BAG)) drawBag(canvas)
@@ -1581,13 +1579,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         label(canvas, if (kind == Items.MOLOTOV) "MOLOTOV" else "GRANADA", gc.x, gc.y + d(18f) * s, 7.5f * s, Color.WHITE)
     }
 
-    private fun drawShoulder(canvas: Canvas) {
-        val gc = g(HudControl.SHOULDER)
-        val s = k(HudControl.SHOULDER)
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.cyan, false)
-        label(canvas, if (hud[Hud.SHOULDER] < 0f) "◧" else "◨", gc.x, gc.y + d(5f) * s, 14f * s, Palette.cyan)
-    }
-
     private fun drawPause(canvas: Canvas) {
         val gc = g(HudControl.PAUSE)
         val s = k(HudControl.PAUSE)
@@ -1618,7 +1609,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         hud[Hud.SUPPLY] = 1f
         hud[Hud.ISLAND] = 1f
         hud[Hud.JUMP_READY] = 1f
-        hud[Hud.SHOULDER] = 1f
         hud[Hud.INV_ENABLED] = 1f
         hud[Hud.WEAPON] = Items.RIFLE.toFloat()
         hud[Hud.WEAPON_SLOT] = 0f

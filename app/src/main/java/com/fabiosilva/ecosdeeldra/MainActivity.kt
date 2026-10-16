@@ -54,6 +54,8 @@ import com.fabiosilva.ecosdeeldra.ui.PvpPauseOverlay
 import com.fabiosilva.ecosdeeldra.ui.PvpResultOverlay
 import com.fabiosilva.ecosdeeldra.ui.PvpScreen
 import com.fabiosilva.ecosdeeldra.ui.Popup
+import com.fabiosilva.ecosdeeldra.ui.RewardCongratsOverlay
+import com.fabiosilva.ecosdeeldra.ui.RewardPreviewOverlay
 import com.fabiosilva.ecosdeeldra.ui.SettingsScreen
 import com.fabiosilva.ecosdeeldra.ui.StagesScreen
 import com.fabiosilva.ecosdeeldra.ui.StoryOverlay
@@ -408,23 +410,30 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     fun previewLook(code: Int) = engine { NativeBridge.setPreviewSkin(code) }
     fun rotatePreview(dx: Float) = NativeBridge.rotatePreview(dx)
 
-    fun showDailyReward(onDone: (() -> Unit)? = null) {
-        if (!Rules.canClaimCalendar(progress, today())) return
-        val reward = Rules.calendarReward(progress.calendarClaims)
-        val day = progress.calendarClaims % 7 + 1
-        Popup.show(
-            this, "Prêmio diário • Dia $day",
-            "Volte todos os dias para ganhar mais! Hoje: ◆ $reward diamantes.\nEntrar em 2, 5 e 7 dias diferentes libera visuais exclusivos para o seu personagem.",
-            "RESGATAR",
-        ) {
-            val got = Rules.claimCalendar(progress, today())
-            if (got > 0) audio.playUi("reward", 1f)
-            save()
-            checkUnlocks()
-            homeScreen?.refresh()
-            onDone?.invoke()
-            requestNotificationsOnce()
-        }
+    fun showDailyReward(force: Boolean = false, onDone: (() -> Unit)? = null) {
+        val canClaim = Rules.canClaimCalendar(progress, today())
+        if (!canClaim && !force) return
+        showOverlay(
+            RewardPreviewOverlay(this, canClaim, onClaim = {
+                val day = progress.calendarClaims % 7 + 1
+                val got = Rules.claimCalendar(progress, today())
+                if (got > 0) audio.playUi("reward", 1f)
+                save()
+                homeScreen?.refresh()
+                onDone?.invoke()
+                showReward("◆ $got DIAMANTES", "Prêmio diário • Dia $day") {
+                    checkUnlocks()
+                    requestNotificationsOnce()
+                }
+            }, onClose = { closeOverlay() }),
+        )
+    }
+
+    fun showReward(label: String, caption: String, onOk: (() -> Unit)? = null) {
+        showOverlay(RewardCongratsOverlay(this, label, caption) {
+            closeOverlay()
+            onOk?.invoke()
+        })
     }
 
     fun applySettings() {

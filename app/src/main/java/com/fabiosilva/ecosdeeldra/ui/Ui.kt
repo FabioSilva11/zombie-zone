@@ -28,10 +28,14 @@ object Palette {
     val line = Color.parseColor("#33A8FF3E")
     val lime = Color.parseColor("#A8FF3E")
     val limeDark = Color.parseColor("#5DA81E")
+    // Cores usadas apenas pelas telas preservadas do lobby e do prêmio diário.
+    val accent = Color.parseColor("#FFC400")
+    val accentDark = Color.parseColor("#B38600")
     val cyan = Color.parseColor("#3CE6FF")
     val gold = Color.parseColor("#FFC83D")
     val red = Color.parseColor("#FF5A5A")
     val purple = Color.parseColor("#A877FF")
+    val purpleDeep = Color.parseColor("#2A1466")
     val text = Color.parseColor("#F4F7FF")
     val muted = Color.parseColor("#9AA6C0")
     val dark = Color.parseColor("#0E1A08")
@@ -219,6 +223,23 @@ object Ui {
         text = span
         background = PanelDrawable(ctx, Color.parseColor("#CC0B1426"), Color.argb(80, Color.red(iconColor), Color.green(iconColor), Color.blue(iconColor)), 14f)
         setPadding(ctx.dpi(12), ctx.dpi(6), ctx.dpi(12), ctx.dpi(6))
+    }
+
+    fun currencyChip(ctx: Context, icon: Icon, value: String, color: Int): LinearLayout = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = PanelDrawable(ctx, Color.parseColor("#D90B0720"), Color.argb(110, Color.red(color), Color.green(color), Color.blue(color)), 8f)
+        setPadding(ctx.dpi(10), ctx.dpi(5), ctx.dpi(14), ctx.dpi(5))
+        addView(IconView(ctx, icon, color), lp(ctx.dpi(20), ctx.dpi(20)))
+        addView(text(ctx, value, 15f, Palette.text, Fonts.title).apply { setPadding(ctx.dpi(7), 0, 0, 0) })
+    }
+
+    fun iconButton(ctx: Context, icon: Icon, fill: Int = Palette.stone, iconColor: Int = Color.WHITE, onClick: () -> Unit): FrameLayout = FrameLayout(ctx).apply {
+        background = BlockDrawable(ctx, fill, 6f, 3f)
+        isClickable = true
+        isFocusable = true
+        addView(IconView(ctx, icon, iconColor), frame(ctx.dpi(22), ctx.dpi(22), Gravity.CENTER))
+        setOnClickListener { clickSound?.invoke(); onClick() }
     }
 
     fun lp(w: Int, h: Int, weight: Float = 0f): LinearLayout.LayoutParams = LinearLayout.LayoutParams(w, h, weight)

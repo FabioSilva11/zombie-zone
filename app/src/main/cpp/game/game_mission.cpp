@@ -221,13 +221,16 @@ void Game::updateNests(float dt) {
         int fromNest = 0;
         for (const Zombie& z : zombies_)
             if (z.nest == static_cast<int>(i) && z.state != ZState::Dead) ++fromNest;
-        if (n.spawnTimer <= 0 && fromNest < 5) {
-            n.spawnTimer = std::max(3.0f, 7.0f - config_.stage * 0.12f);
+        constexpr int kMaxNestMobs = 7;
+        if (n.spawnTimer <= 0 && fromNest < kMaxNestMobs) {
             Vec3 pos;
             if (findSpawnSpot(n.core, 2.0f, 7.0f, false, pos)) {
+                n.spawnTimer = std::max(1.5f, 2.8f - std::min(config_.stage, 30) * 0.04f);
                 spawnZombie(pos, true, static_cast<int>(i));
                 spawnBurst(pos + Vec3(0, 0.5f, 0), {0.7f, 0.3f, 1.0f, 1.0f}, 14, 3.0f, 0.16f, true, -1.0f);
                 emitSound(SND_GROAN, pos, 0.8f);
+            } else {
+                n.spawnTimer = 0.5f;
             }
         }
     }
