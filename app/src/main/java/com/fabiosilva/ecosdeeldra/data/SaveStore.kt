@@ -18,7 +18,7 @@ class SaveStore(context: Context) {
     }
 
     private fun encode(p: Progress): JSONObject = JSONObject().apply {
-        put("version", 3)
+        put("version", 4)
         put("diamonds", p.diamonds)
         put("ownedSkins", JSONArray(p.ownedCosmetics.toList()))  // nome antigo mantido: visuais liberados
         put("selectedHero", p.selectedHero)
@@ -77,6 +77,8 @@ class SaveStore(context: Context) {
         put("dailyBonusClaimed", p.dailyBonusClaimed)
         put("adsDay", p.adsDay)
         put("adsToday", p.adsToday)
+        put("adRevenueMicros", p.adRevenueMicros)
+        put("adRevenueCurrency", p.adRevenueCurrency)
         put("chestReadyAt", p.chestReadyAt)
         put("tutorialSeen", p.tutorialSeen)
         put("missionsSinceInterstitial", p.missionsSinceInterstitial)
@@ -92,6 +94,7 @@ class SaveStore(context: Context) {
             put("vibration", s.vibration)
             put("quality", s.quality)
             put("reminders", s.reminders)
+            put("adRevenueDifficulty", s.adRevenueDifficulty)
             put("showFps", s.showFps)
             put("leftHanded", s.leftHanded)
             put("playerName", s.playerName)
@@ -183,6 +186,8 @@ class SaveStore(context: Context) {
         p.dailyBonusClaimed = o.optBoolean("dailyBonusClaimed")
         p.adsDay = o.optString("adsDay", "")
         p.adsToday = o.optInt("adsToday")
+        p.adRevenueMicros = o.optLong("adRevenueMicros", 0L).coerceAtLeast(0L)
+        p.adRevenueCurrency = o.optString("adRevenueCurrency", "")
         p.chestReadyAt = o.optLong("chestReadyAt")
         p.tutorialSeen = o.optBoolean("tutorialSeen")
         p.missionsSinceInterstitial = o.optInt("missionsSinceInterstitial")
@@ -198,6 +203,7 @@ class SaveStore(context: Context) {
             t.vibration = s.optBoolean("vibration", true)
             t.quality = s.optInt("quality", 1).coerceIn(0, 2)
             t.reminders = s.optBoolean("reminders", true)
+            t.adRevenueDifficulty = s.optBoolean("adRevenueDifficulty", false)
             t.showFps = s.optBoolean("showFps", false)
             t.leftHanded = s.optBoolean("leftHanded", false)
             t.playerName = s.optString("playerName", "")

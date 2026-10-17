@@ -153,7 +153,24 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         Ui.clickSound = { audio.playUi("click", 0.6f) }
         ads = RewardedAds(this)
         ads.onStateChanged = { runOnUiThread { homeScreen?.refresh() } }
+<<<<<<< HEAD
         interstitials = InterstitialAds(this)
+=======
+        ads.onRevenueEstimated = { valueMicros, currencyCode ->
+            runOnUiThread {
+                if (currencyCode.isNotBlank() && valueMicros >= 0L) {
+                    // Nunca somamos moedas diferentes: se a moeda do AdMob mudar, reiniciamos a base local.
+                    if (progress.adRevenueCurrency.isBlank() || progress.adRevenueCurrency == currencyCode) {
+                        progress.adRevenueMicros = (progress.adRevenueMicros + valueMicros).coerceAtLeast(0L)
+                    } else {
+                        progress.adRevenueMicros = valueMicros
+                    }
+                    progress.adRevenueCurrency = currencyCode
+                    store.save(progress)
+                }
+            }
+        }
+>>>>>>> main
 
         NativeBridge.init(assets)
         val root = FrameLayout(this).apply { setBackgroundColor(Palette.bg) }
@@ -465,7 +482,15 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     private fun launchMission() {
         val stage = Campaign.stage(missionStage)
         val p = progress
-        val diff = if (survivalMode) Campaign.survivalDifficulty(p) else Campaign.difficulty(stage.number, p)
+        val diff = if (survivalMode) {
+            Campaign.survivalDifficulty(p)
+        } else {
+            Campaign.difficulty(
+                stage.number, p.vitality, p.power, p.reload,
+                estimatedAdRevenueMicros = p.adRevenueMicros,
+                adRevenueDifficultyEnabled = p.settings.adRevenueDifficulty,
+            )
+        }
         val config = FloatArray(Cfg.COUNT)
         config[Cfg.STAGE] = stage.number.toFloat()
         config[Cfg.SKIN] = 0f  // a aparência vai à parte (32 bits não cabem num float)

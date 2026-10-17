@@ -120,16 +120,44 @@ object Campaign {
         )
     }
 
-    fun difficulty(stageNumber: Int, vitality: Int, power: Int, reload: Int, magazineLevel: Int = 0): Difficulty {
+    fun stage(number: Int): Stage = stages[(number - 1).coerceIn(0, stages.size - 1)]
+
+    /**
+     * Receita por impressão (ILRD) é uma estimativa do AdMob, não receita consolidada.
+     * O ajuste é opcional, afeta apenas novas fases e tem limite para não escalar sem fim.
+     */
+    const val AD_REVENUE_MICROS_PER_LEVEL = 100_000L
+    const val MAX_AD_REVENUE_DIFFICULTY_LEVEL = 5
+
+    fun adRevenueDifficultyTier(revenueMicros: Long): Int =
+        (revenueMicros.coerceAtLeast(0L) / AD_REVENUE_MICROS_PER_LEVEL)
+            .coerceAtMost(MAX_AD_REVENUE_DIFFICULTY_LEVEL.toLong())
+            .toInt()
+
+    fun difficulty(
+        stageNumber: Int,
+        vitality: Int,
+        power: Int,
+        reload: Int,
+        magazineLevel: Int = 0,
+        estimatedAdRevenueMicros: Long = 0L,
+        adRevenueDifficultyEnabled: Boolean = false,
+    ): Difficulty {
         val step = stageNumber.coerceAtLeast(1) - 1
         val late = (step - 19).coerceAtLeast(0)
         // Cada zona nova deixa a horda um pouco mais resistente e perigosa.
         val zoneMul = 1f + (step / STAGES_PER_ZONE) * 0.04f
+        // Adaptive difficulty baseada em receita de anúncios (opcional)
+        val adTier = if (adRevenueDifficultyEnabled) adRevenueDifficultyTier(estimatedAdRevenueMicros) else 0
+        val healthMultiplier = (1f + adTier * 0.035f)
+        val damageMultiplier = (1f + adTier * 0.025f)
+        val speedMultiplier = (1f + adTier * 0.02f)
+        
         return Difficulty(
-            zombieCount = (8 + min(step, 30) * 0.6f + late / 10).toInt().coerceAtMost(30),
-            zombieHealth = (60f + min(step, 19) * 12f + late * 4f) * zoneMul,
-            zombieDamage = ((8f + min(step, 40) * 0.6f + (step - 40).coerceAtLeast(0) * 0.25f) * zoneMul).coerceAtMost(60f),
-            zombieSpeed = 1f + min(0.45f, step * 0.022f),
+            zombieCount = ((8 + min(step, 30) * 0.6f + late / 10).toInt().coerceAtMost(30) + adTier),
+            zombieHealth = (60f + min(step, 19) * 12f + late * 4f) * zoneMul * healthMultiplier,
+            zombieDamage = ((8f + min(step, 40) * 0.6f + (step - 40).coerceAtLeast(0) * 0.25f) * zoneMul * damageMultiplier).coerceAtMost(60f),
+            zombieSpeed = (1f + min(0.45f, step * 0.022f)) * speedMultiplier,
             // A vida e o pente também evoluem a cada fase; as melhorias somam por cima.
             playerHealth = (100f + min(step, 40) * 12f + min(vitality, 5) * 20f) * (1f + 0.06f * (vitality - 5).coerceAtLeast(0)),
             magazine = ((30 + min(step, 30) * 2) * Upgrades.magazine(magazineLevel)).toInt(),
@@ -140,7 +168,9 @@ object Campaign {
     }
 
     fun difficulty(stageNumber: Int, p: Progress): Difficulty =
-        difficulty(stageNumber, p.vitality, p.power, p.reload, p.upgrade("magazine"))
+        difficulty(stageNumber, p.vitality, p.power, p.reload, p.upgrade("magazine"), 
+                   estimatedAdRevenueMicros = p.adRevenueMicros,
+                   adRevenueDifficultyEnabled = p.settings.adRevenueDifficulty)
 
     /** Sobrevivência: zumbis começam fracos (as ondas os fortalecem); o jogador usa suas melhorias. */
     fun survivalDifficulty(p: Progress): Difficulty {
