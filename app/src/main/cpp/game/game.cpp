@@ -363,8 +363,8 @@ void Game::updateLobby(float dt) {
     Vec3 c = layout_.start;
     Vec3 target, eye;
     if (lobbyScreen_ == 1) {
-        // Editor de personagem: herói inteiro na área livre à esquerda do painel.
-        target = c + Vec3(2.35f, 0.95f, 0);
+        // Editor de personagem: o menu ocupa a faixa esquerda, então o herói fica à direita.
+        target = c + Vec3(-2.35f, 0.95f, 0);
         eye = target + Vec3(0.0f, 0.3f, 4.4f);
     } else if (lobbyScreen_ == 2) {
         // Inventário: o herói aparece no painel "Personagem" à esquerda da tela.
@@ -1686,8 +1686,8 @@ void Game::buildScene() {
         posePlayer(scratchPose_, armed);
         bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
         Vec3 pos = player_.position + Vec3(0, visualStep_ - (playing ? 0.12f * crouchBlend_ : 0.0f), 0);
-        // No inventário a câmera fica de lado: o herói vira de frente para ela.
-        float facing = lobbyScreen_ == 2 ? 0.6f : (lobbyScreen_ == 1 ? 0.49f : 0.0f);
+        // No editor a câmera está do lado oposto ao herói: o corpo vira de frente para ela.
+        float facing = lobbyScreen_ == 2 ? 0.6f : (lobbyScreen_ == 1 ? -0.49f : 0.0f);
         float yaw = mode_ == Mode::Lobby ? kPi + previewYaw_ - facing : playerModelYaw_;
         float flash = invulnerable_ > 0 && damageFlash_ > 0.6f ? 0.45f : 0.0f;
         addCharacter(playerAsset_, pos, yaw, 1.0f, scratchPose_, {1, 1, 1}, flash, Vec3(1, 1, 1), playing ? leanRoll_ : 0.0f);

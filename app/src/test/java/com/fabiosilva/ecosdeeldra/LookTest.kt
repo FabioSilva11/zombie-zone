@@ -3,11 +3,13 @@ package com.fabiosilva.ecosdeeldra
 import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import com.fabiosilva.ecosdeeldra.data.Look
 import com.fabiosilva.ecosdeeldra.data.LookOptions
+import com.fabiosilva.ecosdeeldra.data.LookPainter
 import com.fabiosilva.ecosdeeldra.data.LookPart
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -56,5 +58,45 @@ class LookTest {
         val selected = p.currentHero
         assertTrue(Rules.deleteHero(p, 0))
         assertEquals(selected, p.currentHero)  // o personagem em uso continua o mesmo
+    }
+
+    @Test
+    fun bodyThumbnailFollowsEveryPiece() {
+        fun pixel(look: Look, x: Int, y: Int) = LookPainter.bodyPixels(look)[y * LookPainter.BODY_W + x]
+        fun alphaOf(color: Int) = (color ushr 24) and 0xFF
+
+        val base = Look()
+        val thumb = LookPainter.bodyPixels(base)
+        assertEquals(LookPainter.BODY_W * LookPainter.BODY_H, thumb.size)
+        assertEquals(0, alphaOf(thumb[0]))  // fundo transparente
+        // Cabeça (7,6), camisa (7,15), calça (6,25) e sapato (6,31).
+        assertEquals(LookOptions.skinColors[base.skin], pixel(base, 7, 6))
+        assertEquals(LookOptions.topColors[base.topColor], pixel(base, 7, 15))
+        assertEquals(LookOptions.pantsColors[base.pantsColor], pixel(base, 6, 25))
+        assertEquals(LookOptions.shoeColors[base.shoes], pixel(base, 6, 31))
+        assertTrue(thumb.all { alphaOf(it) == 0 || alphaOf(it) == 255 })
+
+        // Cada peça muda a miniatura no ponto correspondente.
+        assertEquals(LookOptions.skinColors[5], pixel(Look(skin = 5), 7, 6))
+        assertEquals(LookOptions.hairColors[2], pixel(Look(hairStyle = 1, hairColor = 2), 7, 2))
+        assertEquals(LookOptions.topColors[0], pixel(Look(topColor = 0), 7, 15))
+        assertEquals(LookOptions.pantsColors[6], pixel(Look(pantsColor = 6), 6, 25))
+        assertEquals(LookOptions.shoeColors[3], pixel(Look(shoes = 3), 6, 31))
+        assertNotEquals(pixel(Look(), 6, 25), pixel(Look(shorts = true), 6, 25))  // bermuda expõe a perna
+        assertEquals(0, alphaOf(pixel(Look(hairStyle = 0), 7, 2)))          // careca: sem cabelo
+        assertEquals(LookOptions.hairColors[2], pixel(Look(hairStyle = 1, hairColor = 2), 7, 2))
+    }
+
+    @Test
+    fun everyOptionHasAUsableThumbnail() {
+        for (part in LookPart.entries) {
+            for (v in 0 until LookOptions.count(part)) {
+                val thumb = LookPainter.bodyPixels(Look().with(part, v))
+                assertTrue(
+                    "miniatura vazia para ${part.name} = $v",
+                    thumb.any { ((it ushr 24) and 0xFF) == 255 },
+                )
+            }
+        }
     }
 }

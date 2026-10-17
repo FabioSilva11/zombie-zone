@@ -137,6 +137,51 @@ class PanelDrawable(private val ctx: Context, private val fill: Int = Palette.pa
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
 
+/** Cartão com cantos arredondados, borda e realce no estado pressionado. */
+class CardDrawable(
+    private val ctx: Context,
+    var fill: Int,
+    var border: Int = Color.TRANSPARENT,
+    private val radiusDp: Float = 10f,
+    private val borderDp: Float = 1.3f,
+) : Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rect = RectF()
+    private var pressed = false
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        val r = ctx.dp(radiusDp)
+        paint.style = Paint.Style.FILL
+        paint.color = if (pressed) BlockDrawable.shade(fill, 0.8f) else fill
+        rect.set(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat())
+        canvas.drawRoundRect(rect, r, r, paint)
+        if (border != Color.TRANSPARENT) {
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = ctx.dp(borderDp)
+            paint.color = if (pressed) BlockDrawable.shade(border, 0.8f) else border
+            rect.inset(paint.strokeWidth / 2f, paint.strokeWidth / 2f)
+            canvas.drawRoundRect(rect, r, r, paint)
+        }
+    }
+
+    override fun isStateful() = true
+    override fun onStateChange(state: IntArray): Boolean {
+        val now = state.contains(android.R.attr.state_pressed)
+        if (now != pressed) {
+            pressed = now
+            invalidateSelf()
+            return true
+        }
+        return false
+    }
+
+    override fun setAlpha(alpha: Int) = Unit
+    override fun setColorFilter(colorFilter: ColorFilter?) = Unit
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
 /** Barra de progresso simples desenhada em Canvas. */
 class ProgressBarView(context: Context, var color: Int = Palette.lime) : View(context) {
     var fraction = 0f
