@@ -7,6 +7,7 @@ import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.OnPaidEventListener
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 
@@ -20,6 +21,8 @@ class RewardedAds(private val activity: Activity) {
     var showing = false
         private set
     var onStateChanged: (() -> Unit)? = null
+    /** ILRD: valor estimado pelo AdMob quando uma impressão gera receita. */
+    var onRevenueEstimated: ((valueMicros: Long, currencyCode: String) -> Unit)? = null
 
     val isReady: Boolean get() = ad != null
 
@@ -29,6 +32,9 @@ class RewardedAds(private val activity: Activity) {
         RewardedAd.load(activity, AD_UNIT_ID, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
             override fun onAdLoaded(loaded: RewardedAd) {
                 loading = false
+                loaded.onPaidEventListener = OnPaidEventListener { value ->
+                    onRevenueEstimated?.invoke(value.valueMicros.coerceAtLeast(0L), value.currencyCode)
+                }
                 ad = loaded
                 onStateChanged?.invoke()
             }

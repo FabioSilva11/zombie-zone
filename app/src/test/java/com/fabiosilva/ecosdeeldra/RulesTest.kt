@@ -139,6 +139,23 @@ class RulesTest {
     }
 
     @Test
+    fun adRevenueDifficultyIsOptInAndBounded() {
+        val baseline = Campaign.difficulty(5, 0, 0, 0)
+        val disabledDespiteRevenue = Campaign.difficulty(5, 0, 0, 0, 9_000_000L, false)
+        assertEquals(baseline.zombieCount, disabledDespiteRevenue.zombieCount)
+        assertEquals(baseline.zombieHealth, disabledDespiteRevenue.zombieHealth, 0.001f)
+        assertEquals(baseline.zombieDamage, disabledDespiteRevenue.zombieDamage, 0.001f)
+        assertEquals(baseline.zombieSpeed, disabledDespiteRevenue.zombieSpeed, 0.001f)
+
+        val enabled = Campaign.difficulty(5, 0, 0, 0, 500_000L, true)
+        assertTrue(enabled.zombieCount > baseline.zombieCount)
+        assertTrue(enabled.zombieHealth > baseline.zombieHealth)
+        assertTrue(enabled.zombieDamage > baseline.zombieDamage)
+        assertTrue(enabled.zombieSpeed > baseline.zombieSpeed)
+        assertEquals(Campaign.MAX_AD_REVENUE_DIFFICULTY_LEVEL, Campaign.adRevenueDifficultyTier(Long.MAX_VALUE))
+    }
+
+    @Test
     fun difficultyScalesWithStageAndUpgrades() {
         val easy = Campaign.difficulty(1, 0, 0, 0)
         val hard = Campaign.difficulty(20, 5, 5, 5)
