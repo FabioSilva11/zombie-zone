@@ -48,6 +48,53 @@ Vec3 cameraDirection(float yaw, float pitch) {
     return {std::sin(yaw) * cp, std::sin(pitch), -std::cos(yaw) * cp};
 }
 
+// Escolhe a animação pela direção real do movimento em relação à orientação do corpo.
+// Modelos que não possuem clipes direcionais continuam usando walk/sprint como fallback.
+int locomotionClip(const CharacterModel& model, const Vec3& velocity, float yaw, bool sprinting) {
+    const Vec3 planar{velocity.x, 0.0f, velocity.z};
+    const float speed = lengthXZ(planar);
+    if (speed < 0.35f) {
+        int idle = model.clipIndex("idle");
+        if (idle >= 0) return idle;
+        return model.clipIndex("static");
+    }
+
+    const float forward = dot(planar, forwardFromYaw(yaw));
+    const float side = dot(planar, rightFromYaw(yaw));
+    int clip = -1;
+
+    if (sprinting) {
+        if (forward < -0.4f) {
+            clip = model.clipIndex("run-back");
+            if (clip < 0) clip = model.clipIndex("sprint-back");
+        }
+        if (clip < 0) clip = model.clipIndex("sprint");
+        if (clip < 0) clip = model.clipIndex("run");
+        if (clip < 0) clip = model.clipIndex("walk");
+    } else if (std::fabs(side) > std::fabs(forward) * 1.15f) {
+        clip = model.clipIndex(side < 0.0f ? "strafe-left" : "strafe-right");
+        if (clip < 0) clip = model.clipIndex("walk");
+    } else if (forward < -0.4f) {
+        clip = model.clipIndex("walk-back");
+        if (clip < 0) clip = model.clipIndex("walk");
+    } else {
+        clip = model.clipIndex("walk");
+    }
+
+    if (clip < 0) clip = model.clipIndex("idle");
+    if (clip < 0) clip = model.clipIndex("static");
+    return clip;
+}
+
+bool clipAnimatesRotation(const CharacterModel& model, int clipIndex, int nodeIndex) {
+    if (clipIndex < 0 || clipIndex >= static_cast<int>(model.clips().size()) || nodeIndex < 0)
+        return false;
+    for (const AnimChannel& channel : model.clips()[static_cast<size_t>(clipIndex)].channels) {
+        if (channel.node == nodeIndex && channel.path == 1) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 Game::Game() {
@@ -555,15 +602,23 @@ void Game::updatePlayer(float dt, const InputState& in) {
 
     if (playerAsset_) {
         const CharacterModel& m = playerAsset_->model;
+        const bool airborne = !player_.onGround && !player_.inWater;
+        const int jumpClip = m.clipIndex("jump");
+
         if (dead_) {
-            int die = m.clipIndex("die");
-            if (playerAnim_.clip() != die) playerAnim_.play(die, false, 0.1f);
-        } else if (horizontal > 5.4f) {
-            playerAnim_.play(m.clipIndex("sprint"), true, 0.15f, horizontal / 6.0f);
-        } else if (horizontal > 0.5f) {
-            playerAnim_.play(m.clipIndex("walk"), true, 0.15f, std::max(0.6f, horizontal / 3.6f));
+            const int die = m.clipIndex("die");
+            if (playerAnim_.clip() != die) playerAnim_.play(die, false, 0.12f);
+        } else if (airborne && jumpClip >= 0) {
+            // Usa o salto criado para o esqueleto quando ele existe.
+            playerAnim_.play(jumpClip, false, 0.1f, 1.0f);
         } else {
-            playerAnim_.play(m.clipIndex("idle"), true, 0.2f);
+            const bool sprintAnim = sprinting_ && horizontal > 5.4f;
+            const int clip = locomotionClip(m, player_.velocity, playerModelYaw_, sprintAnim);
+            const float referenceSpeed = sprintAnim ? 6.0f : 3.6f;
+            const float animSpeed = horizontal > 0.5f
+                ? std::max(0.55f, horizontal / referenceSpeed)
+                : 1.0f;
+            playerAnim_.play(clip, true, sprintAnim ? 0.15f : 0.18f, animSpeed);
         }
         playerAnim_.update(dt);
     }
@@ -1104,9 +1159,68 @@ void Game::addCharacter(CharacterAsset* asset, const Vec3& pos, float yaw, float
 }
 
 void Game::posePlayer(Pose& pose, bool armed) {
-    if (!playerAsset_ || !armed || dead_) return;
-    bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
-    poseArmed(pose, playerAsset_->model, playing ? camPitch_ : -0.3f, playing);
+    if (!playerAsset_ || dead_) return;
+
+    const CharacterModel& m = playerAsset_->model;
+    const bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
+    const float horizontal = lengthXZ(player_.velocity);
+    const int torso = m.nodeIndex("torso");
+    const int legL = m.nodeIndex("leg-left");
+    const int legR = m.nodeIndex("leg-right");
+    const int activeClip = playerAnim_.clip();
+    const bool airborne = playing && !player_.onGround && !player_.inWater;
+
+    if (airborne && m.clipIndex("jump") < 0) {
+        // Fallback de salto para modelos sem clipe jump: recolhe as pernas na subida
+        // e solta-as ligeiramente na queda, em vez de continuar a caminhar no ar.
+        const bool falling = player_.velocity.y < -2.0f;
+        const float leftAngle = falling ? 0.18f : -0.52f;
+        const float rightAngle = falling ? -0.28f : -0.72f;
+        if (legL >= 0)
+            pose.r[legL] = slerp(pose.r[legL], Quat::axisAngle({1, 0, 0}, leftAngle), 0.62f);
+        if (legR >= 0)
+            pose.r[legR] = slerp(pose.r[legR], Quat::axisAngle({1, 0, 0}, rightAngle), 0.62f);
+
+        if (torso >= 0 && !clipAnimatesRotation(m, activeClip, torso)) {
+            const Quat target = pose.r[torso] *
+                Quat::axisAngle({1, 0, 0}, falling ? 0.08f : -0.06f);
+            pose.r[torso] = slerp(pose.r[torso], target, 0.45f);
+        }
+
+        if (!armed) {
+            const int armR = m.nodeIndex("arm-right");
+            const int armL = m.nodeIndex("arm-left");
+            if (armR >= 0) {
+                const Quat target = Quat::axisAngle({0, 0, 1}, -0.35f) *
+                    Quat::axisAngle({1, 0, 0}, falling ? -1.1f : -0.55f);
+                pose.r[armR] = slerp(pose.r[armR], target, 0.5f);
+            }
+            if (armL >= 0) {
+                const Quat target = Quat::axisAngle({0, 0, 1}, 0.35f) *
+                    Quat::axisAngle({1, 0, 0}, falling ? -1.1f : -0.55f);
+                pose.r[armL] = slerp(pose.r[armL], target, 0.5f);
+            }
+        }
+    } else if (playing && player_.onGround && horizontal > 0.45f &&
+               torso >= 0 && !clipAnimatesRotation(m, activeClip, torso)) {
+        // Contrapeso sutil do tronco na caminhada. O clipe continua controlando os membros;
+        // esta correção só adiciona transferência de peso e compensação lateral.
+        const float duration = (activeClip >= 0 && activeClip < static_cast<int>(m.clips().size()))
+            ? m.clips()[static_cast<size_t>(activeClip)].duration : 0.0f;
+        const float phase = duration > 1e-3f
+            ? playerAnim_.time() * 6.28318530718f / duration
+            : time_ * 6.28318530718f;
+        const Vec3 planar{player_.velocity.x, 0.0f, player_.velocity.z};
+        const float side = clampf(dot(planar, rightFromYaw(playerModelYaw_)) /
+                                  std::max(0.01f, horizontal), -1.0f, 1.0f);
+        const float weight = clampf(horizontal / 4.5f, 0.0f, 1.0f);
+        const Quat sway = Quat::axisAngle({0, 1, 0}, -side * 0.035f * weight) *
+            Quat::axisAngle({0, 0, 1}, std::sin(phase * 2.0f) * 0.022f * weight);
+        pose.r[torso] = pose.r[torso] * sway;
+    }
+
+    if (!armed) return;
+    poseArmed(pose, m, playing ? camPitch_ : -0.3f, playing);
 }
 
 void Game::poseArmed(Pose& pose, const CharacterModel& m, float pitch, bool moveHead) {
