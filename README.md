@@ -78,6 +78,7 @@ Nos Ajustes há sensibilidade, mira assistida, tiro automático, eixo Y invertid
 - **3 missões diárias** sorteadas por data, mais um bônus por completar as três.
 - **Baú grátis a cada 4 horas.** Dá para abrir antes do tempo assistindo a um anúncio.
 - **Anúncios premiados (AdMob):** +25 diamantes (até 5 por dia), reviver uma vez por fase, dobrar a recompensa da vitória e abrir o baú.
+- **Dificuldade adaptativa por receita de anúncios (opcional):** em Ajustes, é possível ativar um modo experimental que usa a estimativa ILRD do AdMob registrada localmente neste aparelho para subir até 5 níveis moderados nas novas fases. A opção vem desativada, pode ser desligada a qualquer momento e não altera o PvP. O valor do AdMob é uma estimativa por impressão, não receita consolidada.
 - **Lembretes locais** (notificação) quando o baú fica pronto e para o prêmio do dia seguinte.
 
 > Os IDs de AdMob são **de teste**. Antes de publicar, troque `AD_UNIT_ID` em `ads/RewardedAds.kt` e o `APPLICATION_ID` no `AndroidManifest.xml` pelos IDs reais.
