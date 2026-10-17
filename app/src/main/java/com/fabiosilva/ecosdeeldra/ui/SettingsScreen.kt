@@ -11,6 +11,8 @@ import android.widget.SeekBar
 import android.widget.Switch
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.ads.AdConsent
+import com.fabiosilva.ecosdeeldra.data.Campaign
+import java.util.Locale
 
 @SuppressLint("ViewConstructor", "UseSwitchCompatOrMaterialCode")
 class SettingsScreen(private val app: MainActivity, private val fromPause: Boolean) : FrameLayout(app) {
@@ -35,6 +37,12 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
         left.addView(toggle("Inverter eixo vertical", "", s.invertY) { s.invertY = it })
         left.addView(toggle("Modo canhoto", "Troca o lado dos botões e do joystick", s.leftHanded) { s.leftHanded = it })
         left.addView(toggle("Vibração", "Ao levar dano e acertar tiros", s.vibration) { s.vibration = it })
+        left.addView(section("DIFICULDADE ADAPTATIVA"))
+        left.addView(toggle(
+            "Ajustar pela receita de anúncios",
+            "Opcional: usa a estimativa do AdMob neste aparelho para aumentar gradualmente a dificuldade. Afeta novas fases e pode ser desligado a qualquer momento.",
+            s.adRevenueDifficulty,
+        ) { s.adRevenueDifficulty = it })
 
         right.addView(section("SOM"))
         right.addView(slider("Música", (s.musicVolume * 100).toInt(), 100) { s.musicVolume = it / 100f; app.audio.musicVolume = s.musicVolume })
@@ -54,6 +62,20 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
         right.addView(toggle("Lembretes", "Avisar quando o baú e o prêmio diário estiverem prontos", s.reminders) {
             s.reminders = it
             if (it) app.requestNotificationsOnce()
+        })
+        val revenueText = if (app.progress.adRevenueCurrency.isBlank()) {
+            "Receita estimada ILRD: aguardando dados do AdMob. Sem esse evento, a dificuldade adaptativa permanece no nível inicial."
+        } else {
+            val amount = app.progress.adRevenueMicros / 1_000_000.0
+            val tier = Campaign.adRevenueDifficultyTier(app.progress.adRevenueMicros)
+            String.format(
+                Locale.US,
+                "Receita estimada ILRD neste aparelho: %.4f %s • nível %d/%d. É uma estimativa; só afeta novas fases quando a opção está ligada.",
+                amount, app.progress.adRevenueCurrency, tier, Campaign.MAX_AD_REVENUE_DIFFICULTY_LEVEL,
+            )
+        }
+        right.addView(Ui.text(app, revenueText, 10f, Palette.muted).apply {
+            setPadding(0, app.dpi(8), 0, app.dpi(8))
         })
         if (AdConsent.privacyOptionsRequired(app)) {
             right.addView(Ui.button(app, "PRIVACIDADE DOS ANÚNCIOS", Palette.stone, Color.WHITE, 12f) { AdConsent.showPrivacyOptions(app) }, Ui.lp(Ui.MATCH, app.dpi(42)).apply { topMargin = app.dpi(4) })
