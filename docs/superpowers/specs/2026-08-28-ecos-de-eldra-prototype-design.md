@@ -86,11 +86,11 @@ Loading failures show a clear Portuguese message and a retry button. Loading pro
 - Low-memory Gradle build using one worker and no daemon.
 - Install or launch in an available emulator/device when accessible.
 - Browser/WebView visual run verifying character selection, level load, movement HUD, enemies, and gate.
-- Final screenshot captured from the running game, not from a design mockup.
+- Final verification performed on the running game, not from a design mockup.
 
 ## Success criteria
 
-The prototype is complete when a debug APK builds, the game starts with internet access, a player can select any character, enter the dungeon, move and rotate the camera, perform melee attacks, defeat two enemies, and see the gate open. A real screenshot of the running gameplay must be delivered with the result.
+The prototype is complete when a debug APK builds, the game starts with internet access, a player can select any character, enter the dungeon, move and rotate the camera, perform melee attacks, defeat two enemies, and see the gate open. The real running gameplay must be exercised and reported with the result.
 
 ## Phase and map expansion
 

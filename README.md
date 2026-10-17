@@ -133,6 +133,6 @@ adb install -r -t app/build/intermediates/apk/debug/app-debug.apk
 
 ## Versão anterior
 
-A versão WebView/Three.js, os mapas de masmorra, o editor de mapas e os testes web foram movidos para `legacy/`. Eles não entram no APK. Também existe um backup completo em `zombie-zone-backup-2026-10-02.zip`, na Área de Trabalho. As capturas de antes e depois estão em `docs/screenshots/antes` e `docs/screenshots/depois`.
+A versão WebView/Three.js, os mapas de masmorra, o editor de mapas e os testes web foram movidos para `legacy/`. Eles não entram no APK. Também existe um backup completo em `zombie-zone-backup-2026-10-02.zip`, na Área de Trabalho.
 
 Créditos: personagens [Kenney Blocky Characters](https://kenney.nl) (CC0). Licença em `app/src/main/assets/notices/`.

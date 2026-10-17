@@ -134,10 +134,9 @@
 
 **Files:**
 - Modify: runtime cache query versions in `index.html`, `bootstrap.js`, and `main.js`.
-- Create: screenshots under ignored `output/playwright/`.
 
 **Interfaces:**
-- Produces: verified lobby, hero shop, and campaign screenshots plus a fresh debug APK.
+- Produces: verified lobby, hero shop, and campaign flow plus a fresh debug APK.
 
 - [ ] Run `node --test web-tests/*.test.mjs` and require zero failures.
 - [ ] Use Playwright at 1280x720 to verify lobby, 20-stage scrolling map, locked hero purchase states, Back, and loading story.

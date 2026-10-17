@@ -17,7 +17,7 @@
 - The game starts only with network access; local gameplay code, GLBs, and textures ship inside the APK.
 - The Android activity is landscape-only and the game interface is in Brazilian Portuguese.
 - Build with one Gradle worker, no daemon, and Kotlin compilation in process.
-- The final image must be a screenshot of the running renderer, not a mockup.
+- The final result must come from the running renderer, not a mockup.
 - Each phase is exactly 1000 by 1000 metres in logical coordinates.
 - Room and corridor rectangles must not overlap; both player and enemies use the same occupancy collision test.
 - The minimap is dark for unexplored walkable cells, light for explored cells, and opens to a large overlay on tap.
@@ -219,16 +219,15 @@ git add app/src/main/assets/game/js web-tests
 git commit -m "feat: add playable dungeon exploration prototype"
 ```
 
-### Task 5: Build, launch, and capture evidence
+### Task 5: Build, launch, and verify
 
 **Files:**
 - Create: `README.md`
-- Create: `docs/screenshots/gameplay.png`
 - Modify: `docs/superpowers/plans/2026-08-28-ecos-de-eldra-prototype.md`
 
 **Interfaces:**
 - Consumes: the complete Android app and web game.
-- Produces: `app/build/outputs/apk/debug/app-debug.apk` and a real gameplay screenshot.
+- Produces: `app/build/outputs/apk/debug/app-debug.apk` and a verified run of the real gameplay flow.
 
 - [ ] **Step 1: Run the complete automated verification**
 
@@ -244,20 +243,16 @@ Prefer an attached device/emulator. If none exists, serve `app/src/main/assets` 
 
 - [ ] **Step 3: Exercise the real flow**
 
-Select a character, wait for GLBs, enter the dungeon, move the player, trigger an attack, and frame the player plus at least one enemy and dungeon geometry.
+Select a character, wait for GLBs, enter the dungeon, move the player, trigger an attack, and confirm the player, at least one enemy, and the dungeon geometry render correctly on the target.
 
-- [ ] **Step 4: Capture the renderer**
+- [ ] **Step 4: Record the verified commands and limitations**
 
-Save the screenshot to `docs/screenshots/gameplay.png`. Confirm the file is a valid non-empty PNG and visually inspect it.
+Record exact build/test results, APK path and size, and whether validation used Android or Chromium. Do not claim device verification if only Chromium was available.
 
-- [ ] **Step 5: Document verified commands and limitations**
-
-Record exact build/test results, APK path and size, screenshot path, and whether validation used Android or Chromium. Do not claim device verification if only Chromium was available.
-
-- [ ] **Step 6: Commit delivery evidence**
+- [ ] **Step 5: Commit delivery evidence**
 
 ```powershell
-git add README.md docs/screenshots/gameplay.png docs/superpowers/plans/2026-08-28-ecos-de-eldra-prototype.md
+git add README.md docs/superpowers/plans/2026-08-28-ecos-de-eldra-prototype.md
 git commit -m "docs: add prototype verification evidence"
 ```
 

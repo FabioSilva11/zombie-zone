@@ -73,18 +73,18 @@ The saved schema, stars, crystals, stage unlocks, upgrades, selected avatar, vie
 
 The campaign shell owns screen changes; the avatar preview follows the visible screen. Game sessions continue to dispose minimap listeners, camera controls, Rapier objects, NippleJS managers, renderers, materials, and event handlers on replay or map return.
 
-## Screenshot deliverables
+## Review deliverables
 
-Capture final landscape screenshots for Loading, Home, Avatar, Campaign, Story, Preparation, Gameplay HUD, Map overlay, Pause, Settings, Victory, Defeat, and Compatibility. Where Victory or Defeat is expensive to reach manually, use an explicit development-only route or controlled state injection that is excluded from the packaged production build.
+Review every final landscape screen in the live build: Loading, Home, Avatar, Campaign, Story, Preparation, Gameplay HUD, Map overlay, Pause, Settings, Victory, Defeat, and Compatibility. Where Victory or Defeat is expensive to reach manually, use an explicit development-only route or controlled state injection that is excluded from the packaged production build.
 
-Screenshots are stored under `docs/screenshots/zombie-zone/` with stable descriptive filenames. They must show the same visual system and contain no loading errors, clipped primary actions, or stale Ecos de Eldra wording.
+Every reviewed screen must show the same visual system and contain no loading errors, clipped primary actions, or stale Ecos de Eldra wording. No image files are stored in the repository.
 
 ## Verification
 
 - Pure and adapter tests for campaign, save, progression, camera, movement, weapon, minimap, and screen structure.
 - Browser walkthrough of every reachable screen with fresh console-log filtering and offline network inspection.
 - Browser joystick drag with before/after player coordinates.
-- Visual review of every screenshot at the landscape target size.
+- Visual review of every screen at the landscape target size.
 - Low-memory Android unit test, lint, and debug APK build with one Gradle worker.
 - Fresh APK hash, authorized-device installation, package verification, launch, and device movement check.
 
