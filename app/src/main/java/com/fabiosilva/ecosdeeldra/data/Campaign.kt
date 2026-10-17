@@ -69,13 +69,36 @@ object Campaign {
 
     fun stage(number: Int): Stage = stages[(number - 1).coerceIn(0, stages.size - 1)]
 
-    fun difficulty(stageNumber: Int, vitality: Int, power: Int, reload: Int): Difficulty {
+    /**
+     * Receita por impressão (ILRD) é uma estimativa do AdMob, não receita consolidada.
+     * O ajuste é opcional, afeta apenas novas fases e tem limite para não escalar sem fim.
+     */
+    const val AD_REVENUE_MICROS_PER_LEVEL = 100_000L
+    const val MAX_AD_REVENUE_DIFFICULTY_LEVEL = 5
+
+    fun adRevenueDifficultyTier(revenueMicros: Long): Int =
+        (revenueMicros.coerceAtLeast(0L) / AD_REVENUE_MICROS_PER_LEVEL)
+            .coerceAtMost(MAX_AD_REVENUE_DIFFICULTY_LEVEL.toLong())
+            .toInt()
+
+    fun difficulty(
+        stageNumber: Int,
+        vitality: Int,
+        power: Int,
+        reload: Int,
+        estimatedAdRevenueMicros: Long = 0L,
+        adRevenueDifficultyEnabled: Boolean = false,
+    ): Difficulty {
         val step = (stageNumber.coerceIn(1, 20) - 1)
+        val adTier = if (adRevenueDifficultyEnabled) adRevenueDifficultyTier(estimatedAdRevenueMicros) else 0
+        val healthMultiplier = 1f + adTier * 0.035f
+        val damageMultiplier = 1f + adTier * 0.025f
+        val speedMultiplier = 1f + adTier * 0.02f
         return Difficulty(
-            zombieCount = 8 + step,
-            zombieHealth = 60f + step * 12f,
-            zombieDamage = 8f + (step * 0.6f).toInt(),
-            zombieSpeed = 1f + min(0.45f, step * 0.022f),
+            zombieCount = 8 + step + adTier,
+            zombieHealth = (60f + step * 12f) * healthMultiplier,
+            zombieDamage = (8f + (step * 0.6f).toInt()) * damageMultiplier,
+            zombieSpeed = (1f + min(0.45f, step * 0.022f)) * speedMultiplier,
             playerHealth = 100f + step * 12f + vitality.coerceIn(0, 5) * 20f,
             magazine = 30 + step * 2,
             power = 1f + power.coerceIn(0, 5) * 0.15f,
