@@ -85,6 +85,7 @@ struct RemotePlayer {
     int sampleCount = 0;
     uint32_t lastVersion = 0;
     Vec3 renderPos;
+    Vec3 moveVelocity;
     float renderYaw = 0, renderPitch = 0, speed = 0;
     uint8_t flags = 0;
     float fireFlash = 0;

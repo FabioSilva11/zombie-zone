@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <vector>
 
 #include "../core/math.h"
+#include "../core/platform.h"
 #include "../core/random.h"
 #include "renderer.h"
 
@@ -584,6 +586,93 @@ std::vector<AnimClip> buildClips() {
         p.r[N_HEAD] = ry(-0.05f * s);
         p.rootT = {0, -0.35f * P * std::fabs(s), 0};
     }));
+    // Recuar mantendo a mira: passada invertida e tronco ligeiramente para trás.
+    clips.push_back(makeClip("walk-back", 1.0f, [P](float t, KeyPose& p) {
+        float s = std::sin(t * kTwoPi);
+        p.r[N_LEG_R] = rx(-0.48f * s);
+        p.r[N_LEG_L] = rx(0.48f * s);
+        p.r[N_ARM_R] = rx(0.2f * s) * rz(-0.03f);
+        p.r[N_ARM_L] = rx(-0.2f * s) * rz(0.03f);
+        p.r[N_TORSO] = rx(-0.08f) * ry(-0.05f * s);
+        p.r[N_HEAD] = rx(0.04f) * ry(0.04f * s);
+        p.rootT = {0, -0.22f * P * std::fabs(s), 0};
+    }));
+    // Variações procedurais para recuar correndo e deslocar-se agachado.
+    clips.push_back(makeClip("run-back", 0.58f, [P](float t, KeyPose& p) {
+        float s = std::sin(t / 0.58f * kTwoPi);
+        p.r[N_LEG_R] = rx(-0.92f * s + 0.08f);
+        p.r[N_LEG_L] = rx(0.92f * s + 0.08f);
+        p.r[N_ARM_R] = rx(0.8f * s - 0.1f) * rz(-0.1f);
+        p.r[N_ARM_L] = rx(-0.8f * s - 0.1f) * rz(0.1f);
+        p.r[N_TORSO] = rx(-0.12f) * ry(-0.08f * s);
+        p.r[N_HEAD] = rx(-0.16f) * ry(0.06f * s);
+        p.rootT = {0, P * (0.7f * std::fabs(std::cos(t / 0.58f * kTwoPi)) - 0.4f), 0};
+    }));
+    clips.push_back(makeClip("crouch-walk", 1.1f, [P](float t, KeyPose& p) {
+        float s = std::sin(t / 1.1f * kTwoPi);
+        p.r[N_LEG_R] = rx(0.34f * s + 0.2f);
+        p.r[N_LEG_L] = rx(-0.34f * s + 0.2f);
+        p.r[N_ARM_R] = rx(-0.28f * s - 0.1f);
+        p.r[N_ARM_L] = rx(0.28f * s - 0.1f);
+        p.r[N_TORSO] = rx(0.12f) * ry(0.04f * s);
+        p.r[N_HEAD] = rx(-0.08f) * ry(-0.03f * s);
+        p.rootT = {0, -0.45f * P - 0.12f * P * std::fabs(s), 0};
+    }));
+    clips.push_back(makeClip("crouch-back", 1.1f, [P](float t, KeyPose& p) {
+        float s = std::sin(t / 1.1f * kTwoPi);
+        p.r[N_LEG_R] = rx(-0.3f * s + 0.2f);
+        p.r[N_LEG_L] = rx(0.3f * s + 0.2f);
+        p.r[N_ARM_R] = rx(0.1f * s - 0.08f);
+        p.r[N_ARM_L] = rx(-0.1f * s - 0.08f);
+        p.r[N_TORSO] = rx(-0.08f) * ry(-0.04f * s);
+        p.r[N_HEAD] = rx(-0.06f) * ry(0.03f * s);
+        p.rootT = {0, -0.45f * P - 0.1f * P * std::fabs(s), 0};
+    }));
+    // Faca à frente: passada compacta e mão de ataque sempre pronta.
+    clips.push_back(makeClip("knife-walk", 0.8f, [P](float t, KeyPose& p) {
+        float s = std::sin(t / 0.8f * kTwoPi);
+        p.r[N_LEG_R] = rx(0.5f * s);
+        p.r[N_LEG_L] = rx(-0.5f * s);
+        p.r[N_ARM_R] = rz(-0.3f) * rx(-1.0f + 0.08f * s);
+        p.r[N_ARM_L] = rz(0.08f) * rx(0.35f * s - 0.18f);
+        p.r[N_TORSO] = ry(0.08f * s);
+        p.rootT = {0, -0.25f * P * std::fabs(s), 0};
+    }));
+    clips.push_back(makeClip("knife-back", 0.8f, [P](float t, KeyPose& p) {
+        float s = std::sin(t / 0.8f * kTwoPi);
+        p.r[N_LEG_R] = rx(-0.42f * s);
+        p.r[N_LEG_L] = rx(0.42f * s);
+        p.r[N_ARM_R] = rz(-0.3f) * rx(-0.95f + 0.06f * s);
+        p.r[N_ARM_L] = rz(0.08f) * rx(-0.25f * s - 0.18f);
+        p.r[N_TORSO] = rx(-0.06f) * ry(-0.05f * s);
+        p.rootT = {0, -0.2f * P * std::fabs(s), 0};
+    }));
+    clips.push_back(makeClip("knife-sprint", 0.62f, [P](float t, KeyPose& p) {
+        float s = std::sin(t / 0.62f * kTwoPi);
+        p.r[N_LEG_R] = rx(0.86f * s - 0.1f);
+        p.r[N_LEG_L] = rx(-0.86f * s - 0.1f);
+        p.r[N_ARM_R] = rz(-0.36f) * rx(-0.9f + 0.1f * s);
+        p.r[N_ARM_L] = rx(0.65f * s - 0.25f);
+        p.r[N_TORSO] = rx(0.2f) * ry(0.1f * s);
+        p.r[N_HEAD] = rx(-0.16f);
+        p.rootT = {0, P * (0.8f * std::fabs(std::cos(t / 0.62f * kTwoPi)) - 0.4f), 0};
+    }));
+    // Passos laterais curtos: quadril e ombros compensam sem girar o personagem.
+    for (int side : {-1, 1}) {
+        const char* name = side < 0 ? "strafe-left" : "strafe-right";
+        clips.push_back(makeClip(name, 0.9f, [P, side](float t, KeyPose& p) {
+            float ph = t / 0.9f * kTwoPi;
+            float s = std::sin(ph);
+            float liftR = std::max(0.0f, s), liftL = std::max(0.0f, -s);
+            p.r[N_LEG_R] = rx(0.34f * liftR) * ry(side * 0.12f);
+            p.r[N_LEG_L] = rx(0.34f * liftL) * ry(-side * 0.12f);
+            p.r[N_ARM_R] = rx(-0.18f * s) * rz(-side * 0.05f);
+            p.r[N_ARM_L] = rx(0.18f * s) * rz(side * 0.05f);
+            p.r[N_TORSO] = rz(-side * 0.1f * s) * ry(side * 0.06f);
+            p.r[N_HEAD] = rz(side * 0.025f * s);
+            p.rootT = {side * 0.12f * P * s, 0.12f * P * std::fabs(s), 0};
+        }));
+    }
     // Correr: passadas largas, tronco inclinado para a frente, braços fortes e quique do corpo.
     clips.push_back(makeClip("sprint", 0.62f, [P](float t, KeyPose& p) {
         float ph = t / 0.62f * kTwoPi;
@@ -660,6 +749,76 @@ std::vector<AnimClip> buildClips() {
         p.rootT = {lerpf(0.0f, 0.9f * P * s, m) * env, 0.6f * P * hop * env, 0};
     }));
     return clips;
+}
+
+void appendRetargetedClips(std::vector<AnimClip>& clips) {
+    static bool loaded = false;
+    static std::vector<AnimClip> imported;
+    if (!loaded) {
+        loaded = true;
+        std::vector<uint8_t> bytes;
+        if (!platform::readAsset("animations/tactical-retarget.zzan", bytes) || bytes.size() < 8 ||
+            std::memcmp(bytes.data(), "ZZAN", 4) != 0) return;
+        size_t offset = 4;
+        auto readU8 = [&](uint8_t& value) {
+            if (offset >= bytes.size()) return false;
+            value = bytes[offset++];
+            return true;
+        };
+        auto readU16 = [&](uint16_t& value) {
+            if (offset + 2 > bytes.size()) return false;
+            value = static_cast<uint16_t>(bytes[offset]) | (static_cast<uint16_t>(bytes[offset + 1]) << 8);
+            offset += 2;
+            return true;
+        };
+        auto readFloat = [&](float& value) {
+            if (offset + sizeof(float) > bytes.size()) return false;
+            std::memcpy(&value, bytes.data() + offset, sizeof(float));
+            offset += sizeof(float);
+            return std::isfinite(value);
+        };
+        uint16_t version = 0, clipCount = 0;
+        if (!readU16(version) || version != 1 || !readU16(clipCount) || clipCount > 64) return;
+        std::vector<AnimClip> parsed;
+        parsed.reserve(clipCount);
+        for (uint16_t ci = 0; ci < clipCount; ++ci) {
+            uint8_t nameLength = 0, channelCount = 0;
+            if (!readU8(nameLength) || nameLength == 0 || offset + nameLength > bytes.size()) return;
+            AnimClip clip;
+            clip.name.assign(reinterpret_cast<const char*>(bytes.data() + offset), nameLength);
+            offset += nameLength;
+            if (!readFloat(clip.duration) || clip.duration <= 0 || !readU8(channelCount) || channelCount == 0) return;
+            for (uint8_t channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
+                uint8_t node = 0, path = 0;
+                uint16_t keyCount = 0;
+                if (!readU8(node) || node >= N_COUNT || !readU8(path) || path != 1 ||
+                    !readU16(keyCount) || keyCount < 2 || keyCount > 4096) return;
+                AnimChannel channel;
+                channel.node = node;
+                channel.path = path;
+                channel.times.reserve(keyCount);
+                channel.values.reserve(static_cast<size_t>(keyCount) * 4);
+                float previous = -1.0f;
+                for (uint16_t key = 0; key < keyCount; ++key) {
+                    float time = 0, x = 0, y = 0, z = 0, w = 1;
+                    if (!readFloat(time) || !readFloat(x) || !readFloat(y) || !readFloat(z) || !readFloat(w) ||
+                        time < previous || time < 0 || time > clip.duration + 0.001f) return;
+                    previous = time;
+                    channel.times.push_back(time);
+                    channel.values.insert(channel.values.end(), {x, y, z, w});
+                }
+                clip.channels.push_back(std::move(channel));
+            }
+            parsed.push_back(std::move(clip));
+        }
+        if (offset != bytes.size()) return;
+        imported = std::move(parsed);
+    }
+    for (const AnimClip& source : imported) {
+        auto existing = std::find_if(clips.begin(), clips.end(), [&](const AnimClip& clip) { return clip.name == source.name; });
+        if (existing != clips.end()) *existing = source;
+        else clips.push_back(source);
+    }
 }
 
 }  // namespace
@@ -782,7 +941,9 @@ void buildBlockyCharacter(uint32_t code, CharacterAsset& out) {
         n.mesh = addMesh(hatMesh);
         nodes.push_back(n);
     }
-    out.model.build(std::move(nodes), std::move(meshes), buildClips(), 32.0f * px);
+    std::vector<AnimClip> clips = buildClips();
+    if (!l.zombie) appendRetargetedClips(clips);
+    out.model.build(std::move(nodes), std::move(meshes), std::move(clips), 32.0f * px);
     out.pixelArt = true;
 }
 
