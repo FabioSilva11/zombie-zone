@@ -45,22 +45,6 @@ Vec3 cameraDirection(float yaw, float pitch) {
     return {std::sin(yaw) * cp, std::sin(pitch), -std::cos(yaw) * cp};
 }
 
-int locomotionClip(const CharacterModel& model, const Vec3& velocity, float yaw, float speed, bool sprinting, bool crouched = false, bool knife = false) {
-    if (speed <= 0.5f) return model.clipIndex(crouched ? "crouch-idle" : "idle");
-    Vec3 planar{velocity.x, 0.0f, velocity.z};
-    if (lengthXZ(planar) <= 0.1f) return model.clipIndex("walk");
-    float forward = dot(planar, forwardFromYaw(yaw));
-    float side = dot(planar, rightFromYaw(yaw));
-    if (sprinting) {
-        if (knife) return model.clipIndex("knife-sprint");
-        return forward < -0.4f ? model.clipIndex("run-back") : model.clipIndex("sprint");
-    }
-    if (std::fabs(side) > std::fabs(forward) * 1.15f)
-        return model.clipIndex(side < 0.0f ? "strafe-left" : "strafe-right");
-    if (forward < -0.4f) return model.clipIndex(knife ? "knife-back" : (crouched ? "crouch-back" : "walk-back"));
-    return model.clipIndex(knife ? "knife-walk" : (crouched ? "crouch-walk" : "walk"));
-}
-
 }  // namespace
 
 Game::Game() {
@@ -817,14 +801,15 @@ void Game::updatePlayer(float dt, const InputState& in) {
         if (dead_) {
             int die = m.clipIndex("die");
             if (playerAnim_.clip() != die) playerAnim_.play(die, false, 0.1f);
+        } else if (crouching_) {
+            if (horizontal > 0.4f) playerAnim_.play(m.clipIndex("walk"), true, 0.18f, std::max(0.5f, horizontal / 2.2f));
+            else playerAnim_.play(m.clipIndex("idle"), true, 0.22f);
+        } else if (horizontal > 5.4f) {
+            playerAnim_.play(m.clipIndex("sprint"), true, 0.18f, horizontal / 6.0f);
+        } else if (horizontal > 0.5f) {
+            playerAnim_.play(m.clipIndex("walk"), true, 0.18f, std::max(0.6f, horizontal / 3.6f));
         } else {
-            const bool sprinting = !crouching_ && horizontal > 5.4f;
-            const int jumpClip = m.clipIndex("jump");
-            const bool jumping = !player_.onGround && jumpClip >= 0;
-            int clip = jumping ? jumpClip : locomotionClip(m, player_.velocity, playerModelYaw_, horizontal, sprinting, crouching_, meleeTime_ >= 0);
-            float speed = jumping ? 1.0f : (crouching_ ? std::max(0.5f, horizontal / 2.2f)
-                                     : (sprinting ? horizontal / 6.0f : std::max(0.6f, horizontal / 3.6f)));
-            playerAnim_.play(clip, !jumping, jumping ? 0.1f : (sprinting ? 0.18f : 0.2f), speed);
+            playerAnim_.play(m.clipIndex("idle"), true, 0.22f);
         }
         playerAnim_.update(dt);
     }
@@ -1489,9 +1474,7 @@ void Game::posePlayer(Pose& pose, bool armed) {
     if (!playerAsset_ || dead_) return;
     const CharacterModel& m = playerAsset_->model;
     bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
-    const int currentClip = playerAnim_.clip();
-    const bool authoredCrouch = currentClip == m.clipIndex("crouch-idle") || currentClip == m.clipIndex("crouch-walk") || currentClip == m.clipIndex("crouch-back");
-    if (playing && !authoredCrouch) poseCrouch(pose, m, crouchBlend_, clampf(lengthXZ(player_.velocity) / 2.0f, 0.0f, 1.0f));
+    if (playing) poseCrouch(pose, m, crouchBlend_, clampf(lengthXZ(player_.velocity) / 2.0f, 0.0f, 1.0f));
     if (playing && mantleTime_ >= 0) {
         // Escalando: os dois braços se esticam para a borda e puxam o corpo.
         float k = clampf(mantleTime_ / std::max(0.05f, mantleDuration_), 0.0f, 1.0f);
@@ -1502,8 +1485,7 @@ void Game::posePlayer(Pose& pose, bool armed) {
         return;
     }
     const float armedW = playing ? armedBlend_ : 1.0f;
-    const bool authoredJump = playing && !player_.onGround && currentClip == m.clipIndex("jump");
-    if (playing && !authoredJump) poseAir(pose, m, airBlend_, !armed || armedW < 0.5f);
+    if (playing) poseAir(pose, m, airBlend_, !armed || armedW < 0.5f);
     if (!armed) return;
     if (playing && (throwAiming_ || throwAnimTime_ >= 0.0f)) {
         const int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left"), torso = m.nodeIndex("torso");
@@ -2311,16 +2293,11 @@ void Game::updateRemotes(float dt) {
         if (np.version != r.lastVersion) {
             r.lastVersion = np.version;
             bool teleport = r.sampleCount > 0 && distXZ(r.samples[r.sampleCount - 1].pos, np.pos) > 6.0f;
-            if (teleport) {
-                r.sampleCount = 0;
-                r.moveVelocity = {};
-            }
+            if (teleport) r.sampleCount = 0;
             if (r.sampleCount == 8) {
                 for (int k = 1; k < 8; ++k) r.samples[k - 1] = r.samples[k];
                 r.sampleCount = 7;
             }
-            const bool hasPrevious = r.sampleCount > 0;
-            const RemoteSample previous = hasPrevious ? r.samples[r.sampleCount - 1] : RemoteSample{};
             RemoteSample& s = r.samples[r.sampleCount++];
             s.time = time_;
             s.pos = np.pos;
@@ -2328,16 +2305,6 @@ void Game::updateRemotes(float dt) {
             s.pitch = np.pitch;
             s.speed = np.speed;
             s.flags = np.flags;
-            if (hasPrevious && s.time > previous.time + 1e-3f) {
-                Vec3 delta = s.pos - previous.pos;
-                float distance = lengthXZ(delta);
-                if (distance > 0.02f && distance < 6.0f) {
-                    delta.y = 0.0f;
-                    r.moveVelocity = delta * (np.speed / distance);
-                } else if (distance <= 0.02f && np.speed <= 0.5f) {
-                    r.moveVelocity = {};
-                }
-            }
         }
         if (r.sampleCount > 0) {
             float rt = time_ - delay;
@@ -2369,10 +2336,9 @@ void Game::updateRemotes(float dt) {
         }
         if (r.asset && r.alive) {
             const CharacterModel& m = r.asset->model;
-            const bool sprinting = r.speed > 5.4f && !(r.flags & NF_CROUCH);
-            int clip = locomotionClip(m, r.moveVelocity, r.renderYaw, r.speed, sprinting, (r.flags & NF_CROUCH) != 0);
-            float speed = sprinting ? r.speed / 6.0f : std::max(0.6f, r.speed / 3.6f);
-            r.anim.play(clip, true, sprinting ? 0.15f : 0.2f, speed);
+            if (r.speed > 5.4f && !(r.flags & NF_CROUCH)) r.anim.play(m.clipIndex("sprint"), true, 0.15f, r.speed / 6.0f);
+            else if (r.speed > 0.5f) r.anim.play(m.clipIndex("walk"), true, 0.15f, std::max(0.6f, r.speed / 3.6f));
+            else r.anim.play(m.clipIndex("idle"), true, 0.2f);
         }
         r.anim.update(dt);
     }

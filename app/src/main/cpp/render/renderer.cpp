@@ -17,6 +17,19 @@ constexpr int kBillboardFloats = 9;    // pos(3) cor(4) uv(2)
 constexpr float kExposure = 0.8f;      // evita superexposição das cores das texturas
 constexpr float kCinematicExposure = 0.62f; // preserva detalhe antes da textura LDR do pós-processamento
 
+Vec3 biomeBounceColor(const Theme& theme, float exposure) {
+    const uint32_t rgb = blockInfo(theme.surface).mapColor;
+    auto linear = [](uint8_t c) {
+        const float s = static_cast<float>(c) / 255.0f;
+        return s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+    };
+    // A cor linear da superfície dominante funciona como proxy leve para o color bleed do bioma.
+    return Vec3(0.022f, 0.022f, 0.028f) +
+           Vec3(linear(static_cast<uint8_t>((rgb >> 16) & 0xff)),
+                linear(static_cast<uint8_t>((rgb >> 8) & 0xff)),
+                linear(static_cast<uint8_t>(rgb & 0xff))) * (exposure * 0.35f);
+}
+
 std::string shaderSource(const char* defines, const char* body) {
     std::string s = "#version 300 es\n";
     s += defines;
@@ -102,6 +115,36 @@ float sunShadow(vec3 p, vec3 n) {
     float fade = smoothstep(0.0, 0.08, min(e.x, e.y));
     return mix(1.0, s * 0.25, fade);
 }
+
+// Modelo Cook-Torrance (GGX + Schlick) para o caminho de alta qualidade.
+// O ambiente continua sendo uma aproximação de baixo custo, sem uma cubemap de reflexão.
+const float kPi = 3.14159265359;
+float distributionGGX(float nDotH, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float d = nDotH * nDotH * (a2 - 1.0) + 1.0;
+    return a2 / max(kPi * d * d, 0.001);
+}
+float geometrySchlickGGX(float nDotV, float roughness) {
+    float r = roughness + 1.0;
+    float k = r * r * 0.125;
+    return nDotV / max(nDotV * (1.0 - k) + k, 0.001);
+}
+vec3 fresnelSchlick(float vDotH, vec3 f0) {
+    return f0 + (1.0 - f0) * pow(1.0 - clamp(vDotH, 0.0, 1.0), 5.0);
+}
+vec3 directSpecular(vec3 n, vec3 v, vec3 l, vec3 albedo, float roughness, float metallic, vec3 radiance) {
+    float nDotV = max(dot(n, v), 0.001);
+    float nDotL = max(dot(n, l), 0.0);
+    if (nDotL <= 0.0) return vec3(0.0);
+    vec3 h = normalize(v + l);
+    float nDotH = max(dot(n, h), 0.0);
+    vec3 f0 = mix(vec3(0.04), albedo, metallic);
+    vec3 f = fresnelSchlick(max(dot(v, h), 0.0), f0);
+    float d = distributionGGX(nDotH, roughness);
+    float g = geometrySchlickGGX(nDotV, roughness) * geometrySchlickGGX(nDotL, roughness);
+    return (d * g * f / max(4.0 * nDotV * nDotL, 0.001)) * radiance * nDotL;
+}
 #endif
 )";
 
@@ -111,6 +154,8 @@ precision mediump sampler2DArray;
 uniform sampler2DArray u_tex;
 uniform vec3 u_dayLight;
 uniform vec3 u_ambient;
+uniform vec3 u_groundBounce;
+uniform vec3 u_environment;
 uniform vec3 u_sunColor;
 uniform vec3 u_sunDir;
 uniform vec3 u_fogColor;
@@ -147,20 +192,37 @@ void main() {
     float ao = plant > 0.5 ? 0.92 : clamp(v_light / faceShade, 0.0, 1.0);
     float ndl = plant > 0.5 ? 0.7 : max(dot(n, u_sunDir), 0.0);
     float sh = dist < 120.0 ? sunShadow(v_world, n) : 1.0;
-    vec3 light = (u_ambient * (0.55 + 0.45 * faceShade) + u_sunColor * ndl * sh + pointLights(v_world)) * ao;
+    float roughness = 0.86;
+    float metallic = 0.0;
+    float layer = v_uvl.z;
+    if (abs(layer - 10.0) < 0.25) roughness = 0.16; // gelo
+    if (abs(layer - 11.0) < 0.25) roughness = 0.075; // água
+    if (abs(layer - 25.0) < 0.25) { roughness = 0.24; metallic = 0.12; } // obsidiana
+    if (abs(layer - 37.0) < 0.25) { roughness = 0.42; metallic = 0.08; } // minério de ferro
+    if (abs(layer - 64.0) < 0.25) roughness = 0.12; // vidro
+    vec3 viewDir = normalize(u_camPos - v_world);
+    vec3 lightDir = normalize(u_sunDir);
+    float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+    // Luz ambiente de hemisfério + AO de vértices: aproxima GI/color bleed sem ray tracing.
+    vec3 indirect = mix(u_groundBounce, u_ambient, hemi) * ao;
+    vec3 direct = u_sunColor * ndl * sh + pointLights(v_world);
+    vec3 diffuse = albedo * (indirect + direct) * (1.0 - metallic);
+    vec3 specular = directSpecular(n, viewDir, lightDir, albedo, roughness, metallic, u_sunColor * ndl * sh);
+    vec3 f0 = mix(vec3(0.04), albedo, metallic);
+    vec3 envFresnel = fresnelSchlick(max(dot(n, viewDir), 0.0), f0);
+    vec3 color = diffuse + specular + u_environment * envFresnel * (1.0 - roughness * 0.55) * 0.22;
 #else
     vec3 light = (u_dayLight + pointLights(v_world)) * v_light;
-#endif
     vec3 color = albedo * light;
+#endif
     color = mix(color, tex.rgb * 1.1, emissive);
 #ifdef SHADOWS
     if (water > 0.5) {
         vec3 v = normalize(u_camPos - v_world);
         vec3 wn = normalize(vec3(sin(v_world.x * 1.7 + u_time * 1.3) * 0.06, 1.0, cos(v_world.z * 1.9 + u_time * 1.1) * 0.06));
-        vec3 h = normalize(u_sunDir + v);
-        float spec = pow(max(dot(wn, h), 0.0), 140.0) * sh;
+        vec3 spec = directSpecular(wn, v, normalize(u_sunDir), albedo, 0.075, 0.0, u_sunColor * ndl * sh);
         float fres = pow(1.0 - max(dot(wn, v), 0.0), 3.0);
-        color = mix(color, u_fogColor * 1.05, fres * 0.45) + u_sunColor * spec;
+        color = mix(color, u_fogColor * 1.05, fres * 0.45) + spec;
     }
 #endif
     float fog = smoothstep(u_fogRange.x, u_fogRange.y, dist);
@@ -216,6 +278,10 @@ uniform float u_emissive;
 uniform vec3 u_sunDir;
 uniform vec3 u_sunColor;
 uniform vec3 u_ambient;
+uniform vec3 u_groundBounce;
+uniform vec3 u_environment;
+uniform float u_roughness;
+uniform float u_metallic;
 uniform vec3 u_fogColor;
 uniform vec2 u_fogRange;
 uniform vec3 u_camPos;
@@ -234,14 +300,24 @@ void main() {
     float ndl = max(dot(n, u_sunDir), 0.0);
 #ifdef SHADOWS
     float sh = sunShadow(v_world, n);
+    // Hemisfério de céu/chão dá uma aproximação estável de luz indireta e color bleed.
+    vec3 viewDir = normalize(u_camPos - v_world);
+    float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 indirect = mix(u_groundBounce, u_ambient, hemi);
+    vec3 direct = u_sunColor * ndl * sh + pointLights(v_world) * 0.7;
+    float roughness = clamp(u_roughness, 0.06, 1.0);
+    float metallic = clamp(u_metallic, 0.0, 1.0);
+    vec3 diffuse = base.rgb * (indirect + direct) * (1.0 - metallic);
+    vec3 specular = directSpecular(n, viewDir, normalize(u_sunDir), base.rgb, roughness, metallic, u_sunColor * ndl * sh);
+    vec3 f0 = mix(vec3(0.04), base.rgb, metallic);
+    vec3 envFresnel = fresnelSchlick(max(dot(n, viewDir), 0.0), f0);
+    vec3 color = diffuse + specular + u_environment * envFresnel * (1.0 - roughness * 0.55) * 0.22;
 #else
     float sh = 1.0;
-#endif
-    // Luzes pontuais mais fracas nos modelos (eles ficam colados nas lanternas) e um teto suave
-    // para roupas claras não estourarem nem acenderem o bloom do modo cinematográfico.
     vec3 light = u_ambient + u_sunColor * ndl * sh + vec3(0.06) * max(-n.y, 0.0) + pointLights(v_world) * 0.7;
-    light = min(light, vec3(1.25));
-    vec3 color = base.rgb * light;
+    vec3 color = base.rgb * min(light, vec3(1.25));
+#endif
+    color = min(color, vec3(1.25));
     color = mix(min(color, vec3(0.9)), color, step(0.05, u_emissive + u_flash));
     color = mix(color, base.rgb, u_emissive);
     color = mix(color, u_flashColor, u_flash);
@@ -858,6 +934,12 @@ void Renderer::setVoxelUniforms(const FrameScene& scene, const ShaderProgram& p,
     Vec3 amb = sky.ambient * (exposure * 1.05f);
     Vec3 sun = sky.sunColor * (sky.sunIntensity * exposure * 1.2f);
     glUniform3f(p.uniform("u_ambient"), amb.x, amb.y, amb.z);
+    Vec3 bounce = biomeBounceColor(theme_, exposure);
+    Vec3 environment((sky.zenith.x + sky.horizon.x) * exposure * 0.08f,
+                     (sky.zenith.y + sky.horizon.y) * exposure * 0.08f,
+                     (sky.zenith.z + sky.horizon.z) * exposure * 0.08f);
+    glUniform3f(p.uniform("u_groundBounce"), bounce.x, bounce.y, bounce.z);
+    glUniform3f(p.uniform("u_environment"), environment.x, environment.y, environment.z);
     glUniform3f(p.uniform("u_sunColor"), sun.x, sun.y, sun.z);
     Vec3 sd = normalize(sky.sunDirection);
     glUniform3f(p.uniform("u_sunDir"), sd.x, sd.y, sd.z);
@@ -960,6 +1042,14 @@ void Renderer::setModelUniforms(const FrameScene& scene, const ShaderProgram& p,
     glUniform3f(p.uniform("u_sunColor"), sun.x, sun.y, sun.z);
     float extra = lit ? 0.03f : 0.06f;
     glUniform3f(p.uniform("u_ambient"), sky.ambient.x * exposure + extra, sky.ambient.y * exposure + extra, sky.ambient.z * exposure + extra);
+    Vec3 bounce = biomeBounceColor(theme_, exposure);
+    Vec3 environment((sky.zenith.x + sky.horizon.x) * exposure * 0.08f,
+                     (sky.zenith.y + sky.horizon.y) * exposure * 0.08f,
+                     (sky.zenith.z + sky.horizon.z) * exposure * 0.08f);
+    glUniform3f(p.uniform("u_groundBounce"), bounce.x, bounce.y, bounce.z);
+    glUniform3f(p.uniform("u_environment"), environment.x, environment.y, environment.z);
+    glUniform1f(p.uniform("u_roughness"), 0.78f);
+    glUniform1f(p.uniform("u_metallic"), 0.0f);
     glUniform3f(p.uniform("u_fogColor"), sky.fog.x, sky.fog.y, sky.fog.z);
     glUniform2f(p.uniform("u_fogRange"), sky.fogStart, sky.fogEnd);
     glUniform3f(p.uniform("u_camPos"), scene.cameraPos.x, scene.cameraPos.y, scene.cameraPos.z);
@@ -988,6 +1078,8 @@ void Renderer::drawCharacters(const FrameScene& scene, const ShaderProgram& p, b
             glUniform3f(uTint, draw.tint.x, draw.tint.y, draw.tint.z);
             glUniform1f(uFlash, draw.flash);
             glUniform3f(uFlashColor, draw.flashColor.x, draw.flashColor.y, draw.flashColor.z);
+            glUniform1f(p.uniform("u_roughness"), draw.asset->roughness);
+            glUniform1f(p.uniform("u_metallic"), draw.asset->metallic);
         }
         const bool restoreCull = draw.asset->doubleSided && glIsEnabled(GL_CULL_FACE);
         if (draw.asset->doubleSided) glDisable(GL_CULL_FACE);
@@ -1014,6 +1106,8 @@ void Renderer::drawBoxes(const FrameScene& scene, const ShaderProgram& p) {
     glUniform1f(p.uniform("u_useTex"), 0.0f);
     glUniform3f(p.uniform("u_tint"), 1, 1, 1);
     glUniform1f(p.uniform("u_flash"), 0.0f);
+    glUniform1f(p.uniform("u_roughness"), 0.72f);
+    glUniform1f(p.uniform("u_metallic"), 0.04f);
     glBindVertexArray(boxVao_);
     for (const BoxDraw& box : scene.boxes) {
         glUniformMatrix4fv(uModel, 1, GL_FALSE, box.world.m);

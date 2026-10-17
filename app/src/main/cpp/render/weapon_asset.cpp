@@ -66,6 +66,9 @@ bool loadConvertedAk47(CharacterAsset& out) {
     out.model.build({root}, {std::move(mesh)}, {});
     out.pixelArt = false;
     out.doubleSided = true;
+    // Acabamento de metal pintado/fosco do rifle, aproximado para a iluminação PBR do modo ultra.
+    out.roughness = 0.42f;
+    out.metallic = 0.48f;
     if (!platform::decodeAssetImage("weapons/ak47_texture.jpg", 1024, out.image)) {
         LOGE("Textura do AK não pôde ser decodificada");
         out.model = CharacterModel{};

@@ -55,7 +55,7 @@ class Settings {
     var showFps = false
     var leftHanded = false
     var playerName = ""
-    var cinematic = false // iluminação cinematográfica (sombras, bloom, raios de sol)
+    var cinematic = false // modo ultra-realista (PBR aproximado, sombras do sol e pós-processamento)
     var hudLayout = ""    // posições dos controles montadas pelo jogador (vazio = padrão)
     var hudOpacity = 0.85f
 }
