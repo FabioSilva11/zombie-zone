@@ -1,5 +1,6 @@
 #include "world.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace zz {
@@ -23,50 +24,109 @@ const FaceDef kFaces[6] = {
 };
 const uint8_t kUv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
 const float kAoCurve[4] = {0.46f, 0.64f, 0.82f, 1.0f};
+constexpr int kPad = kChunkSize + 2;
+
+bool isLeaf(uint8_t b) { return isLeafBlock(b); }
 
 }  // namespace
 
+void World::clear() {
+    for (Chunk* c : list_)
+        if (c->gpu.contextId >= 0) gpuGarbage_.push_back(c->gpu);
+    list_.clear();
+    grid_.clear();
+    unloadCursor_ = 0;
+}
+
 void World::reset(int width, int height, int depth) {
+    clear();
     ++generation_;
+    source_ = nullptr;
     width_ = width;
     height_ = height;
     depth_ = depth;
-    blocks_.assign(static_cast<size_t>(width) * height * depth, B_AIR);
-    ground_.assign(static_cast<size_t>(width) * depth, 0);
     chunksX_ = (width + kChunkSize - 1) / kChunkSize;
     chunksZ_ = (depth + kChunkSize - 1) / kChunkSize;
-    chunks_.clear();
-    chunks_.resize(static_cast<size_t>(chunksX_) * chunksZ_);
+    grid_.resize(static_cast<size_t>(chunksX_) * chunksZ_);
     for (int cz = 0; cz < chunksZ_; ++cz) {
         for (int cx = 0; cx < chunksX_; ++cx) {
-            Chunk& c = chunks_[cz * chunksX_ + cx];
-            c.cx = cx;
-            c.cz = cz;
-            c.dirty = true;
-            c.bounds.min = {static_cast<float>(cx * kChunkSize), 0, static_cast<float>(cz * kChunkSize)};
-            c.bounds.max = {static_cast<float>((cx + 1) * kChunkSize), static_cast<float>(height), static_cast<float>((cz + 1) * kChunkSize)};
+            Chunk* c = createChunk(cx, cz);
+            c->blocks.assign(static_cast<size_t>(kChunkSize) * kChunkSize * height_, B_AIR);
+            c->generated = true;
         }
     }
 }
 
+void World::resetStreaming(int width, int height, int depth, ChunkSource* source) {
+    clear();
+    ++generation_;
+    source_ = source;
+    width_ = width;
+    height_ = height;
+    depth_ = depth;
+    chunksX_ = (width + kChunkSize - 1) / kChunkSize;
+    chunksZ_ = (depth + kChunkSize - 1) / kChunkSize;
+    grid_.resize(static_cast<size_t>(chunksX_) * chunksZ_);
+}
+
+Chunk* World::createChunk(int cx, int cz) {
+    auto chunk = std::make_unique<Chunk>();
+    Chunk* c = chunk.get();
+    c->cx = cx;
+    c->cz = cz;
+    c->bounds.min = {static_cast<float>(cx * kChunkSize), 0, static_cast<float>(cz * kChunkSize)};
+    c->bounds.max = {static_cast<float>((cx + 1) * kChunkSize), static_cast<float>(height_), static_cast<float>((cz + 1) * kChunkSize)};
+    c->listIndex = static_cast<int>(list_.size());
+    list_.push_back(c);
+    grid_[static_cast<size_t>(cz) * chunksX_ + cx] = std::move(chunk);
+    return c;
+}
+
+void World::destroyChunk(Chunk* c) {
+    if (c->gpu.contextId >= 0) gpuGarbage_.push_back(c->gpu);
+    int idx = c->listIndex;
+    if (idx >= 0 && idx < static_cast<int>(list_.size())) {
+        list_[static_cast<size_t>(idx)] = list_.back();
+        list_[static_cast<size_t>(idx)]->listIndex = idx;
+        list_.pop_back();
+    }
+    grid_[static_cast<size_t>(c->cz) * chunksX_ + c->cx].reset();
+}
+
 void World::set(int x, int y, int z, uint8_t block, bool markDirty) {
     if (!inBounds(x, y, z)) return;
-    blocks_[index(x, y, z)] = block;
+    Chunk* c = chunkAt(x >> 4, z >> 4);
+    if (!c || !c->generated) return;
+    c->blocks[blockIndex(x & 15, y, z & 15)] = block;
+    if (block != B_AIR && y + 1 > c->maxY) c->maxY = y + 1;
     if (!markDirty) return;
     markDirtyAt(x, z);
-    if (x % kChunkSize == 0) markDirtyAt(x - 1, z);
-    if (x % kChunkSize == kChunkSize - 1) markDirtyAt(x + 1, z);
-    if (z % kChunkSize == 0) markDirtyAt(x, z - 1);
-    if (z % kChunkSize == kChunkSize - 1) markDirtyAt(x, z + 1);
+    if ((x & 15) == 0) markDirtyAt(x - 1, z);
+    if ((x & 15) == 15) markDirtyAt(x + 1, z);
+    if ((z & 15) == 0) markDirtyAt(x, z - 1);
+    if ((z & 15) == 15) markDirtyAt(x, z + 1);
 }
 
 void World::markDirtyAt(int x, int z) {
     if (!columnInBounds(x, z)) return;
-    chunks_[(z / kChunkSize) * chunksX_ + (x / kChunkSize)].dirty = true;
+    Chunk* c = chunkAt(x >> 4, z >> 4);
+    if (c) c->dirty = true;
 }
 
 void World::markAllDirty() {
-    for (auto& c : chunks_) c.dirty = true;
+    for (Chunk* c : list_) c->dirty = true;
+}
+
+void World::setGroundHeight(int x, int z, int h) {
+    if (!columnInBounds(x, z)) return;
+    Chunk* c = chunkAt(x >> 4, z >> 4);
+    if (c) c->ground[((z & 15) << 4) | (x & 15)] = static_cast<int16_t>(h);
+}
+
+int World::groundHeight(int x, int z) const {
+    if (!columnInBounds(x, z)) return 0;
+    const Chunk* c = chunkAt(x >> 4, z >> 4);
+    return (c && c->generated) ? c->ground[((z & 15) << 4) | (x & 15)] : 0;
 }
 
 int World::standHeight(int x, int z) const {
@@ -77,23 +137,115 @@ int World::standHeight(int x, int z) const {
 }
 
 int World::topBlockY(int x, int z) const {
-    for (int y = height_ - 1; y >= 0; --y) {
-        uint8_t b = get(x, y, z);
+    if (!columnInBounds(x, z)) return -1;
+    const Chunk* c = chunkAt(x >> 4, z >> 4);
+    if (!c || !c->generated) return -1;
+    for (int y = std::min(height_, c->maxY) - 1; y >= 0; --y) {
+        uint8_t b = c->blocks[blockIndex(x & 15, y, z & 15)];
         if (b != B_AIR && blockInfo(b).shape != Shape::Cross) return y;
     }
     return -1;
 }
 
+void World::updateMaxY(Chunk& c) {
+    c.maxY = 0;
+    for (int y = height_ - 1; y >= 0 && c.maxY == 0; --y) {
+        const uint8_t* row = &c.blocks[blockIndex(0, y, 0)];
+        for (int i = 0; i < kChunkSize * kChunkSize; ++i) {
+            if (row[i] != B_AIR) {
+                c.maxY = y + 1;
+                break;
+            }
+        }
+    }
+}
+
+bool World::neighborsReady(int cx, int cz) const {
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            int nx = cx + dx, nz = cz + dz;
+            if (nx < 0 || nz < 0 || nx >= chunksX_ || nz >= chunksZ_) continue;  // fora do mundo = ar
+            const Chunk* n = chunkAt(nx, nz);
+            if (!n || !n->generated) return false;
+        }
+    }
+    return true;
+}
+
 int World::rebuildDirty(int maxChunks) {
     int rebuilt = 0;
-    for (auto& c : chunks_) {
-        if (!c.dirty) continue;
-        buildChunk(c);
-        c.dirty = false;
-        ++c.version;
+    for (Chunk* c : list_) {
+        if (!c->dirty || !c->generated || !neighborsReady(c->cx, c->cz)) continue;
+        buildChunk(*c);
+        c->dirty = false;
+        c->meshed = true;
+        ++c->version;
         if (++rebuilt >= maxChunks) break;
     }
     return rebuilt;
+}
+
+int World::stream(float fx, float fz, int radius, int maxGenerate, int maxMesh) {
+    if (!source_) return 0;
+    const int genRadius = radius + 1;
+    if (spiralRadius_ != genRadius) {
+        spiral_.clear();
+        float lim = (genRadius + 0.5f) * (genRadius + 0.5f);
+        for (int dz = -genRadius; dz <= genRadius; ++dz)
+            for (int dx = -genRadius; dx <= genRadius; ++dx)
+                if (dx * dx + dz * dz <= lim) spiral_.push_back({dx, dz});
+        std::sort(spiral_.begin(), spiral_.end(), [](const auto& a, const auto& b) {
+            return a.first * a.first + a.second * a.second < b.first * b.first + b.second * b.second;
+        });
+        spiralRadius_ = genRadius;
+    }
+    const int pcx = static_cast<int>(std::floor(fx)) >> 4, pcz = static_cast<int>(std::floor(fz)) >> 4;
+    const float meshLim = (radius + 0.5f) * (radius + 0.5f);
+    int generated = 0, meshed = 0, pending = 0;
+    for (const auto& off : spiral_) {
+        int cx = pcx + off.first, cz = pcz + off.second;
+        if (cx < 0 || cz < 0 || cx >= chunksX_ || cz >= chunksZ_) continue;
+        bool inMesh = static_cast<float>(off.first * off.first + off.second * off.second) <= meshLim;
+        Chunk* c = chunkAt(cx, cz);
+        if (!c) c = createChunk(cx, cz);
+        if (!c->generated) {
+            if (generated >= maxGenerate) {
+                if (inMesh) ++pending;
+                continue;
+            }
+            c->blocks.assign(static_cast<size_t>(kChunkSize) * kChunkSize * height_, B_AIR);
+            std::fill(std::begin(c->ground), std::end(c->ground), static_cast<int16_t>(0));
+            c->lights.clear();
+            c->campfires.clear();
+            source_->generate(*c, height_);
+            updateMaxY(*c);
+            c->generated = true;
+            c->dirty = true;
+            ++generated;
+        }
+        if (inMesh && c->dirty) {
+            if (meshed < maxMesh && neighborsReady(cx, cz)) {
+                buildChunk(*c);
+                c->dirty = false;
+                c->meshed = true;
+                ++c->version;
+                ++meshed;
+            } else {
+                ++pending;
+            }
+        }
+    }
+    // Descarta aos poucos os chunks que ficaram para trás.
+    const int unloadDist = genRadius + 2;
+    int checks = std::min<int>(48, static_cast<int>(list_.size()));
+    for (int i = 0; i < checks && !list_.empty(); ++i) {
+        if (unloadCursor_ >= list_.size()) unloadCursor_ = 0;
+        Chunk* c = list_[unloadCursor_];
+        int dx = c->cx - pcx, dz = c->cz - pcz;
+        if (dx * dx + dz * dz > unloadDist * unloadDist) destroyChunk(c);
+        else ++unloadCursor_;
+    }
+    return pending;
 }
 
 void World::buildChunk(Chunk& chunk) {
@@ -101,17 +253,42 @@ void World::buildChunk(Chunk& chunk) {
     mesh.opaque.clear();
     mesh.cutout.clear();
     mesh.water.clear();
+    const int H = height_;
     const int x0 = chunk.cx * kChunkSize, z0 = chunk.cz * kChunkSize;
-    const int x1 = std::min(width_, x0 + kChunkSize), z1 = std::min(depth_, z0 + kChunkSize);
 
-    auto occludes = [&](int x, int y, int z) { return isOpaque(get(x, y, z)) ? 1 : 0; };
+    // Copia o chunk e uma borda de 1 bloco dos vizinhos para consultas rápidas.
+    pad_.assign(static_cast<size_t>(kPad) * kPad * H, B_AIR);
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            const Chunk* n = chunkAt(chunk.cx + dx, chunk.cz + dz);
+            if (!n || !n->generated) continue;
+            int lx0 = dx < 0 ? 15 : 0, lx1 = dx > 0 ? 0 : 15;
+            int lz0 = dz < 0 ? 15 : 0, lz1 = dz > 0 ? 0 : 15;
+            int ymax = std::min(H, n->maxY);
+            for (int y = 0; y < ymax; ++y)
+                for (int lz = lz0; lz <= lz1; ++lz)
+                    for (int lx = lx0; lx <= lx1; ++lx) {
+                        int px = lx + 1 + dx * kChunkSize, pz = lz + 1 + dz * kChunkSize;
+                        pad_[(static_cast<size_t>(y) * kPad + pz) * kPad + px] = n->blocks[blockIndex(lx, y, lz)];
+                    }
+        }
+    }
+    auto at = [&](int px, int y, int pz) -> uint8_t {
+        if (y < 0) return B_BEDROCK;
+        if (y >= H) return B_AIR;
+        return pad_[(static_cast<size_t>(y) * kPad + pz) * kPad + px];
+    };
+    auto occludes = [&](int px, int y, int pz) { return isOpaque(at(px, y, pz)) ? 1 : 0; };
 
-    for (int y = 0; y < height_; ++y) {
-        for (int z = z0; z < z1; ++z) {
-            for (int x = x0; x < x1; ++x) {
-                uint8_t b = blocks_[index(x, y, z)];
+    const int ymax = std::min(H, chunk.maxY);
+    for (int y = 0; y < ymax; ++y) {
+        for (int lz = 0; lz < kChunkSize; ++lz) {
+            for (int lx = 0; lx < kChunkSize; ++lx) {
+                const int px = lx + 1, pz = lz + 1;
+                uint8_t b = at(px, y, pz);
                 if (b == B_AIR) continue;
                 const BlockInfo& info = blockInfo(b);
+                const int x = x0 + lx, z = z0 + lz;
 
                 if (info.shape == Shape::Cross) {
                     // Duas faces diagonais, frente e verso (plantas).
@@ -131,7 +308,7 @@ void World::buildChunk(Chunk& chunk) {
                                 v.v = (i == 0 || i == 1) ? 1 : 0;
                                 v.layer = info.side;
                                 v.light = 230;
-                                v.flags = static_cast<uint8_t>(d[i][1] ? VF_SWAY : 0);
+                                v.flags = static_cast<uint8_t>(VF_PLANT | (d[i][1] ? VF_SWAY : 0));
                                 mesh.cutout.push_back(v);
                             }
                         }
@@ -141,15 +318,18 @@ void World::buildChunk(Chunk& chunk) {
 
                 const bool water = info.shape == Shape::Liquid;
                 if (info.shape != Shape::Cube && !water) continue;
+                const bool leaf = isLeaf(b);
+                const bool glass = b == B_GLASS;
 
                 for (int f = 0; f < 6; ++f) {
                     const FaceDef& face = kFaces[f];
-                    uint8_t nb = get(x + face.nx, y + face.ny, z + face.nz);
+                    uint8_t nb = at(px + face.nx, y + face.ny, pz + face.nz);
                     if (water) {
                         if (nb == B_WATER || isOpaque(nb)) continue;
                         if (face.ny < 0) continue;
                     } else {
                         if (isOpaque(nb)) continue;
+                        if (glass && nb == B_GLASS) continue;
                         if (y + face.ny < 0) continue;
                     }
                     uint8_t layer = face.ny > 0 ? info.top : (face.ny < 0 ? info.bottom : info.side);
@@ -157,26 +337,28 @@ void World::buildChunk(Chunk& chunk) {
                     for (int k = 0; k < 4; ++k) {
                         const int* c = face.corners[k];
                         if (info.emissive || water) { ao[k] = 3; continue; }
-                        int px = x + face.nx, py = y + face.ny, pz = z + face.nz;
+                        int qx = px + face.nx, qy = y + face.ny, qz = pz + face.nz;
                         int t1[3] = {0, 0, 0}, t2[3] = {0, 0, 0};
                         if (face.nx != 0) { t1[1] = c[1] ? 1 : -1; t2[2] = c[2] ? 1 : -1; }
                         else if (face.ny != 0) { t1[0] = c[0] ? 1 : -1; t2[2] = c[2] ? 1 : -1; }
                         else { t1[0] = c[0] ? 1 : -1; t2[1] = c[1] ? 1 : -1; }
-                        int s1 = occludes(px + t1[0], py + t1[1], pz + t1[2]);
-                        int s2 = occludes(px + t2[0], py + t2[1], pz + t2[2]);
-                        int cc = occludes(px + t1[0] + t2[0], py + t1[1] + t2[1], pz + t1[2] + t2[2]);
+                        int s1 = occludes(qx + t1[0], qy + t1[1], qz + t1[2]);
+                        int s2 = occludes(qx + t2[0], qy + t2[1], qz + t2[2]);
+                        int cc = occludes(qx + t1[0] + t2[0], qy + t1[1] + t2[1], qz + t1[2] + t2[2]);
                         ao[k] = (s1 && s2) ? 0 : 3 - (s1 + s2 + cc);
                     }
                     // Gira o quad quando a AO é anisotrópica para evitar costura diagonal.
                     int start = (ao[0] + ao[2] < ao[1] + ao[3]) ? 1 : 0;
-                    std::vector<VoxelVertex>& target = water ? mesh.water : mesh.opaque;
-                    const bool waterTop = water && face.ny > 0 && get(x, y + 1, z) != B_WATER;
+                    std::vector<VoxelVertex>& target = water ? mesh.water : (glass ? mesh.cutout : mesh.opaque);
+                    const bool waterAbove = at(px, y + 1, pz) == B_WATER;
+                    uint8_t flags = static_cast<uint8_t>((water ? VF_WATER : 0) | (info.emissive ? VF_EMISSIVE : 0) | (leaf ? VF_LEAF : 0));
+                    if (b == B_GRASS && face.ny > 0) flags |= VF_GRASS;
                     for (int n = 0; n < 4; ++n) {
                         int k = (start + n) % 4;
                         const int* c = face.corners[k];
                         VoxelVertex v{};
                         float vy = static_cast<float>(y + c[1]);
-                        if (water && c[1] == 1 && (waterTop || get(x, y + 1, z) != B_WATER)) vy -= 0.125f;
+                        if (water && c[1] == 1 && !waterAbove) vy -= 0.125f;
                         v.x = static_cast<int16_t>((x + c[0]) * kPosScale);
                         v.y = static_cast<int16_t>(std::lround(vy * kPosScale));
                         v.z = static_cast<int16_t>((z + c[2]) * kPosScale);
@@ -185,7 +367,7 @@ void World::buildChunk(Chunk& chunk) {
                         v.layer = layer;
                         float light = info.emissive ? 1.0f : face.shade * kAoCurve[ao[k]];
                         v.light = static_cast<uint8_t>(clampf(light * 255.0f, 0, 255));
-                        v.flags = static_cast<uint8_t>((water ? VF_WATER : 0) | (info.emissive ? VF_EMISSIVE : 0));
+                        v.flags = flags;
                         target.push_back(v);
                     }
                 }

@@ -6,7 +6,7 @@
 
 **Architecture:** Preserve the existing offline Android WebView/Three.js campaign and save schema. Keep gameplay, progression, maps, and character catalog intact; add narrowly scoped presentation adapters (`avatar-preview.js`, `brand.js`) and a localhost-only preview hook. NippleJS exclusively owns its generated joystick DOM inside a renamed outer movement zone. All new art remains packaged in Android assets and every browser iteration uses explicit cache-version tags.
 
-**Tech Stack:** Android/Kotlin WebView, HTML/CSS, JavaScript ES modules, Three.js 0.185.1, GLTFLoader, Camera Controls 3.1.2, Rapier 0.20.0, NippleJS 1.0.4, Node test runner, Gradle, ADB, built-in ImageGen, in-app browser, Playwright CLI for stable screenshot files.
+**Tech Stack:** Android/Kotlin WebView, HTML/CSS, JavaScript ES modules, Three.js 0.185.1, GLTFLoader, Camera Controls 3.1.2, Rapier 0.20.0, NippleJS 1.0.4, Node test runner, Gradle, ADB, built-in ImageGen, in-app browser, Playwright CLI for stable visual review runs.
 
 **Spec:** `docs/superpowers/specs/2026-08-28-zombie-zone-visual-overhaul-design.md`
 
@@ -214,7 +214,7 @@ Expected: PASS.
 
 **Step 1: Write the failing preview-gate tests**
 
-Test that `isPreviewAllowed(location)` returns true only for `127.0.0.1`/`localhost`, that the route enumerates exactly the 13 screenshot states, and that non-local Android asset URLs cannot install the global preview API.
+Test that `isPreviewAllowed(location)` returns true only for `127.0.0.1`/`localhost`, that the route enumerates exactly the 13 preview states, and that non-local Android asset URLs cannot install the global preview API.
 
 **Step 2: Run the test to verify RED**
 
@@ -232,22 +232,22 @@ Run: `node --test web-tests/preview-harness.test.mjs`
 
 Expected: PASS.
 
-### Task 7: Capture and visually review all final screens
+### Task 7: Visually review all final screens
 
 **Files:**
-- Create directory/files: `docs/screenshots/zombie-zone/*.png`
+- Modify only the CSS or copy that fails review; no image files are produced or stored.
 
-**Step 1: Read and use the Playwright skill for file-backed screenshots**
+**Step 1: Run the build in the review browser**
 
-Use the provided Playwright wrapper/CLI against `http://127.0.0.1:4173/` at a fixed 1280×720 landscape viewport. Keep the in-app browser open for live progress while the screenshot browser writes files.
+Use the provided Playwright wrapper/CLI against `http://127.0.0.1:4173/` at a fixed 1280×720 landscape viewport. Keep the in-app browser open for live progress.
 
-**Step 2: Capture all 13 states**
+**Step 2: Walk through all 13 states**
 
-Write stable descriptive files for loading, home, avatar, campaign, story, preparation, gameplay, map overlay, pause, settings, victory, defeat, and compatibility under `docs/screenshots/zombie-zone/`.
+Visit loading, home, avatar, campaign, story, preparation, gameplay, map overlay, pause, settings, victory, defeat, and compatibility in the live build.
 
-**Step 3: Inspect every image**
+**Step 3: Inspect every state**
 
-Open each PNG at original detail and check consistency, avatar scale, text contrast, safe-area padding, button visibility, no stale branding, no blank background, and no clipped controls. Patch CSS and recapture any failure.
+Check consistency, avatar scale, text contrast, safe-area padding, button visibility, no stale branding, no blank background, and no clipped controls. Patch CSS and re-check any failure.
 
 **Step 4: Inspect browser diagnostics**
 
@@ -301,7 +301,7 @@ Run `adb -s <serial> install -r <absolute-apk-path>`, confirm `Success`, verify 
 
 **Step 5: Verify the device presentation and movement**
 
-Confirm Zombie Zone branding and live selected avatar appear, enter a mission, drag the movement zone on the phone, and verify visible world-position change. Capture a device screenshot after movement and inspect it.
+Confirm Zombie Zone branding and live selected avatar appear, enter a mission, drag the movement zone on the phone, and verify visible world-position change on the device screen.
 
 ### Task 10: Independent review and final evidence
 
@@ -318,8 +318,8 @@ Use `superpowers:receiving-code-review` before applying non-trivial feedback. Ad
 
 **Step 3: Run verification-before-completion**
 
-Re-run `npm test`, the relevant Gradle tasks, browser console/network checks, browser before/after movement proof, APK hash/install/package checks, and confirm all 13 screenshots exist.
+Re-run `npm test`, the relevant Gradle tasks, browser console/network checks, browser before/after movement proof, APK hash/install/package checks, and confirm all 13 preview states render correctly.
 
 **Step 4: Deliver concise final evidence**
 
-Report the movement coordinates, web test count, Android build result, fresh APK hash/install status, screenshot folder, generated image paths/prompts, and any limitation that could not be directly observed. Do not stage or commit unrelated dirty-worktree files.
+Report the movement coordinates, web test count, Android build result, fresh APK hash/install status, and any limitation that could not be directly observed. Do not stage or commit unrelated dirty-worktree files.

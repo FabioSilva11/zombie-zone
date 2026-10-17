@@ -35,7 +35,9 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
         left.addView(toggle("Mira assistida", "Puxa a mira levemente para o zumbi", s.aimAssist) { s.aimAssist = it })
         left.addView(toggle("Tiro automático", "Atira sozinho quando a mira está no zumbi", s.autoFire) { s.autoFire = it })
         left.addView(toggle("Inverter eixo vertical", "", s.invertY) { s.invertY = it })
-        left.addView(toggle("Modo canhoto", "Troca o lado dos botões e do joystick", s.leftHanded) { s.leftHanded = it })
+        left.addView(Ui.button(app, "✥ PERSONALIZAR CONTROLES (HUD)", Palette.cyan, Palette.dark, 13f) { app.applySettings(); app.showHudEditor(fromPause) }, Ui.lp(Ui.MATCH, app.dpi(46)).apply { bottomMargin = app.dpi(4) })
+        left.addView(Ui.text(app, "Mova, aumente ou esconda cada botão: atirar, mirar, pular, agachar, correr, faca, granada...", 10f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(8)) })
+        left.addView(toggle("Modo canhoto", "Espelha o layout padrão (apaga o layout personalizado)", s.leftHanded) { s.leftHanded = it; s.hudLayout = "" })
         left.addView(toggle("Vibração", "Ao levar dano e acertar tiros", s.vibration) { s.vibration = it })
         left.addView(section("DIFICULDADE ADAPTATIVA"))
         left.addView(toggle(
@@ -57,7 +59,9 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
             }
             qualityRow.addView(b, Ui.lp(0, app.dpi(42), 1f).apply { marginEnd = if (i < 2) app.dpi(6) else 0 })
         }
-        right.addView(qualityRow, Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(8) })
+        right.addView(qualityRow, Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(4) })
+        right.addView(Ui.text(app, "Qualidade muda a resolução e a distância de visão da ilha.", 10f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(8)) })
+        right.addView(toggle("Modo ultra-realista", "Sombras do sol em tempo real, iluminação indireta aproximada, materiais PBR, bloom e névoa. Gasta mais bateria.", s.cinematic) { s.cinematic = it })
         right.addView(toggle("Mostrar FPS", "", s.showFps) { s.showFps = it })
         right.addView(toggle("Lembretes", "Avisar quando o baú e o prêmio diário estiverem prontos", s.reminders) {
             s.reminders = it
@@ -80,7 +84,7 @@ class SettingsScreen(private val app: MainActivity, private val fromPause: Boole
         if (AdConsent.privacyOptionsRequired(app)) {
             right.addView(Ui.button(app, "PRIVACIDADE DOS ANÚNCIOS", Palette.stone, Color.WHITE, 12f) { AdConsent.showPrivacyOptions(app) }, Ui.lp(Ui.MATCH, app.dpi(42)).apply { topMargin = app.dpi(4) })
         }
-        right.addView(Ui.text(app, "Personagens: Kenney Blocky Characters (CC0). Mundo, texturas, sons e músicas gerados para o Zombie Zone.", 10f, Palette.muted).apply { setPadding(0, app.dpi(10), 0, 0) })
+        right.addView(Ui.text(app, "Personagens, mundo, texturas, sons e músicas gerados para o Zombie Zone.", 10f, Palette.muted).apply { setPadding(0, app.dpi(10), 0, 0) })
 
         val columns = Ui.row(app, Gravity.TOP)
         columns.addView(left, Ui.lp(0, Ui.WRAP, 1f).apply { marginEnd = app.dpi(16) })

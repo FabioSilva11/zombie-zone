@@ -251,6 +251,106 @@ void campfireSide(Canvas& c, uint32_t seed) {
         }
 }
 
+// Tronco de bétula: casca branca com manchas pretas horizontais.
+void birchLog(Canvas& c, uint32_t seed) {
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) c.setV(x, y, jitter(Vec3(222, 218, 206), x, y, seed, 8));
+    for (int k = 0; k < 7; ++k) {
+        int y = static_cast<int>(n01(k, 1, seed) * 16), x = static_cast<int>(n01(k, 2, seed) * 16);
+        int len = 2 + static_cast<int>(n01(k, 3, seed) * 4);
+        for (int i = 0; i < len; ++i) c.set(x + i, y, 46, 42, 40);
+    }
+}
+
+// Tronco de coqueiro: anéis marcados.
+void palmLog(Canvas& c, uint32_t seed) {
+    for (int y = 0; y < 16; ++y) {
+        float ring = (y % 4 == 0) ? 0.7f : (y % 4 == 1 ? 0.88f : 1.0f);
+        for (int x = 0; x < 16; ++x) c.setV(x, y, jitter(Vec3(158, 124, 82) * ring, x, y, seed, 7));
+    }
+}
+
+// Copa florida: base colorida com flores mais claras e alguns furos de sombra.
+void blossom(Canvas& c, const Vec3& base, const Vec3& flower, uint32_t seed) {
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) {
+            float n = n01(x, y, seed);
+            Vec3 col = n < 0.18f ? base * 0.62f : (n > 0.78f ? flower : base * (0.88f + n * 0.18f));
+            c.setV(x, y, jitter(col, x, y, seed + 3, 6));
+        }
+}
+
+void palmLeaves(Canvas& c, uint32_t seed) {
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) {
+            bool vein = (x + y) % 5 == 0;
+            float n = n01(x, y, seed);
+            Vec3 col = vein ? Vec3(118, 160, 60) : Vec3(66, 140, 52) * (0.8f + n * 0.3f);
+            c.setV(x, y, col);
+        }
+}
+
+// Tijolos alternados com argamassa.
+void bricks(Canvas& c, const Vec3& brick, const Vec3& mortar, int rowH, int brickW, uint32_t seed) {
+    for (int y = 0; y < 16; ++y) {
+        int row = y / rowH;
+        int offset = (row % 2) * (brickW / 2);
+        for (int x = 0; x < 16; ++x) {
+            bool joint = (y % rowH == rowH - 1) || ((x + offset) % brickW == 0);
+            if (joint) c.setV(x, y, jitter(mortar, x, y, seed, 6));
+            else c.setV(x, y, jitter(brick * (0.9f + 0.2f * n01((x + offset) / brickW, row, seed + 1)), x, y, seed + 2, 7));
+        }
+    }
+}
+
+void roofTiles(Canvas& c, const Vec3& base, uint32_t seed) {
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) {
+            int row = y / 4;
+            int ox = (row % 2) * 2;
+            float v = (y % 4 == 3) ? 0.6f : (((x + ox) % 4 == 0) ? 0.78f : 1.0f - (y % 4) * 0.05f);
+            c.setV(x, y, jitter(base * v, x, y, seed, 6));
+        }
+}
+
+// Janela: moldura opaca, vidro recortado com reflexos (o resto é transparente).
+void glass(Canvas& c) {
+    c.clear();
+    for (int i = 0; i < 16; ++i) {
+        for (int t = 0; t < 1; ++t) {
+            c.set(i, t, 220, 232, 240); c.set(i, 15 - t, 220, 232, 240);
+            c.set(t, i, 220, 232, 240); c.set(15 - t, i, 220, 232, 240);
+        }
+    }
+    for (int k = 0; k < 4; ++k) {
+        c.set(3 + k, 4 - k + 6, 236, 246, 255, 255);
+        c.set(9 + k, 12 - k, 200, 226, 246, 255);
+    }
+}
+
+void bookshelf(Canvas& c, uint32_t seed) {
+    planks(c, {150, 110, 64}, seed);
+    const Vec3 colors[5] = {{170, 46, 40}, {52, 92, 170}, {60, 140, 60}, {200, 170, 60}, {120, 70, 140}};
+    for (int shelf = 0; shelf < 2; ++shelf) {
+        int y0 = 1 + shelf * 8;
+        for (int x = 1; x < 15; ++x) {
+            const Vec3& col = colors[static_cast<int>(n01(x, shelf, seed) * 5) % 5];
+            int h = 5 + static_cast<int>(n01(x, shelf + 3, seed) * 2);
+            for (int y = y0 + (6 - h); y < y0 + 6; ++y) c.setV(x, y, col * (x % 2 ? 0.85f : 1.0f));
+        }
+    }
+}
+
+void pump(Canvas& c) {
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) c.set(x, y, 206, 52, 44);
+    for (int y = 3; y < 8; ++y)
+        for (int x = 4; x < 12; ++x) c.set(x, y, 30, 34, 40);
+    c.set(6, 5, 120, 255, 140); c.set(7, 5, 120, 255, 140); c.set(9, 5, 120, 255, 140);
+    for (int y = 10; y < 14; ++y) c.set(12, y, 40, 40, 44);
+    for (int x = 3; x < 13; ++x) c.set(x, 15, 120, 30, 26);
+}
+
 }  // namespace
 
 std::vector<uint8_t> generateBlockTextures(const Theme& theme) {
@@ -358,6 +458,34 @@ std::vector<uint8_t> generateBlockTextures(const Theme& theme) {
     c = layer(T_MUSHROOM_RED); cross(c, {}, {200, 36, 36}, 4, s + 47);
     c = layer(T_DIAMOND); fillNoise(c, {90, 230, 220}, 18, s + 48);
     c = layer(T_GOLD); fillNoise(c, {250, 208, 64}, 16, s + 49);
+
+    // Árvores coloridas.
+    c = layer(T_LOG_BIRCH); birchLog(c, s + 50);
+    c = layer(T_LOG_CHERRY); logSide(c, {92, 52, 48}, s + 51);
+    c = layer(T_LOG_PALM); palmLog(c, s + 52);
+    c = layer(T_LOG_PALM_TOP); fillNoise(c, {170, 140, 92}, 10, s + 53);
+    c = layer(T_LEAVES_BIRCH); leaves(c, Vec3(128, 182, 74) * (0.6f + tint.y * 0.45f), s + 54);
+    c = layer(T_LEAVES_CHERRY); blossom(c, {244, 168, 204}, {255, 214, 232}, s + 55);
+    c = layer(T_LEAVES_MAPLE); blossom(c, {214, 76, 34}, {246, 150, 46}, s + 56);
+    c = layer(T_LEAVES_GOLD); blossom(c, {236, 190, 30}, {255, 232, 96}, s + 57);
+    c = layer(T_LEAVES_PURPLE); blossom(c, {150, 102, 214}, {196, 160, 246}, s + 58);
+    c = layer(T_LEAVES_PALM); palmLeaves(c, s + 59);
+
+    // Construções.
+    c = layer(T_BRICK); bricks(c, {164, 78, 58}, {196, 186, 170}, 4, 8, s + 60);
+    c = layer(T_PLASTER); fillNoise(c, {226, 218, 198}, 6, s + 61); speckle(c, {196, 188, 168}, 0.06f, s + 62);
+    c = layer(T_ROOF_RED); roofTiles(c, {176, 66, 46}, s + 63);
+    c = layer(T_ROOF_SLATE); roofTiles(c, {72, 80, 98}, s + 64);
+    c = layer(T_GLASS); glass(c);
+    c = layer(T_CONCRETE); fillNoise(c, {164, 164, 160}, 7, s + 65); speckle(c, {140, 140, 136}, 0.1f, s + 66);
+    c = layer(T_ASPHALT);
+    fillNoise(c, {60, 60, 64}, 8, s + 67);
+    speckle(c, {92, 92, 96}, 0.08f, s + 68);
+    for (int x = 2; x < 14; ++x) c.set(x, 7, 214, 196, 80);  // faixa amarela
+    c = layer(T_STONE_BRICK); bricks(c, {124, 124, 128}, {84, 84, 88}, 8, 8, s + 69);
+    c = layer(T_WOOL_RED); fillNoise(c, {160, 40, 40}, 10, s + 70);
+    c = layer(T_BOOKSHELF); bookshelf(c, s + 71);
+    c = layer(T_PUMP); pump(c);
     return data;
 }
 

@@ -204,6 +204,16 @@ struct Mat4 {
         r.m[14] = 2.0f * zFar * zNear / (zNear - zFar);
         return r;
     }
+    static Mat4 ortho(float l, float r, float b, float t, float n, float f) {
+        Mat4 m;
+        m.m[0] = 2.0f / (r - l);
+        m.m[5] = 2.0f / (t - b);
+        m.m[10] = -2.0f / (f - n);
+        m.m[12] = -(r + l) / (r - l);
+        m.m[13] = -(t + b) / (t - b);
+        m.m[14] = -(f + n) / (f - n);
+        return m;
+    }
     static Mat4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
         Vec3 f = normalize(target - eye);
         Vec3 s = normalize(cross(f, up));
@@ -251,7 +261,7 @@ inline Mat4 Mat4::inverse() const {
 inline Vec3 forwardFromYaw(float yaw) { return {std::sin(yaw), 0.0f, -std::cos(yaw)}; }
 inline Vec3 rightFromYaw(float yaw) { return {std::cos(yaw), 0.0f, std::sin(yaw)}; }
 inline float yawFromDirection(float dx, float dz) { return std::atan2(dx, -dz); }
-// Os modelos Kenney olham para +Z; converte yaw de jogo para rotação do modelo.
+// Os personagens de blocos olham para +Z; converte yaw de jogo para rotação do modelo.
 inline float modelRotationFromYaw(float yaw) { return kPi - yaw; }
 
 struct AABB {

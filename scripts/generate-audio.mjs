@@ -1,10 +1,12 @@
 // Sintetiza todos os efeitos sonoros e músicas do Zombie Zone (áudio 100% original).
-// Uso: node scripts/generate-audio.mjs <pasta-wav-temporária>
+// Uso: node scripts/generate-audio.mjs <pasta-wav-temporária> [nomes...]
+// (com nomes, grava só esses arquivos; a síntese das outras faixas roda igual para manter o RNG estável)
 // Depois converta para OGG com ffmpeg (ver scripts/build-audio.ps1).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const OUT = process.argv[2] ?? 'build/audio-wav';
+const ONLY = new Set(process.argv.slice(3));
 mkdirSync(OUT, { recursive: true });
 
 let seed = 1234567;
@@ -59,6 +61,7 @@ function fadeEdges(data, rate, ms = 6) {
 }
 function finish(b, peak = 0.9, ms = 6) { normalize(b.data, peak); fadeEdges(b.data, b.rate, ms); return b; }
 function writeWav(name, { rate, data }) {
+  if (ONLY.size && !ONLY.has(name)) return;
   const bytes = Buffer.alloc(44 + data.length * 2);
   bytes.write('RIFF', 0); bytes.writeUInt32LE(36 + data.length * 2, 4); bytes.write('WAVE', 8);
   bytes.write('fmt ', 12); bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
@@ -93,16 +96,53 @@ function click(data, rate, at, freq, gain = 1) {
   }
 }
 
+// Raspão metálico (pente deslizando, ferrolho correndo).
+function scrape(data, rate, at, length, from, to, gain) {
+  const start = Math.floor(at * rate), n = Math.floor(length * rate);
+  let phase = 0;
+  for (let i = 0; i < n && start + i < data.length; i++) {
+    const t = i / rate, k = t / length;
+    phase += (from + (to - from) * k) / rate;
+    const amp = Math.sin(Math.PI * k) * gain;
+    data[start + i] += (noise() * 0.55 + osc.saw(phase) * 0.25) * amp;
+  }
+}
+
+// Batida grave (pente encaixando na arma).
+function thunk(data, rate, at, freq, gain) {
+  const start = Math.floor(at * rate);
+  for (let i = 0; i < rate * 0.12 && start + i < data.length; i++) {
+    const t = i / rate;
+    data[start + i] += (Math.sin(TAU * freq * t) * 0.9 + noise() * 0.5) * env(t, 0.0008, 0.03) * gain;
+  }
+}
+
+// Recarga do fuzil: trava solta, pente sai raspando, pente novo entra e bate no lugar.
 function reload() {
-  const b = buffer(1.15); const { rate, data } = b;
-  click(data, rate, 0.02, 2200, 0.7);
-  click(data, rate, 0.08, 1400, 0.5);
-  click(data, rate, 0.55, 1800, 0.9);
-  click(data, rate, 0.6, 900, 0.6);
-  click(data, rate, 0.92, 2600, 1.0);
-  click(data, rate, 0.98, 1200, 0.8);
-  highpass(data, rate, 300);
-  return finish(b, 0.8);
+  const b = buffer(1.05); const { rate, data } = b;
+  click(data, rate, 0.02, 2400, 0.8);
+  scrape(data, rate, 0.05, 0.16, 1400, 900, 0.45);
+  thunk(data, rate, 0.24, 160, 0.5);
+  scrape(data, rate, 0.52, 0.12, 900, 1500, 0.4);
+  thunk(data, rate, 0.66, 210, 1.0);
+  click(data, rate, 0.67, 2900, 1.0);
+  click(data, rate, 0.74, 1300, 0.5);
+  highpass(data, rate, 140);
+  return finish(b, 0.9);
+}
+
+// Ferrolho: puxado para trás e solto — o "clac-clac" de arma carregada.
+function rack() {
+  const b = buffer(0.5); const { rate, data } = b;
+  click(data, rate, 0.0, 2000, 0.7);
+  scrape(data, rate, 0.01, 0.1, 1800, 1100, 0.6);
+  thunk(data, rate, 0.11, 240, 0.7);
+  click(data, rate, 0.115, 3400, 0.9);
+  scrape(data, rate, 0.19, 0.06, 1200, 2200, 0.5);
+  thunk(data, rate, 0.25, 300, 1.0);
+  click(data, rate, 0.252, 4200, 1.0);
+  highpass(data, rate, 160);
+  return finish(b, 0.9);
 }
 
 function hit() {
@@ -333,3 +373,209 @@ writeWav('sfx_defeat', jingle([69, 65, 62, 57], 0.22, 1.6, 'tri', 0.35));
 writeWav('sfx_unlock', arpeggio([76, 79, 83, 88, 91, 95], 0.07, 0.3, 'square', 1.1, 0.45));
 writeWav('music_menu', music({ bpm: 88, bars: 16, chords: [[A, C, E], [F - 12 + 12, A, C], [C, E, G], [G - 12, 59, D]] }));
 writeWav('music_battle', music({ bpm: 124, bars: 16, chords: [[A, C, E], [A, C, E], [F, A, C + 12], [G, 71, D + 12]], dark: true }));
+
+// ------------------------------------------------------------------ habilidades dos zumbis
+
+function throwWhoosh() {
+  const b = buffer(0.32); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const sweep = Math.sin(Math.PI * Math.min(1, t / 0.32)) ** 2;
+    data[i] = noise() * sweep * (0.6 + 0.4 * Math.sin(TAU * 18 * t));
+  }
+  bandpass(data, rate, 900, 1.2).forEach((v, i) => { data[i] = v; });
+  return finish(b, 0.7);
+}
+
+function fireBurst() {
+  const b = buffer(1.4); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const glass = t < 0.12 ? (Math.sin(TAU * 3100 * t) + Math.sin(TAU * 4700 * t) * 0.6) * env(t, 0.001, 0.03) * 0.5 : 0;
+    const whoosh = noise() * env(t, 0.03, 0.45) * 0.9;
+    const crackle = rand() < 0.004 ? noise() * 2.5 : 0;
+    data[i] = glass + whoosh + crackle * Math.exp(-t * 1.5);
+  }
+  lowpass(data, rate, 3800);
+  return finish(b, 0.85, 20);
+}
+
+function explosion() {
+  const b = buffer(1.8); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const boom = Math.sin(TAU * (60 - 30 * Math.min(1, t)) * t) * env(t, 0.002, 0.35) * 1.2;
+    const blast = noise() * env(t, 0.001, 0.25);
+    const rumble = noise() * env(t, 0.05, 0.7) * 0.4;
+    data[i] = boom + blast + rumble;
+  }
+  lowpass(data, rate, 2200);
+  return finish(b, 0.95, 30);
+}
+
+function knife() {
+  const b = buffer(0.3); const { rate, data } = b;
+  let phase = 0;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    phase += (2600 + 2200 * t) / rate;
+    const ring = Math.sin(TAU * phase) * env(t, 0.004, 0.06) * 0.35;
+    const swish = noise() * Math.sin(Math.PI * Math.min(1, t / 0.18)) * 0.6;
+    data[i] = ring + swish;
+  }
+  highpass(data, rate, 1200);
+  return finish(b, 0.75);
+}
+
+function scream() {
+  const b = buffer(1.3); const { rate, data } = b;
+  const src = new Float32Array(data.length);
+  let phase = 0;
+  for (let i = 0; i < src.length; i++) {
+    const t = i / rate;
+    const f = (520 + 260 * Math.sin(Math.PI * Math.min(1, t / 0.5))) * (1 + 0.04 * Math.sin(TAU * 9 * t) + 0.02 * noise());
+    phase += f / rate;
+    const amp = Math.sin(Math.PI * Math.min(1, t / 1.3)) ** 0.5;
+    src[i] = (osc.saw(phase) * 0.7 + noise() * 0.3) * amp;
+  }
+  const f1 = bandpass(src, rate, 1100, 3), f2 = bandpass(src, rate, 2600, 5);
+  for (let i = 0; i < data.length; i++) data[i] = f1[i] + f2[i] * 0.7 + src[i] * 0.05;
+  return finish(b, 0.85, 25);
+}
+
+function rockThud() {
+  const b = buffer(0.45); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    data[i] = Math.sin(TAU * (110 - 60 * t) * t) * env(t, 0.001, 0.08) + noise() * env(t, 0.001, 0.05) * 0.7 + noise() * env(t, 0.02, 0.12) * 0.15;
+  }
+  lowpass(data, rate, 1600);
+  return finish(b, 0.85);
+}
+
+function spit() {
+  const b = buffer(0.5); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const gurgle = Math.sin(TAU * (180 + 60 * Math.sin(TAU * 23 * t)) * t) * env(t, 0.01, 0.12) * 0.5;
+    data[i] = noise() * env(t, 0.005, 0.09) * 0.8 + gurgle;
+  }
+  bandpass(data, rate, 1400, 0.9).forEach((v, i) => { data[i] = v; });
+  return finish(b, 0.75);
+}
+
+writeWav('sfx_throw', throwWhoosh());
+writeWav('sfx_fire', fireBurst());
+writeWav('sfx_explosion', explosion());
+writeWav('sfx_knife', knife());
+writeWav('sfx_scream', scream());
+writeWav('sfx_rock', rockThud());
+writeWav('sfx_chest', arpeggio([79, 83, 86, 91, 95, 98], 0.05, 0.22, 'square', 0.9, 0.42));
+writeWav('sfx_spit', spit());
+writeWav('sfx_rack', rack());
+
+// ------------------------------------------------------------------ armas novas, troca de arma e ondas
+// (no fim do arquivo para não mudar o RNG dos sons anteriores)
+
+function gunshot({ seconds, crackDecay, bodyFreq, bodyDecay, tailDecay, tailGain, cutoff }) {
+  const b = buffer(seconds); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const crack = noise() * env(t, 0.001, crackDecay);
+    const body = Math.sin(TAU * (bodyFreq - t * bodyFreq * 1.2) * t) * env(t, 0.002, bodyDecay) * 0.9;
+    const tail = noise() * env(t, 0.01, tailDecay) * tailGain;
+    data[i] = crack + body + tail;
+  }
+  lowpass(data, rate, cutoff);
+  return b;
+}
+
+function pistolShot() { return finish(gunshot({ seconds: 0.24, crackDecay: 0.02, bodyFreq: 150, bodyDecay: 0.04, tailDecay: 0.07, tailGain: 0.2, cutoff: 6500 }), 0.9); }
+function smgShot() { return finish(gunshot({ seconds: 0.18, crackDecay: 0.016, bodyFreq: 125, bodyDecay: 0.035, tailDecay: 0.05, tailGain: 0.18, cutoff: 6000 }), 0.85); }
+function lmgShot() { return finish(gunshot({ seconds: 0.3, crackDecay: 0.03, bodyFreq: 75, bodyDecay: 0.08, tailDecay: 0.12, tailGain: 0.3, cutoff: 4200 }), 0.95); }
+
+function shotgunShot() {
+  const b = gunshot({ seconds: 0.75, crackDecay: 0.05, bodyFreq: 58, bodyDecay: 0.12, tailDecay: 0.22, tailGain: 0.45, cutoff: 3600 });
+  // Bomba: "chk-chk" depois do disparo.
+  scrape(b.data, b.rate, 0.42, 0.08, 900, 500, 0.25);
+  click(b.data, b.rate, 0.5, 1800, 0.45);
+  scrape(b.data, b.rate, 0.55, 0.07, 500, 900, 0.22);
+  click(b.data, b.rate, 0.63, 2200, 0.5);
+  return finish(b, 0.97, 10);
+}
+
+function sniperShot() {
+  const b = gunshot({ seconds: 1.2, crackDecay: 0.012, bodyFreq: 70, bodyDecay: 0.1, tailDecay: 0.45, tailGain: 0.3, cutoff: 7000 });
+  // Eco distante e ferrolho.
+  const { rate, data } = b;
+  const delay = Math.floor(rate * 0.18);
+  for (let i = data.length - 1; i >= delay; i--) data[i] += data[i - delay] * 0.35;
+  click(data, rate, 0.8, 1500, 0.35);
+  scrape(data, rate, 0.85, 0.12, 700, 1100, 0.18);
+  click(data, rate, 0.99, 2400, 0.4);
+  return finish(b, 0.97, 20);
+}
+
+function flameRoar() {
+  const b = buffer(0.42); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const roar = noise() * Math.sin(Math.PI * Math.min(1, t / 0.42)) * (0.75 + 0.25 * Math.sin(TAU * 31 * t));
+    const crackle = rand() < 0.01 ? noise() * 1.8 : 0;
+    data[i] = roar + crackle;
+  }
+  lowpass(data, rate, 2400);
+  return finish(b, 0.7, 30);
+}
+
+function launcherThump() {
+  const b = buffer(0.55); const { rate, data } = b;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const thump = Math.sin(TAU * (75 - 40 * Math.min(1, t * 3)) * t) * env(t, 0.002, 0.12);
+    const air = noise() * env(t, 0.004, 0.08) * 0.6;
+    const hiss = noise() * env(t, 0.05, 0.2) * 0.2;
+    data[i] = thump + air + hiss;
+  }
+  lowpass(data, rate, 2600);
+  return finish(b, 0.92, 12);
+}
+
+function equip() {
+  const b = buffer(0.36); const { rate, data } = b;
+  click(data, rate, 0.0, 1300, 0.6);
+  scrape(data, rate, 0.05, 0.12, 600, 1000, 0.25);
+  click(data, rate, 0.2, 2100, 0.8);
+  return finish(b, 0.7);
+}
+
+// Corneta da horda (estilo "uma grande onda de zumbis está chegando").
+function waveHorn() {
+  const b = buffer(2.4); const { rate, data } = b;
+  let phase = 0, phase2 = 0;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / rate;
+    const blast = t < 1.0 ? 0 : 1;
+    const local = blast ? t - 1.05 : t;
+    const len = blast ? 1.3 : 0.9;
+    const k = Math.max(0, Math.min(1, local / len));
+    const f = (blast ? 98 : 110) * (1 + 0.45 * Math.min(1, k * 3)) * (1 + 0.012 * Math.sin(TAU * 6 * t));
+    phase += f / rate;
+    phase2 += f * 1.5 / rate;
+    const amp = local < 0 ? 0 : Math.sin(Math.PI * k) ** 0.4;
+    data[i] = (osc.saw(phase) * 0.6 + osc.saw(phase2) * 0.3 + noise() * 0.05) * amp;
+  }
+  lowpass(data, rate, 1800);
+  for (const at of [0.0, 0.45, 1.05, 1.5, 1.95]) thunk(data, rate, at, 55, 0.9);
+  return finish(b, 0.85, 40);
+}
+
+writeWav('sfx_pistol', pistolShot());
+writeWav('sfx_shotgun', shotgunShot());
+writeWav('sfx_smg', smgShot());
+writeWav('sfx_sniper', sniperShot());
+writeWav('sfx_lmg', lmgShot());
+writeWav('sfx_flame', flameRoar());
+writeWav('sfx_launcher', launcherThump());
+writeWav('sfx_equip', equip());
+writeWav('sfx_wave', waveHorn());

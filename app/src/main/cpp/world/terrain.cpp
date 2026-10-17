@@ -11,7 +11,21 @@ namespace {
 
 enum Reserve : uint8_t { R_NONE = 0, R_PATH = 1, R_CAMP = 2, R_TREE = 3, R_RIVER = 4 };
 
-enum CampKind { K_FIRE = 0, K_RUINS = 1, K_GRAVEYARD = 2, K_DEPOT = 3, K_FARM = 4 };
+// Adaptador: estruturas escrevem direto no mundo finito (sem marcar chunks sujos).
+class WorldSink : public BlockSink {
+public:
+    explicit WorldSink(World& w) : w_(w) {}
+    uint8_t get(int x, int y, int z) const override { return w_.get(x, y, z); }
+    void set(int x, int y, int z, uint8_t block) override { w_.set(x, y, z, block, false); }
+
+private:
+    World& w_;
+};
+
+void absorb(WorldLayout& layout, const DecorOut& out) {
+    layout.lights.insert(layout.lights.end(), out.lights.begin(), out.lights.end());
+    layout.campfires.insert(layout.campfires.end(), out.campfires.begin(), out.campfires.end());
+}
 
 struct HeightField {
     int w = 0, d = 0;
@@ -67,7 +81,7 @@ MapShape makeShape(MapStyle style, int size, Rng& rng) {
     s.nx = std::cos(a);
     s.nz = std::sin(a);
     s.offset = rng.range(-0.08f, 0.08f) * size;
-    s.terrace = rng.range(3.0f, 4.0f);
+    s.terrace = 1.0f;  // degraus de um bloco: nada de paredes mais altas que o jogador
     return s;
 }
 
@@ -114,7 +128,7 @@ float naturalHeight(const MapShape& s, float x, float z, int size, const Theme& 
             float r = std::sqrt(dx * dx + dz * dz);
             float ring = std::exp(-((r - 0.5f) / 0.13f) * ((r - 0.5f) / 0.13f)) * 17.0f * theme.hilliness;
             mountains = ring + mountains * 0.3f;
-            if (r < 0.3f) hills = lerpf(-9.0f, hills, smoothstepf(0.18f, 0.3f, r));
+            if (r < 0.32f) hills = lerpf(-7.0f, hills, smoothstepf(0.06f, 0.32f, r));  // bacia com encosta suave
             break;
         }
         case MapStyle::Rivers:
@@ -229,86 +243,6 @@ void carvePath(HeightField& hf, Vec2 a, Vec2 b, uint32_t seed, int sea) {
     }
 }
 
-// --------------------------------------------------------------------------- árvores (troncos altos)
-
-void leafBlock(World& w, int x, int y, int z, uint8_t leaf) {
-    if (w.get(x, y, z) == B_AIR) w.set(x, y, z, leaf, false);
-}
-
-void placeOak(World& w, int x, int y, int z, Rng& rng) {
-    if (rng.chance(0.18f)) {
-        // Carvalho gigante: copa esférica bem acima da cabeça.
-        int h = rng.rangeInt(9, 11);
-        for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_OAK, false);
-        int cy = h - 1;
-        for (int dy = -3; dy <= 2; ++dy)
-            for (int dz = -3; dz <= 3; ++dz)
-                for (int dx = -3; dx <= 3; ++dx) {
-                    float dist = static_cast<float>(dx * dx + dz * dz) + dy * dy * 1.7f;
-                    if (dist > 10.5f || (dist > 8.0f && rng.chance(0.4f))) continue;
-                    if (dx == 0 && dz == 0 && cy + dy < h) continue;
-                    leafBlock(w, x + dx, y + cy + dy, z + dz, B_LEAVES_OAK);
-                }
-        return;
-    }
-    int h = rng.rangeInt(7, 9);
-    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_OAK, false);
-    for (int dy = h - 3; dy <= h + 1; ++dy) {
-        int r = dy <= h - 1 ? 2 : 1;
-        for (int dz = -r; dz <= r; ++dz) {
-            for (int dx = -r; dx <= r; ++dx) {
-                bool corner = std::abs(dx) == r && std::abs(dz) == r;
-                if (corner && (dy == h + 1 || dy == h - 1 || rng.chance(0.5f))) continue;
-                if (dx == 0 && dz == 0 && dy < h) continue;
-                leafBlock(w, x + dx, y + dy, z + dz, B_LEAVES_OAK);
-            }
-        }
-    }
-}
-
-void placeSpruce(World& w, int x, int y, int z, Rng& rng) {
-    int h = rng.rangeInt(9, 12);
-    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_SPRUCE, false);
-    for (int dy = 4; dy <= h; ++dy) {
-        int fromTop = h - dy;
-        int layerR = fromTop == 0 ? 0 : (fromTop < 3 ? 1 : (dy % 2 == 0 ? 2 : 1));
-        for (int dz = -layerR; dz <= layerR; ++dz)
-            for (int dx = -layerR; dx <= layerR; ++dx) {
-                if (std::abs(dx) + std::abs(dz) > layerR + 1) continue;
-                if (dx == 0 && dz == 0 && dy < h) continue;
-                leafBlock(w, x + dx, y + dy, z + dz, B_LEAVES_SPRUCE);
-            }
-    }
-    w.set(x, y + h, z, B_LEAVES_SPRUCE, false);
-}
-
-void placeCactus(World& w, int x, int y, int z, Rng& rng) {
-    int h = rng.rangeInt(2, 4);
-    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_CACTUS, false);
-}
-
-void placeDeadTree(World& w, int x, int y, int z, Rng& rng) {
-    int h = rng.rangeInt(5, 7);
-    for (int i = 0; i < h; ++i) w.set(x, y + i, z, B_LOG_DEAD, false);
-    int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-    int branches = rng.rangeInt(1, 3);
-    for (int b = 0; b < branches; ++b) {
-        int* d = dirs[rng.rangeInt(0, 3)];
-        int by = y + h - 1 - b;
-        w.set(x + d[0], by, z + d[1], B_LOG_DEAD, false);
-        w.set(x + d[0] * 2, by + 1, z + d[1] * 2, B_LOG_DEAD, false);
-    }
-}
-
-void placeTree(World& w, TreeKind kind, int x, int y, int z, Rng& rng) {
-    switch (kind) {
-        case TreeKind::Oak: placeOak(w, x, y, z, rng); break;
-        case TreeKind::Spruce: placeSpruce(w, x, y, z, rng); break;
-        case TreeKind::Cactus: placeCactus(w, x, y, z, rng); break;
-        case TreeKind::Dead: placeDeadTree(w, x, y, z, rng); break;
-    }
-}
-
 void fillColumns(World& world, HeightField& hf, const Theme& theme, int sea, uint32_t seed) {
     Rng rng(seed ^ 0xA5A5u);
     for (int z = 0; z < hf.d; ++z) {
@@ -353,139 +287,6 @@ bool farFromAll(const Vec2& p, const std::vector<Vec2>& others, float minDist) {
     return true;
 }
 
-void lanternPost(World& world, int x, int y, int z, WorldLayout& layout) {
-    world.set(x, y, z, B_LOG_OAK, false);
-    world.set(x, y + 1, z, B_LOG_OAK, false);
-    world.set(x, y + 2, z, B_LANTERN, false);
-    layout.lights.push_back({x + 0.5f, y + 2.6f, z + 0.5f});
-}
-
-void decorateCamp(World& world, const Camp& camp, const Theme& theme, Rng& rng, WorldLayout& layout) {
-    int cx = static_cast<int>(camp.center.x), cz = static_cast<int>(camp.center.z);
-    int y = static_cast<int>(camp.center.y);
-    int r = static_cast<int>(camp.radius);
-    uint8_t floorA = theme.id == 1 ? B_SANDSTONE : B_COBBLE;
-    uint8_t floorB = theme.id == 3 ? B_GRAVEL : B_PLANKS;
-    if (camp.kind == K_GRAVEYARD || camp.kind == K_FARM) floorA = B_PATH;
-    for (int dz = -r; dz <= r; ++dz)
-        for (int dx = -r; dx <= r; ++dx) {
-            float d = std::sqrt(static_cast<float>(dx * dx + dz * dz));
-            if (d > r - 0.5f) continue;
-            float n = hashFloat(cx + dx, cz + dz, 77);
-            if (d < 3.2f || n < 0.55f) world.set(cx + dx, y - 1, cz + dz, n < 0.3f ? floorB : floorA, false);
-        }
-    float base = rng.range(0, kTwoPi);
-    auto ringPos = [&](float ang, float dist, int& x, int& z) {
-        x = cx + static_cast<int>(std::lround(std::cos(ang) * dist));
-        z = cz + static_cast<int>(std::lround(std::sin(ang) * dist));
-    };
-    bool fire = !camp.portal && (camp.kind == K_FIRE || camp.kind == K_FARM || camp.start);
-    if (fire) {
-        world.set(cx, y - 1, cz, B_CAMPFIRE, false);
-        layout.campfires.push_back({cx + 0.5f, static_cast<float>(y), cz + 0.5f});
-        layout.lights.push_back({cx + 0.5f, y + 0.8f, cz + 0.5f});
-    }
-    switch (camp.start ? K_FIRE : camp.kind) {
-        case K_RUINS: {
-            // Pilares quebrados e muretas baixas (cobertura, nunca paredes fechadas).
-            int pillars = rng.rangeInt(5, 8);
-            for (int i = 0; i < pillars; ++i) {
-                int x, z;
-                ringPos(base + i * kTwoPi / pillars, camp.radius - rng.range(0.8f, 2.0f), x, z);
-                int h = rng.rangeInt(1, 4);
-                for (int k = 0; k < h; ++k) world.set(x, y + k, z, rng.chance(0.3f) ? B_STONE : B_COBBLE, false);
-            }
-            for (int i = 0; i < 2; ++i) {
-                int x, z;
-                ringPos(base + kPi * 0.25f + i * kPi, camp.radius * 0.45f, x, z);
-                for (int k = -1; k <= 1; ++k) world.set(x + (i ? k : 0), y, z + (i ? 0 : k), B_COBBLE, false);
-            }
-            if (!camp.portal) lanternPost(world, cx + 1, y, cz - 1, layout);
-            break;
-        }
-        case K_GRAVEYARD: {
-            for (int row = -2; row <= 2; row += 2)
-                for (int col = -3; col <= 3; col += 2) {
-                    if (rng.chance(0.25f)) continue;
-                    int x = cx + col, z = cz + row;
-                    world.set(x, y, z, B_COBBLE, false);
-                    if (rng.chance(0.3f)) world.set(x, y + 1, z, B_STONE, false);
-                    if (rng.chance(0.4f)) world.set(x, y, z + 1, theme.plantB, false);
-                }
-            lanternPost(world, cx + r - 1, y, cz, layout);
-            lanternPost(world, cx - r + 1, y, cz, layout);
-            break;
-        }
-        case K_DEPOT: {
-            int stacks = rng.rangeInt(5, 8);
-            for (int i = 0; i < stacks; ++i) {
-                int x, z;
-                ringPos(base + i * kTwoPi / stacks + rng.range(-0.2f, 0.2f), rng.range(2.0f, camp.radius - 1.0f), x, z);
-                int h = rng.rangeInt(1, 3);
-                for (int k = 0; k < h; ++k) world.set(x, y + k, z, rng.chance(0.25f) ? B_HAY : B_CRATE, false);
-                if (rng.chance(0.5f)) world.set(x + 1, y, z, B_CRATE, false);
-            }
-            lanternPost(world, cx, y, cz, layout);
-            break;
-        }
-        case K_FARM: {
-            for (int dz = -2; dz <= 2; ++dz)
-                for (int dx = 2; dx <= 5; ++dx) {
-                    world.set(cx + dx, y - 1, cz + dz, B_DIRT, false);
-                    if (rng.chance(0.8f)) world.set(cx + dx, y, cz + dz, B_TALL_GRASS, false);
-                }
-            for (int i = 0; i < 4; ++i) {
-                int x, z;
-                ringPos(base + kPi + i * 0.5f, camp.radius - 1.5f, x, z);
-                world.set(x, y, z, B_HAY, false);
-                if (i % 2 == 0) world.set(x, y + 1, z, B_HAY, false);
-            }
-            lanternPost(world, cx - 2, y, cz + 3, layout);
-            break;
-        }
-        default: {
-            int covers = camp.start ? 3 : rng.rangeInt(4, 6);
-            for (int i = 0; i < covers; ++i) {
-                float ang = base + i * kTwoPi / covers + rng.range(-0.3f, 0.3f);
-                int x, z;
-                ringPos(ang, camp.radius - rng.range(1.5f, 2.5f), x, z);
-                bool hay = rng.chance(0.35f);
-                int height = hay ? 1 : rng.rangeInt(1, 2);
-                int width = rng.chance(0.5f) ? 2 : 1;
-                bool alongZ = std::fabs(std::cos(ang)) > 0.7f;
-                for (int wv = 0; wv < width; ++wv)
-                    for (int hy = 0; hy < height; ++hy)
-                        world.set(x + (alongZ ? 0 : wv), y + hy, z + (alongZ ? wv : 0), hay ? B_HAY : B_CRATE, false);
-            }
-            for (int i = 0; i < 2; ++i) {
-                int x, z;
-                ringPos(base + kPi * 0.5f + i * kPi, camp.radius - 0.5f, x, z);
-                lanternPost(world, x, y, z, layout);
-            }
-            break;
-        }
-    }
-}
-
-void buildPortal(World& world, const Camp& camp, const Vec3& towards, WorldLayout& layout) {
-    int cx = static_cast<int>(camp.center.x), cz = static_cast<int>(camp.center.z);
-    int y = static_cast<int>(camp.center.y);
-    Vec3 dir = normalize(Vec3(towards.x - camp.center.x, 0, towards.z - camp.center.z));
-    bool alongZ = std::fabs(dir.x) > std::fabs(dir.z);  // portal voltado para ±X: moldura ao longo de Z
-    for (int a = -2; a <= 2; ++a) {
-        for (int dy = -1; dy <= 4; ++dy) {
-            int x = alongZ ? cx : cx + a;
-            int z = alongZ ? cz + a : cz;
-            bool frame = std::abs(a) == 2 || dy == -1 || dy == 4;
-            world.set(x, y + dy, z, frame ? B_OBSIDIAN : B_AIR, false);
-        }
-    }
-    layout.portalBase = {cx + 0.5f, static_cast<float>(y), cz + 0.5f};
-    layout.portalYaw = alongZ ? (dir.x > 0 ? yawFromDirection(1, 0) : yawFromDirection(-1, 0))
-                              : (dir.z > 0 ? yawFromDirection(0, 1) : yawFromDirection(0, -1));
-    layout.lights.push_back({cx + 0.5f, y + 2.0f, cz + 0.5f});
-}
-
 void scatterTreesAndPlants(World& world, HeightField& hf, const Theme& theme, int sea, uint32_t seed, float densityScale) {
     Rng rng(seed ^ 0x51ED27u);
     std::vector<uint8_t> trunk(static_cast<size_t>(hf.w) * hf.d, 0);
@@ -508,7 +309,8 @@ void scatterTreesAndPlants(World& world, HeightField& hf, const Theme& theme, in
             float forest = fbm(x / 34.0f, z / 34.0f, seed + 9, 3);
             float p = theme.treeDensity * densityScale * (0.25f + forest * forest * 4.0f);
             if (rng.chance(p) && !nearReserved(x, z, theme.tree == TreeKind::Cactus ? 2 : 3)) {
-                placeTree(world, theme.tree, x, y, z, rng);
+                WorldSink sink(world);
+                placeTree(sink, pickTreeKind(theme, x, z, seed, y <= sea + 4), x, y, z, rng);
                 trunk[static_cast<size_t>(z) * hf.w + x] = 1;
                 hf.res(x, z) = R_TREE;
                 continue;
@@ -647,7 +449,11 @@ WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint
         if (!farFromAll(c, placed, minBetween) || !okSpot(c)) continue;
         float h = hf.get(static_cast<int>(c.x), static_cast<int>(c.y));
         placed.push_back(c);
-        camps.push_back({{c.x, std::round(clampf(h, sea + 2.0f, sea + 12.0f)), c.y}, rng.range(6.0f, 8.0f), false, false, rng.rangeInt(0, 4)});
+        // Acampamentos e construções (casas, posto, celeiro) servem de cobertura no PvP.
+        static const int kKinds[] = {K_FIRE, K_RUINS, K_GRAVEYARD, K_DEPOT, K_FARM, K_HOUSE, K_HOUSE, K_GAS, K_BARN};
+        int kind = kKinds[rng.rangeInt(0, static_cast<int>(sizeof(kKinds) / sizeof(kKinds[0])) - 1)];
+        float radius = isBuildingKind(kind) ? buildingRadius(kind) : rng.range(6.0f, 8.0f);
+        camps.push_back({{c.x, std::round(clampf(h, sea + 2.0f, sea + 12.0f)), c.y}, radius, false, false, kind});
     }
     if (options.portal && camps.size() > 1) {
         size_t farIdx = 1;
@@ -674,8 +480,11 @@ WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint
 
     for (auto& c : camps) {
         c.center = {std::floor(c.center.x) + 0.5f, static_cast<float>(world.groundHeight(static_cast<int>(c.center.x), static_cast<int>(c.center.z))), std::floor(c.center.z) + 0.5f};
-        decorateCamp(world, c, theme, rng, layout);
-        if (c.portal) buildPortal(world, c, camps[0].center, layout);
+        WorldSink sink(world);
+        DecorOut out;
+        decorateCamp(sink, c, theme, rng, out);
+        if (c.portal) buildPortal(sink, c, camps[0].center, layout.portalBase, layout.portalYaw, out);
+        absorb(layout, out);
     }
 
     layout.camps = camps;
@@ -771,7 +580,12 @@ WorldLayout generateLobbyWorld(World& world, const Theme& theme) {
     world.set(fx + 2, cy, fz - 2, B_CRATE, false);
     world.set(fx + 2, cy + 1, fz - 2, B_CRATE, false);
     world.set(fx + 3, cy, fz - 2, B_HAY, false);
-    lanternPost(world, static_cast<int>(camp.center.x) - 6, cy, static_cast<int>(camp.center.z) - 7, layout);
+    {
+        WorldSink sink(world);
+        DecorOut out;
+        lanternPost(sink, static_cast<int>(camp.center.x) - 6, cy, static_cast<int>(camp.center.z) - 7, out);
+        absorb(layout, out);
+    }
     for (int dz = -3; dz <= 3; ++dz)
         for (int dx = -3; dx <= 3; ++dx) {
             int x = static_cast<int>(camp.center.x) + dx, z = static_cast<int>(camp.center.z) + dz;

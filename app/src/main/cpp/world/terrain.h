@@ -1,10 +1,11 @@
-// Gerador procedural do mundo aberto (ilha) de cada fase, da arena PvP e do cenário do lobby.
+// Geradores de mundo finito: arena PvP e cenário do lobby (as fases usam a ilha em streaming, island.h).
 #pragma once
 
 #include <cstdint>
 #include <vector>
 
 #include "../core/math.h"
+#include "structures.h"
 #include "theme.h"
 #include "world.h"
 
@@ -12,14 +13,6 @@ namespace zz {
 
 // Estilos de mapa sorteados pela semente: cada partida gera um mundo diferente.
 enum class MapStyle : int { Island = 0, Archipelago, Valley, Mesas, Crater, Rivers, Count };
-
-struct Camp {
-    Vec3 center;   // posição dos pés no centro do acampamento
-    float radius;
-    bool start;
-    bool portal;
-    int kind = 0;  // 0 fogueira, 1 ruínas, 2 cemitério, 3 depósito, 4 fazenda
-};
 
 struct WorldLayout {
     Vec3 start;

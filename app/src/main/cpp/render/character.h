@@ -1,4 +1,5 @@
-// Personagens blocky (Kenney) carregados de GLB: hierarquia rígida de partes + animações TRS.
+// Personagens de blocos (estilo Minecraft): hierarquia rígida de partes + animações TRS.
+// O modelo é montado em código (ver blocky.cpp); este arquivo cuida da pose e das animações.
 #pragma once
 
 #include <cstdint>
@@ -46,12 +47,13 @@ struct Pose {
 
 class CharacterModel {
 public:
-    bool loadGlb(const std::vector<uint8_t>& data);
+    // Monta o modelo a partir de nós, malhas e clipes gerados em código. `height` > 0 fixa a altura de
+    // referência (chapéus e cabelos altos não podem encolher o personagem).
+    void build(std::vector<ModelNode> nodes, std::vector<ModelMesh> meshes, std::vector<AnimClip> clips, float height = 0.0f);
 
     const std::vector<ModelNode>& nodes() const { return nodes_; }
     const std::vector<ModelMesh>& meshes() const { return meshes_; }
     const std::vector<AnimClip>& clips() const { return clips_; }
-    const std::string& textureUri() const { return textureUri_; }
     int clipIndex(const std::string& name) const;
     int nodeIndex(const std::string& name) const;
     float bindHeight() const { return bindHeight_; }
@@ -67,7 +69,6 @@ private:
     std::vector<int> order_;  // pais antes dos filhos
     std::vector<ModelMesh> meshes_;
     std::vector<AnimClip> clips_;
-    std::string textureUri_;
     float bindHeight_ = 1.0f;
     float bindMinY_ = 0.0f;
 };

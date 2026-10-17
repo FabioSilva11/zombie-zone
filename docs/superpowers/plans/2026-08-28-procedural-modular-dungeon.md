@@ -121,7 +121,6 @@
 
 **Files:**
 - Modify if required by verified failures: `README.md`, loading copy, and focused runtime files only.
-- Capture: `docs/screenshots/procedural-dungeon.png`, `docs/screenshots/interior-camera.png`, `docs/screenshots/procedural-minimap.png`.
 
 **Interfaces:**
 - Validates the complete runtime; produces no new API.
@@ -130,7 +129,7 @@
 - [ ] Serve the local game, generate a dungeon, and inspect console/network logs for model or runtime errors.
 - [ ] Verify all 24 ids exist in the active layout, both levels are present, doors animate, stairs change Y, and the exit is reachable.
 - [ ] Verify movement in eight directions, camera wall pull-in, and no outside/top-down gameplay view.
-- [ ] Verify minimap exploration and level switching; capture the three screenshots.
+- [ ] Verify minimap exploration and level switching on the running build.
 - [ ] Run `./gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon --max-workers=1` and inspect the APK artifact.
 - [ ] Update README claims only with evidence obtained in this task.
 - [ ] Commit verified integration changes with `feat: deliver procedural modular dungeon`.

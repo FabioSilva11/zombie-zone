@@ -12,13 +12,14 @@ android {
         applicationId = "com.fabiosilva.ecosdeeldra"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 8
+        versionName = "0.6.1"
 
         // AdMob (IDs reais do app). O aparelho de desenvolvimento recebe anúncios de teste
         // via ADMOB_TEST_DEVICES para não gerar tráfego inválido (políticas do AdMob).
         manifestPlaceholders["admobAppId"] = "ca-app-pub-6598765502914364~3458194932"
         buildConfigField("String", "ADMOB_REWARDED_ID", "\"ca-app-pub-6598765502914364/5788844807\"")
+        buildConfigField("String", "ADMOB_INTERSTITIAL_ID", "\"ca-app-pub-6598765502914364/6741641853\"")
         buildConfigField("String", "ADMOB_TEST_DEVICES", "\"E812F36934272DE8BFD5D96B7E64BE83\"")
 
         ndk {
@@ -56,9 +57,6 @@ android {
         buildConfig = true
     }
 
-    androidResources {
-        noCompress += listOf("glb")
-    }
 }
 
 kotlin {

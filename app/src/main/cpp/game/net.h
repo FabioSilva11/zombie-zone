@@ -16,7 +16,7 @@ constexpr int kMaxNetPlayers = 8;
 constexpr uint16_t kGamePort = 47778;
 
 enum NetAnimFlags : uint8_t {
-    NF_MOVING = 1, NF_SPRINT = 2, NF_AIR = 4, NF_FIRING = 8, NF_AIM = 16, NF_WATER = 32,
+    NF_MOVING = 1, NF_SPRINT = 2, NF_AIR = 4, NF_FIRING = 8, NF_AIM = 16, NF_WATER = 32, NF_CROUCH = 64,
 };
 
 enum NetEventKind : uint8_t { NE_FIRE = 1, NE_HIT = 2, NE_KILL = 3, NE_LEFT = 4 };

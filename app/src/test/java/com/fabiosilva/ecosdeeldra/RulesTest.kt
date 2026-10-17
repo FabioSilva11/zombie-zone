@@ -4,7 +4,7 @@ import com.fabiosilva.ecosdeeldra.data.Campaign
 import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
-import com.fabiosilva.ecosdeeldra.data.Skins
+import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -50,18 +50,18 @@ class RulesTest {
     fun objectiveSkinsUnlockWhenGoalReached() {
         val p = Progress()
         p.stats.kills = 39
-        assertTrue(Rules.refreshSkinUnlocks(p).isEmpty())
+        assertTrue(Rules.refreshCosmeticUnlocks(p).isEmpty())
         p.stats.kills = 40
-        val unlocked = Rules.refreshSkinUnlocks(p)
-        assertTrue(unlocked.any { it.name == "Brann" })
-        assertTrue(2 in p.ownedSkins)
+        val unlocked = Rules.refreshCosmeticUnlocks(p)
+        assertTrue(unlocked.any { it.name == "Colete tático" })
+        assertTrue(2 in p.ownedCosmetics)
     }
 
     @Test
     fun adSkinsUnlockByWatchingAds() {
         val p = Progress()
         repeat(3) { Rules.registerAdWatched(p) }
-        assertTrue(Rules.refreshSkinUnlocks(p).any { it.index == 5 })
+        assertTrue(Rules.refreshCosmeticUnlocks(p).any { it.index == 5 })
     }
 
     @Test
@@ -71,7 +71,7 @@ class RulesTest {
         assertFalse(Rules.onAppOpen(p, "2026-10-02"))
         assertTrue(Rules.onAppOpen(p, "2026-10-03"))
         assertEquals(2, p.stats.loginDays)
-        assertTrue(Rules.refreshSkinUnlocks(p).any { it.name == "Nyla" })
+        assertTrue(Rules.refreshCosmeticUnlocks(p).any { it.name == "Boné" })
     }
 
     @Test
@@ -129,9 +129,9 @@ class RulesTest {
     fun buyingSkinsAndUpgradesSpendsDiamonds() {
         val p = Progress()
         p.diamonds = 200
-        assertTrue(Rules.buySkin(p, 1))
+        assertTrue(Rules.buyCosmetic(p, 1))
         assertEquals(50, p.diamonds)
-        assertFalse(Rules.buySkin(p, 3)) // skin de login não se compra
+        assertFalse(Rules.buyCosmetic(p, 3)) // visual de login não se compra
         assertFalse(Rules.buyUpgrade(p, "power"))
         p.diamonds = 60
         assertTrue(Rules.buyUpgrade(p, "power"))
@@ -139,15 +139,65 @@ class RulesTest {
     }
 
     @Test
+    fun stagesAreInfiniteAndKeepUnlocking() {
+        val p = Progress()
+        for (n in 1..25) Rules.applyResult(p, Campaign.stage(n), win(n))
+        assertEquals(26, p.highestUnlockedStage())
+        val far = Campaign.stage(137)
+        assertEquals(137, far.number)
+        assertTrue(far.title.isNotBlank())
+        assertTrue(Campaign.difficulty(137, 0, 0, 0).zombieHealth > Campaign.difficulty(20, 0, 0, 0).zombieHealth)
+        assertTrue(Campaign.difficulty(137, 0, 0, 0).power > Campaign.difficulty(20, 0, 0, 0).power)
+    }
+
+    @Test
+    fun stuckStageCanBeSkippedAfterTwoDefeats() {
+        val p = Progress()
+        val stage = Campaign.stage(1)
+        val lose = MissionResult(false, 30f, 0f, 100f, 2, 0, 0, 0)
+        Rules.applyResult(p, stage, lose)
+        assertFalse(Rules.canSkip(p, 1))
+        assertTrue(Rules.canSkip(p, 1, pendingFails = 1))
+        Rules.applyResult(p, stage, lose)
+        assertTrue(Rules.skipStage(p, 1))
+        assertEquals(2, p.highestUnlockedStage())
+        assertEquals(0, p.totalStars())
+    }
+
+    @Test
+    fun explorationPaysChestsAndDistance() {
+        val p = Progress()
+        val r = MissionResult(true, 60f, 100f, 100f, 0, 0, 0, 0, chests = 2, chestDiamonds = 25, distance = 1500f, nests = 3)
+        val summary = Rules.applyResult(p, Campaign.stage(1), r)
+        assertEquals(25, summary.chestBonus)
+        assertEquals(15, summary.exploreBonus)
+        assertEquals(2, p.stats.chests)
+        assertEquals(3, p.stats.nests)
+    }
+
+    @Test
+    fun interstitialRespectsFrequency() {
+        val p = Progress()
+        p.stats.wins = 3
+        p.missionsSinceInterstitial = 1
+        assertFalse(Rules.shouldShowInterstitial(p, 1_000_000L))
+        p.missionsSinceInterstitial = 2
+        p.lastAdAt = 1_000_000L - 10_000L
+        assertFalse(Rules.shouldShowInterstitial(p, 1_000_000L))
+        p.lastAdAt = 0L
+        assertTrue(Rules.shouldShowInterstitial(p, 1_000_000L))
+    }
+
+    @Test
     fun adRevenueDifficultyIsOptInAndBounded() {
         val baseline = Campaign.difficulty(5, 0, 0, 0)
-        val disabledDespiteRevenue = Campaign.difficulty(5, 0, 0, 0, 9_000_000L, false)
+        val disabledDespiteRevenue = Campaign.difficulty(5, 0, 0, 0, estimatedAdRevenueMicros = 9_000_000L, adRevenueDifficultyEnabled = false)
         assertEquals(baseline.zombieCount, disabledDespiteRevenue.zombieCount)
         assertEquals(baseline.zombieHealth, disabledDespiteRevenue.zombieHealth, 0.001f)
         assertEquals(baseline.zombieDamage, disabledDespiteRevenue.zombieDamage, 0.001f)
         assertEquals(baseline.zombieSpeed, disabledDespiteRevenue.zombieSpeed, 0.001f)
 
-        val enabled = Campaign.difficulty(5, 0, 0, 0, 500_000L, true)
+        val enabled = Campaign.difficulty(5, 0, 0, 0, estimatedAdRevenueMicros = 500_000L, adRevenueDifficultyEnabled = true)
         assertTrue(enabled.zombieCount > baseline.zombieCount)
         assertTrue(enabled.zombieHealth > baseline.zombieHealth)
         assertTrue(enabled.zombieDamage > baseline.zombieDamage)
@@ -161,7 +211,8 @@ class RulesTest {
         val hard = Campaign.difficulty(20, 5, 5, 5)
         assertTrue(hard.zombieCount > easy.zombieCount)
         assertTrue(hard.zombieHealth > easy.zombieHealth)
-        assertEquals(1.75f, hard.power, 0.001f)
-        assertEquals(18, Skins.all.size)
+        // 5 níveis de poder (+75%) e o bônus da zona 4 (+12% de zona x 0,8).
+        assertEquals(1.75f * (1f + 0.12f * 0.8f), hard.power, 0.001f)
+        assertEquals(18, Cosmetics.all.size)
     }
 }

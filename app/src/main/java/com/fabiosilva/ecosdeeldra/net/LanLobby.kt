@@ -1,6 +1,8 @@
 package com.fabiosilva.ecosdeeldra.net
 
 import android.content.Context
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
@@ -11,6 +13,7 @@ import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.MulticastSocket
 import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
@@ -19,7 +22,13 @@ import kotlin.random.Random
 
 /**
  * Sala de espera do PvP em Wi-Fi local (UDP, porta 47777).
- * O anfitrião anuncia a sala por broadcast; os outros aparelhos a encontram e entram.
+ * Detecção automática das salas (ninguém precisa digitar IP), por vários caminhos ao mesmo tempo,
+ * porque cada roteador/hotspot bloqueia um tipo diferente de pacote:
+ *  - o anfitrião anuncia a sala por broadcast e multicast;
+ *  - quem procura pergunta ("DISCOVER") por broadcast, multicast, ao gateway (hotspot) e a cada IP
+ *    da sub-rede — o anfitrião responde direto a quem perguntou;
+ *  - e o Android NSD (mDNS/DNS-SD) registra e encontra o serviço "_zombiezone._udp".
+ * "Entrar automaticamente" entra na primeira sala livre encontrada. Conectar por IP continua existindo.
  * Ao iniciar, todos recebem a mesma semente do mundo e a lista de jogadores; a partida
  * em si roda no motor C++ (porta 47778).
  */
@@ -29,6 +38,7 @@ class LanLobby(context: Context, private val listener: Listener) {
         fun onLobby(players: List<LobbyPlayer>, rules: Rules, localId: Int, isHost: Boolean)
         fun onStart(info: StartInfo)
         fun onClosed(reason: String)
+        fun onAutoJoin(room: Room) = Unit
     }
 
     data class Room(val address: String, val name: String, val players: Int, val max: Int, val inMatch: Boolean, val seenAt: Long)
@@ -49,6 +59,13 @@ class LanLobby(context: Context, private val listener: Listener) {
 
     private val main = Handler(Looper.getMainLooper())
     private val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
+    private val nsd: NsdManager? = runCatching { context.applicationContext.getSystemService(NsdManager::class.java) }.getOrNull()
+    private var nsdRegistration: NsdManager.RegistrationListener? = null
+    private var nsdDiscovery: NsdManager.DiscoveryListener? = null
+    private val nsdQueue = ArrayDeque<NsdServiceInfo>()
+    @Volatile private var nsdResolving = false
+    private val nsdHosts = ConcurrentHashMap<String, Long>()  // IPs achados pelo NSD (perguntamos direto a eles)
+    @Volatile private var lastSweep = 0L
     private val sender = Executors.newSingleThreadExecutor()
     private var multicastLock: WifiManager.MulticastLock? = null
     @Volatile private var socket: DatagramSocket? = null
@@ -64,6 +81,12 @@ class LanLobby(context: Context, private val listener: Listener) {
         private set
     @Volatile var inMatch = false
         private set
+
+    // Entrada automática: entra na primeira sala livre que aparecer.
+    @Volatile var autoJoining = false
+        private set
+    @Volatile private var autoName = ""
+    @Volatile private var autoSkin = 0
 
     // Cliente
     @Volatile private var hostAddress: InetAddress? = null
@@ -84,14 +107,10 @@ class LanLobby(context: Context, private val listener: Listener) {
                 setReferenceCounted(false)
                 acquire()
             }
-            socket = DatagramSocket(null).apply {
-                reuseAddress = true
-                broadcast = true
-                soTimeout = 250
-                bind(InetSocketAddress(PORT))
-            }
+            socket = openSocket()
             running = true
             Thread({ loop() }, "lan-lobby").apply { isDaemon = true }.start()
+            startNsdDiscovery()
             true
         } catch (e: Exception) {
             Log.e(TAG, "Não foi possível abrir a porta $PORT", e)
@@ -100,7 +119,52 @@ class LanLobby(context: Context, private val listener: Listener) {
         }
     }
 
+    /** Socket que também escuta o grupo multicast (alguns roteadores bloqueiam broadcast, não multicast). */
+    private fun openSocket(): DatagramSocket {
+        val multicast = runCatching {
+            MulticastSocket(null).apply {
+                reuseAddress = true
+                broadcast = true
+                soTimeout = 250
+                bind(InetSocketAddress(PORT))
+                val group = InetSocketAddress(InetAddress.getByName(GROUP), PORT)
+                NetworkInterface.getNetworkInterfaces().toList()
+                    .filter { it.isUp && !it.isLoopback && it.supportsMulticast() }
+                    .forEach { ni -> runCatching { joinGroup(group, ni) } }
+            }
+        }.getOrNull()
+        return multicast ?: DatagramSocket(null).apply {
+            reuseAddress = true
+            broadcast = true
+            soTimeout = 250
+            bind(InetSocketAddress(PORT))
+        }
+    }
+
+    /** Procura uma sala e entra sozinho na primeira livre (sem digitar IP). */
+    fun autoJoin(name: String, skin: Int) {
+        autoName = sanitize(name)
+        autoSkin = skin
+        autoJoining = true
+        lastSweep = 0L
+        sender.execute { discover(SystemClock.elapsedRealtime(), sweep = true) }
+        tryAutoJoin()
+    }
+
+    fun cancelAutoJoin() {
+        autoJoining = false
+    }
+
+    private fun tryAutoJoin() {
+        if (!autoJoining || role != Role.SCANNING) return
+        val room = rooms.values.filter { !it.inMatch && it.players < it.max }.maxByOrNull { it.seenAt } ?: return
+        autoJoining = false
+        main.post { listener.onAutoJoin(room) }
+        join(room.address, autoName, autoSkin)
+    }
+
     fun close() {
+        stopNsd()
         if (role == Role.HOST) members.values.forEach { m -> repeat(3) { send("CLOSE", m.address, m.port) } }
         if (role == Role.CLIENT && localId >= 0) hostAddress?.let { h -> repeat(3) { send("LEAVE|$localId", h, PORT) } }
         running = false
@@ -117,11 +181,13 @@ class LanLobby(context: Context, private val listener: Listener) {
 
     fun host(name: String, skin: Int, rules: Rules) {
         role = Role.HOST
+        autoJoining = false
         hostName = sanitize(name)
         hostSkin = skin
         this.rules = rules
         members.clear()
         inMatch = false
+        registerNsd()
         notifyLobby()
     }
 
@@ -180,6 +246,7 @@ class LanLobby(context: Context, private val listener: Listener) {
     fun leaveRoom() {
         if (role == Role.CLIENT && localId >= 0) hostAddress?.let { h -> repeat(3) { send("LEAVE|$localId", h, PORT) } }
         if (role == Role.HOST) members.values.forEach { m -> repeat(3) { send("CLOSE", m.address, m.port) } }
+        unregisterNsd()
         members.clear()
         role = Role.SCANNING
         localId = -1
@@ -215,12 +282,17 @@ class LanLobby(context: Context, private val listener: Listener) {
         when (role) {
             Role.SCANNING -> {
                 val before = rooms.size
-                rooms.entries.removeIf { now - it.value.seenAt > 4000 }
+                rooms.entries.removeIf { now - it.value.seenAt > 5000 }
                 if (rooms.size != before) notifyRooms()
+                // Pergunta ativamente quem está hospedando (varre a sub-rede a cada 4 s).
+                val sweep = now - lastSweep > 4000
+                if (sweep) lastSweep = now
+                discover(now, sweep)
             }
             Role.HOST -> {
-                val beacon = "BEACON|${hostName}|${members.size + 1}|$MAX|${if (inMatch) 1 else 0}"
+                val beacon = beacon()
                 broadcastTargets().forEach { send(beacon, it, PORT) }
+                runCatching { send(beacon, InetAddress.getByName(GROUP), PORT) }
                 val dropped = members.values.filter { now - it.lastSeen > 7000 }
                 dropped.forEach { members.remove(it.id) }
                 broadcastRoom()
@@ -253,10 +325,13 @@ class LanLobby(context: Context, private val listener: Listener) {
         when (p[1]) {
             "BEACON" -> if (role == Role.SCANNING && p.size >= 6 && !isLocalAddress(from)) {
                 val key = from.hostAddress ?: return
-                val isNew = !rooms.containsKey(key)
-                rooms[key] = Room(key, p[2], p[3].toIntOrNull() ?: 1, p[4].toIntOrNull() ?: MAX, p[5] == "1", now)
-                if (isNew) notifyRooms()
+                val old = rooms[key]
+                val room = Room(key, p[2], p[3].toIntOrNull() ?: 1, p[4].toIntOrNull() ?: MAX, p[5] == "1", now)
+                rooms[key] = room
+                if (old == null || old.players != room.players || old.inMatch != room.inMatch || old.name != room.name) notifyRooms()
+                tryAutoJoin()
             }
+            "DISCOVER" -> if (role == Role.HOST && !isLocalAddress(from)) send(beacon(), from, port)
             "JOIN" -> if (role == Role.HOST && p.size >= 5) handleJoin(p[2], p[3].toIntOrNull() ?: 0, sanitize(p[4]), from, port, now)
             "PING" -> if (role == Role.HOST) {
                 val m = members[p.getOrNull(2)?.toIntOrNull() ?: -1]
@@ -316,10 +391,137 @@ class LanLobby(context: Context, private val listener: Listener) {
             send("REJECT|$joinNonce|Sala cheia.", from, port)
             return
         }
-        members[id] = Member(id, skin.coerceIn(0, 17), name, from, port, joinNonce, now)
+        members[id] = Member(id, skin, name, from, port, joinNonce, now)
         send("ACCEPT|$joinNonce|$id", from, port)
         broadcastRoom()
         notifyLobby()
+    }
+
+    private fun beacon(): String = "BEACON|${hostName}|${members.size + 1}|$MAX|${if (inMatch) 1 else 0}"
+
+    /** Pergunta "tem sala aí?" por todos os caminhos possíveis. */
+    private fun discover(now: Long, sweep: Boolean) {
+        val targets = LinkedHashSet<InetAddress>()
+        targets.addAll(broadcastTargets())
+        runCatching { targets.add(InetAddress.getByName(GROUP)) }
+        gatewayAddress()?.let { targets.add(it) }
+        nsdHosts.entries.removeIf { now - it.value > 60_000 }
+        nsdHosts.keys.forEach { ip -> runCatching { targets.add(InetAddress.getByName(ip)) } }
+        if (sweep) targets.addAll(subnetHosts())
+        val payload = "DISCOVER|$now"
+        targets.forEach { send(payload, it, PORT) }
+    }
+
+    /** Gateway do Wi-Fi: quando o anfitrião é o hotspot, ele é o próprio gateway. */
+    @Suppress("DEPRECATION")
+    private fun gatewayAddress(): InetAddress? = runCatching {
+        val g = wifi?.dhcpInfo?.gateway ?: 0
+        if (g == 0) null
+        else InetAddress.getByAddress(byteArrayOf((g and 0xFF).toByte(), (g shr 8 and 0xFF).toByte(), (g shr 16 and 0xFF).toByte(), (g shr 24 and 0xFF).toByte()))
+    }.getOrNull()
+
+    /** Todos os IPs da sub-rede /24 de cada interface local (para quando broadcast e multicast são bloqueados). */
+    private fun subnetHosts(): List<InetAddress> {
+        val out = ArrayList<InetAddress>()
+        runCatching {
+            NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }.forEach { ni ->
+                ni.interfaceAddresses.forEach { ia ->
+                    val addr = ia.address as? Inet4Address ?: return@forEach
+                    if (!addr.isSiteLocalAddress) return@forEach
+                    val b = addr.address
+                    for (last in 1..254) {
+                        if (last == (b[3].toInt() and 0xFF)) continue
+                        out.add(InetAddress.getByAddress(byteArrayOf(b[0], b[1], b[2], last.toByte())))
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // ------------------------------------------------------------------ NSD (mDNS / DNS-SD)
+
+    private fun registerNsd() {
+        val manager = nsd ?: return
+        unregisterNsd()
+        val info = NsdServiceInfo().apply {
+            serviceName = "ZZ-" + hostName.replace(Regex("[^A-Za-z0-9 _-]"), "").ifEmpty { "Sala" }
+            serviceType = NSD_TYPE
+            port = PORT
+        }
+        val listener = object : NsdManager.RegistrationListener {
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) = Unit
+            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+        }
+        runCatching {
+            manager.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
+            nsdRegistration = listener
+        }.onFailure { Log.w(TAG, "NSD indisponível: ${it.message}") }
+    }
+
+    private fun unregisterNsd() {
+        val l = nsdRegistration ?: return
+        nsdRegistration = null
+        runCatching { nsd?.unregisterService(l) }
+    }
+
+    private fun startNsdDiscovery() {
+        val manager = nsd ?: return
+        if (nsdDiscovery != null) return
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) = Unit
+            override fun onDiscoveryStopped(serviceType: String) = Unit
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                synchronized(nsdQueue) { nsdQueue.addLast(serviceInfo) }
+                resolveNext()
+            }
+        }
+        runCatching {
+            manager.discoverServices(NSD_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+            nsdDiscovery = listener
+        }.onFailure { Log.w(TAG, "Descoberta NSD falhou: ${it.message}") }
+    }
+
+    /** O NSD só resolve um serviço por vez: fila simples. */
+    @Suppress("DEPRECATION")
+    private fun resolveNext() {
+        val manager = nsd ?: return
+        val next = synchronized(nsdQueue) {
+            if (nsdResolving || nsdQueue.isEmpty()) return
+            nsdResolving = true
+            nsdQueue.removeFirst()
+        }
+        runCatching {
+            manager.resolveService(next, object : NsdManager.ResolveListener {
+                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    nsdResolving = false
+                    resolveNext()
+                }
+
+                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                    nsdResolving = false
+                    val host = serviceInfo.host
+                    if (host is Inet4Address && !isLocalAddress(host)) {
+                        host.hostAddress?.let { nsdHosts[it] = SystemClock.elapsedRealtime() }
+                        send("DISCOVER|nsd", host, PORT)
+                    }
+                    resolveNext()
+                }
+            })
+        }.onFailure {
+            nsdResolving = false
+        }
+    }
+
+    private fun stopNsd() {
+        unregisterNsd()
+        nsdDiscovery?.let { l -> runCatching { nsd?.stopServiceDiscovery(l) } }
+        nsdDiscovery = null
     }
 
     private fun lobbyPlayers(): List<LobbyPlayer> =
@@ -363,6 +565,8 @@ class LanLobby(context: Context, private val listener: Listener) {
         private const val TAG = "LanLobby"
         const val PORT = 47777
         const val PREFIX = "ZZ1"
+        const val GROUP = "239.255.77.77"
+        const val NSD_TYPE = "_zombiezone._udp."
         const val MAX = 8
 
         fun sanitize(name: String): String =
@@ -376,7 +580,7 @@ class LanLobby(context: Context, private val listener: Listener) {
             if (f.size < 3) return@mapNotNull null
             val id = f[0].toIntOrNull() ?: return@mapNotNull null
             if (id !in 0 until MAX) return@mapNotNull null
-            LobbyPlayer(id, (f[1].toIntOrNull() ?: 0).coerceIn(0, 17), f[2])
+            LobbyPlayer(id, f[1].toIntOrNull() ?: 0, f[2])  // skin = aparência (Look codificado)
         }
 
         /** IPv4 desta rede local (para mostrar ao jogador e conectar manualmente). */

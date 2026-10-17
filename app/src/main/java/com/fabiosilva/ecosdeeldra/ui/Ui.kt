@@ -28,10 +28,14 @@ object Palette {
     val line = Color.parseColor("#33A8FF3E")
     val lime = Color.parseColor("#A8FF3E")
     val limeDark = Color.parseColor("#5DA81E")
+    // Cores usadas apenas pelas telas preservadas do lobby e do prêmio diário.
+    val accent = Color.parseColor("#FFC400")
+    val accentDark = Color.parseColor("#B38600")
     val cyan = Color.parseColor("#3CE6FF")
     val gold = Color.parseColor("#FFC83D")
     val red = Color.parseColor("#FF5A5A")
     val purple = Color.parseColor("#A877FF")
+    val purpleDeep = Color.parseColor("#2A1466")
     val text = Color.parseColor("#F4F7FF")
     val muted = Color.parseColor("#9AA6C0")
     val dark = Color.parseColor("#0E1A08")
@@ -133,6 +137,51 @@ class PanelDrawable(private val ctx: Context, private val fill: Int = Palette.pa
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
 
+/** Cartão com cantos arredondados, borda e realce no estado pressionado. */
+class CardDrawable(
+    private val ctx: Context,
+    var fill: Int,
+    var border: Int = Color.TRANSPARENT,
+    private val radiusDp: Float = 10f,
+    private val borderDp: Float = 1.3f,
+) : Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rect = RectF()
+    private var pressed = false
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        val r = ctx.dp(radiusDp)
+        paint.style = Paint.Style.FILL
+        paint.color = if (pressed) BlockDrawable.shade(fill, 0.8f) else fill
+        rect.set(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat())
+        canvas.drawRoundRect(rect, r, r, paint)
+        if (border != Color.TRANSPARENT) {
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = ctx.dp(borderDp)
+            paint.color = if (pressed) BlockDrawable.shade(border, 0.8f) else border
+            rect.inset(paint.strokeWidth / 2f, paint.strokeWidth / 2f)
+            canvas.drawRoundRect(rect, r, r, paint)
+        }
+    }
+
+    override fun isStateful() = true
+    override fun onStateChange(state: IntArray): Boolean {
+        val now = state.contains(android.R.attr.state_pressed)
+        if (now != pressed) {
+            pressed = now
+            invalidateSelf()
+            return true
+        }
+        return false
+    }
+
+    override fun setAlpha(alpha: Int) = Unit
+    override fun setColorFilter(colorFilter: ColorFilter?) = Unit
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
 /** Barra de progresso simples desenhada em Canvas. */
 class ProgressBarView(context: Context, var color: Int = Palette.lime) : View(context) {
     var fraction = 0f
@@ -219,6 +268,23 @@ object Ui {
         text = span
         background = PanelDrawable(ctx, Color.parseColor("#CC0B1426"), Color.argb(80, Color.red(iconColor), Color.green(iconColor), Color.blue(iconColor)), 14f)
         setPadding(ctx.dpi(12), ctx.dpi(6), ctx.dpi(12), ctx.dpi(6))
+    }
+
+    fun currencyChip(ctx: Context, icon: Icon, value: String, color: Int): LinearLayout = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = PanelDrawable(ctx, Color.parseColor("#D90B0720"), Color.argb(110, Color.red(color), Color.green(color), Color.blue(color)), 8f)
+        setPadding(ctx.dpi(10), ctx.dpi(5), ctx.dpi(14), ctx.dpi(5))
+        addView(IconView(ctx, icon, color), lp(ctx.dpi(20), ctx.dpi(20)))
+        addView(text(ctx, value, 15f, Palette.text, Fonts.title).apply { setPadding(ctx.dpi(7), 0, 0, 0) })
+    }
+
+    fun iconButton(ctx: Context, icon: Icon, fill: Int = Palette.stone, iconColor: Int = Color.WHITE, onClick: () -> Unit): FrameLayout = FrameLayout(ctx).apply {
+        background = BlockDrawable(ctx, fill, 6f, 3f)
+        isClickable = true
+        isFocusable = true
+        addView(IconView(ctx, icon, iconColor), frame(ctx.dpi(22), ctx.dpi(22), Gravity.CENTER))
+        setOnClickListener { clickSound?.invoke(); onClick() }
     }
 
     fun lp(w: Int, h: Int, weight: Float = 0f): LinearLayout.LayoutParams = LinearLayout.LayoutParams(w, h, weight)
