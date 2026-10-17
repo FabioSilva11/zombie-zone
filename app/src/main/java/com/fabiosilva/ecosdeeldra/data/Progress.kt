@@ -35,6 +35,7 @@ class Settings {
     var vibration = true
     var quality = 1 // 0 baixa, 1 média, 2 alta
     var reminders = true
+    var adRevenueDifficulty = false
     var showFps = false
     var leftHanded = false
     var playerName = ""
@@ -58,6 +59,9 @@ class Progress {
     var dailyBonusClaimed = false
     var adsDay = ""
     var adsToday = 0
+    // Valor ILRD estimado acumulado localmente; não é valor de receita final/consolidada.
+    var adRevenueMicros = 0L
+    var adRevenueCurrency = ""
     var chestReadyAt = 0L
     var tutorialSeen = false
     val settings = Settings()
