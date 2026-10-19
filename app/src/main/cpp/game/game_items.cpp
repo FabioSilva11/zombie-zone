@@ -1,6 +1,7 @@
 // Inventário estilo Minecraft (barra rápida + mochila), armas, consumíveis, itens deixados pelos
 // zumbis e a mira do arremesso com trajetória visível antes de soltar a granada/molotov.
 #include <algorithm>
+#include <utility>
 #include <cmath>
 
 #include "game.h"
@@ -381,7 +382,18 @@ void Game::handleSlotTap(int slot) {
     if (!inventoryEnabled() || slot < 0 || slot >= kInvSlots || dead_) return;
     int id = inv_[static_cast<size_t>(slot)].id;
     if (isWeaponItem(id)) {
-        if (slot != weaponSlot_) equipSlot(slot, false);
+        if (slot != weaponSlot_) {
+            // Permuta, como no Free Fire: a arma do cartao vai para o espaco tocado e a tocada vai para o cartao.
+            clips_[weaponId()] = ammo_;
+            if (weaponSlot_ >= 0 && weaponSlot_ < kInvSlots && isWeaponItem(inv_[static_cast<size_t>(weaponSlot_)].id))
+                std::swap(inv_[static_cast<size_t>(weaponSlot_)], inv_[static_cast<size_t>(slot)]);
+            // O cartao continua no mesmo indice: depois da permuta ele mostra a arma tocada.
+            ensureWeapon();
+            loadWeaponAmmo();
+            swapTimer_ = 0.35f;
+            emitSound(SND_EQUIP, player_.position, 0.8f);
+            emit(EV_WEAPON, weaponId());
+        }
     } else if (isThrowableItem(id)) {
         throwSlot_ = slot;
         emitSound(SND_EQUIP, player_.position, 0.5f);

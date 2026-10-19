@@ -18,7 +18,7 @@ enum class HudControl(val key: String, val label: String, val optional: Boolean,
     MELEE("melee", "Faca", true, 27f),
     GRENADE("grenade", "Granada", true, 27f),
     MEDKIT("medkit", "Kit médico", true, 27f),
-    WEAPON("weapon", "Painel da arma", true, 40f),
+    WEAPON("weaponpanel", "Painel da arma", true, 40f),
     EMOTE("emote", "Emoji", true, 22f),
     MAP("map", "Minimapa", true, 48f),
     SUPPLY("supply", "Suprimentos", true, 17f),
@@ -90,7 +90,7 @@ class HudLayout(val controls: MutableMap<HudControl, ControlPos>) {
             right(HudControl.MELEE, 216f, 112f)
             right(HudControl.GRENADE, 180f, 178f)
             right(HudControl.MEDKIT, 262f, 178f)
-            put(HudControl.WEAPON, wDp - 172f, 46f, 1f, mirror = false)
+            put(HudControl.WEAPON, wDp - 172f, 92f, 1f, mirror = false)
             put(HudControl.EMOTE, 136f, 86f, 1f, mirror = false)
             put(HudControl.MAP, 62f, 86f, 1f, mirror = false)
             put(HudControl.SUPPLY, 62f, 155f, 1f, mirror = false)
