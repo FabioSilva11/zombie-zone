@@ -464,6 +464,7 @@ private:
     void updatePois(float dt);
     void updateNests(float dt);
     void updateChests(float dt);
+    void scatterMapChests();
     void updateSupply(float dt, const InputState& in);
     void rebuildMinimap();
     void buildBigMap();

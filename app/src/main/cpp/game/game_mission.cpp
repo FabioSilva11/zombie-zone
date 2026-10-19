@@ -92,6 +92,7 @@ void Game::startMission(const MissionConfig& config) {
     zombies_.clear();
     pendingSpawns_.clear();
     chests_.clear();
+    scatterMapChests();
     visitedPois_.clear();
     announcedPois_.clear();
     supply_ = SupplyDrop{};
@@ -379,6 +380,28 @@ void Game::damageNest(int index, float amount, const Vec3& hitPoint) {
     LOGI("OBJ ninho_destruido idx=%d total=%zu t=%.1f", index, nests_.size(), missionTime_);
     emit(EV_NEST_DESTROYED, index);
     revealCargo();
+}
+
+// Baús espalhados pelo mapa, fora dos pontos de interesse: cada célula da ilha tem uma pequena chance de
+// ter um. Sorteio com semente própria, então não mexe no prng dos POIs (contratos seguem iguais).
+void Game::scatterMapChests() {
+    constexpr float kMapChestChance = 0.025f;  // ~1 em 40 células
+    Rng mapRng(config_.seed * 2654435761u + 911u);
+    for (int cz = 0; cz < kIslandCells; ++cz) {
+        for (int cx = 0; cx < kIslandCells; ++cx) {
+            if (!mapRng.chance(kMapChestChance)) continue;
+            const float x = cx * kIslandCell + mapRng.range(16.0f, kIslandCell - 16.0f);
+            const float z = cz * kIslandCell + mapRng.range(16.0f, kIslandCell - 16.0f);
+            if (distXZ({x, 0, z}, layout_.start) < 90.0f) continue;  // longe do ponto de partida
+            if (island_->poi(cx, cz).exists) continue;
+            const ColumnInfo col = island_->column(static_cast<int>(x), static_cast<int>(z));
+            if (col.water || col.path || col.bridge || col.nearPoi || col.river > 0.5f) continue;
+            Chest ch;
+            ch.pos = {x + 0.5f, static_cast<float>(col.top), z + 0.5f};
+            ch.diamonds = mapRng.rangeInt(3, 8) + config_.stage / 3;
+            chests_.push_back(ch);
+        }
+    }
 }
 
 void Game::updateChests(float dt) {

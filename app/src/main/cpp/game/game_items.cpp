@@ -324,7 +324,7 @@ void Game::dropItem(const Vec3& at, int id, int count) {
 void Game::rollZombieDrop(const Zombie& z) {
     if (!inventoryEnabled()) return;
     // Itens de cura são raros: a maior parte dos drops é de ataque.
-    float chance = (z.mutations ? 0.45f : 0.05f) * config_.luck;
+    float chance = (z.mutations ? 0.45f : 0.15f) * config_.luck;
     if (z.kind == ZombieKind::Brute) chance += 0.1f;
     if (!rng_.chance(std::min(1.0f, chance))) return;
     struct W { int id; float w; };
