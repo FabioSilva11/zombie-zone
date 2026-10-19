@@ -10,13 +10,21 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import com.fabiosilva.ecosdeeldra.data.ContractId
+import com.fabiosilva.ecosdeeldra.data.Contracts
 import com.fabiosilva.ecosdeeldra.data.Items
 import com.fabiosilva.ecosdeeldra.data.ZombieKinds
 import com.fabiosilva.ecosdeeldra.engine.Hud
 import com.fabiosilva.ecosdeeldra.engine.NativeBridge
+import com.fabiosilva.ecosdeeldra.tutorial.CoachFocus
+import com.fabiosilva.ecosdeeldra.tutorial.CoachHint
+import com.fabiosilva.ecosdeeldra.tutorial.CoachSink
+import com.fabiosilva.ecosdeeldra.tutorial.Objective
+import com.fabiosilva.ecosdeeldra.tutorial.PillState
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -38,15 +46,17 @@ import kotlin.math.tan
  * Na ilha mostra ninhos, portal, efeitos (fogo, sangramento, veneno) e zumbis elite.
  */
 @SuppressLint("ViewConstructor")
-class HudView(context: Context, private val listener: Listener) : View(context) {
+class HudView(context: Context, private val listener: Listener) : View(context), CoachSink {
     interface Listener {
         fun onPauseRequested()
         fun onMapRequested()
         fun onSupplyRequested()
         fun onInventoryRequested() = Unit
+        /** Botão PULAR TUTORIAL do cartão do tutorial. */
+        fun onCoachSkipRequested() = Unit
     }
 
-    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, FIRE_LEFT, AIM, JUMP, RELOAD, CROUCH, SPRINT, MELEE, GRENADE, PAUSE, MAP, SUPPLY, HOTBAR, BAG }
+    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, FIRE_LEFT, AIM, JUMP, RELOAD, CROUCH, SPRINT, MELEE, GRENADE, PAUSE, MAP, SUPPLY, HOTBAR, BAG, COACH_SKIP }
     private class Touch(var role: Role, var x: Float, var y: Float, val startX: Float, val startY: Float, var slot: Int = -1, var cancel: Boolean = false)
     private class Geo(var x: Float = 0f, var y: Float = 0f, var r: Float = 0f, var visible: Boolean = true)
 
@@ -98,10 +108,22 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     private var stickX = 0f
     private var stickY = 0f
     private var stickActive = false
-    private val feed = ArrayList<Pair<String, Long>>()
-    private var feedColor = Palette.lime
+    /** Aviso de combate (uma só mensagem por vez) e dica longa: estado puro em CombatFeed.kt. */
+    private val combatFeed = CombatFeed()
+    /** Banner de onda desenhado neste quadro: o aviso de combate cede a faixa a ele. */
+    private var bannerShown = false
+    private val tipState = HudTip()
+    // Tutorial (coach): o cartão e os realces vêm do CoachController; reset() NÃO apaga (é chamado a cada pausa).
+    private var coach: CoachHint? = null
+    private var coachSince = 0L
+    private var coachRect: CoachPlacement.Rect? = null
+    private var coachDirty = true
+    private var coachSkipActive = false
+    private val coachSkip = RectF()
+    private val coachPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Fonts.bold; textAlign = Paint.Align.CENTER }
+    private var objective = Objective.INACTIVE
+    private var objectiveAt = 0L
     private var lastHealth = -1f
-    private var tip: Pair<String, Long>? = null
     private var dragControl: HudControl? = null
     private var dragDx = 0f
     private var dragDy = 0f
@@ -163,6 +185,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         g(HudControl.SUPPLY).let { supplyX = it.x; supplyY = it.y; supplyH = it.r * 2f; supplyW = it.r * 6.6f }
         g(HudControl.JOYSTICK).let { stickRadius = it.r; stickHomeX = it.x; stickHomeY = it.y }
         g(HudControl.HOTBAR).let { hotbarX = it.x; hotbarY = it.y; slotSize = it.r * 2f }
+        coachDirty = true
         if (!stickActive) {
             stickBaseX = stickHomeX; stickBaseY = stickHomeY; stickX = stickBaseX; stickY = stickBaseY
         }
@@ -183,8 +206,8 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         aimStage = 0
         aimWeapon = -1
         stickActive = false
-        feed.clear()
-        tip = null
+        combatFeed.clear()
+        tipState.clear()
         lastHealth = -1f
         NativeBridge.setMove(0f, 0f)
         NativeBridge.setFire(false)
@@ -261,15 +284,15 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         return true
     }
 
-    fun message(text: String, color: Int = Palette.lime) {
-        feedColor = color
-        feed.add(text to System.currentTimeMillis())
-        if (feed.size > 3) feed.removeAt(0)
+    /** Aviso de combate: só o mais recente fica na tela (substitui o anterior e expira em 1800 ms). */
+    fun message(text: String, color: Int = Palette.lime, priority: Int = CombatFeed.PRIORITY_NORMAL) {
+        combatFeed.show(text, color, System.currentTimeMillis(), priority)
     }
 
-    /** Dica longa (ex.: habilidade de um zumbi novo) mostrada na parte de baixo por alguns segundos. */
+    /** Dica longa (ex.: habilidade de um zumbi novo) mostrada na parte de baixo; descartada enquanto o tutorial está ativo. */
     fun tip(text: String) {
-        tip = text to System.currentTimeMillis()
+        if (coach != null) return
+        tipState.show(text, System.currentTimeMillis())
     }
 
     fun haptic(strong: Boolean) {
@@ -313,18 +336,22 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         return ((x - left) / slotSize).toInt().coerceIn(0, 5)
     }
 
+    /** O toque cai na área do controle [c] (formas em HudTouch, as mesmas usadas nos testes de layout)? */
+    private fun touchHit(c: HudControl, x: Float, y: Float): Boolean {
+        if (!available(c)) return false
+        val gc = g(c)
+        return HudTouch.area(c, gc.x, gc.y, gc.r, density).contains(x, y)
+    }
+
     private fun roleAt(x: Float, y: Float): Role {
         val w = width.toFloat()
         val h = height.toFloat()
+        if (coachSkipActive && coachSkip.contains(x, y)) return Role.COACH_SKIP
         if (hotbarSlotAt(x, y) >= 0) return Role.HOTBAR
-        if (available(HudControl.BAG) && inside(x, y, g(HudControl.BAG).x, g(HudControl.BAG).y, g(HudControl.BAG).r * 1.2f + d(4f))) return Role.BAG
-        for ((c, role) in buttons) {
-            if (!available(c)) continue
-            val gc = g(c)
-            if (inside(x, y, gc.x, gc.y, gc.r * 1.2f + d(4f))) return role
-        }
-        if (available(HudControl.MAP) && abs(x - mapX) < mapSize / 2 && abs(y - mapY) < mapSize / 2) return Role.MAP
-        if (available(HudControl.SUPPLY) && abs(x - supplyX) < supplyW / 2 && abs(y - supplyY) < supplyH / 2 + d(4f)) return Role.SUPPLY
+        if (touchHit(HudControl.BAG, x, y)) return Role.BAG
+        for ((c, role) in buttons) if (touchHit(c, x, y)) return role
+        if (touchHit(HudControl.MAP, x, y)) return Role.MAP
+        if (touchHit(HudControl.SUPPLY, x, y)) return Role.SUPPLY
         // Joystick dinâmico no lado em que ele foi posicionado.
         val leftSide = if (stickHomeX < w / 2) x < w * 0.45f else x > w * 0.55f
         if (leftSide && y > h * 0.28f && touches.values.none { it.role == Role.JOYSTICK }) return Role.JOYSTICK
@@ -373,6 +400,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                     }
                     Role.BAG -> listener.onInventoryRequested()
                     Role.PAUSE -> listener.onPauseRequested()
+                    Role.COACH_SKIP -> { listener.onCoachSkipRequested(); haptic(false) }
                     Role.MAP -> listener.onMapRequested()
                     Role.SUPPLY -> if (supplyReady) listener.onSupplyRequested()
                     else -> Unit
@@ -478,8 +506,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         drawWorldLabels(canvas, w, h)
         if (island) {
             if (survival) drawFronts(canvas, w) else drawObjectives(canvas, w, h)
-        } else {
-            drawPortalMarker(canvas, w, h)
         }
         drawReticle(canvas, w, h)
         if (available(HudControl.MAP)) drawMinimap(canvas)
@@ -490,6 +516,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             drawPvpScoreboard(canvas, w)
         } else {
             if (survival) drawSurvivalTop(canvas, w, h) else drawObjective(canvas, w)
+            drawContractChip(canvas, w)
             if (island) {
                 if (!survival) drawNestBar(canvas, w)
                 if (available(HudControl.SUPPLY)) drawSupplyButton(canvas)
@@ -497,13 +524,17 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         }
         drawFeed(canvas, w, h)
         drawTip(canvas, w, h)
+        drawCoach(canvas, w, h)
         if (hud[Hud.PVP] > 0.5f) drawPvpRespawn(canvas, w, h)
         drawThrowAim(canvas, w, h)
         drawControls(canvas)
         if (showFps) {
-            textPaint.textSize = d(11f)
+            // canto inferior direito, com margem segura (fica abaixo da linha de 16 dp dos controles)
+            textPaint.textAlign = Paint.Align.RIGHT
+            textPaint.textSize = d(10f)
             textPaint.color = Palette.muted
-            canvas.drawText("${hud[Hud.FPS].toInt()} FPS", w / 2f, h - d(8f), textPaint)
+            canvas.drawText("${hud[Hud.FPS].toInt()} FPS", w - d(10f), h - d(5f), textPaint)
+            textPaint.textAlign = Paint.Align.CENTER
         }
         postInvalidateOnAnimation()
     }
@@ -628,33 +659,69 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.drawText(label, x, y + s + d(13f), textPaint)
     }
 
+    /** Alvo da bússola e do rótulo: portal aberto > cristal caído > ninho vivo mais próximo > carga revelada. */
+    private class Target(val kind: Int, val x: Float, val z: Float, val dist: Float, val marked: Boolean)
+
+    private fun crystalCount(): Int = hud[Hud.CRYSTAL_COUNT].toInt().coerceIn(0, Hud.MAX_CRYSTALS)
+
     /**
-     * Ninhos e portal: marcador 3D só na área central (longe dos botões) e uma bússola no topo
+     * Posição (px) do marcador 3D, ou null se está fora da faixa útil da tela. Quando o ninho está alinhado com a
+     * câmera o marcador cairia em cima da mira: ele é deslocado para a esquerda, deixando o núcleo à vista.
+     */
+    private fun markerSpot(sx: Float, sy: Float, on: Boolean, w: Float, h: Float, wide: Boolean): Pair<Float, Float>? {
+        val xs = if (wide) 0.08f..0.92f else 0.18f..0.82f
+        val ys = if (wide) 0.12f..0.74f else 0.16f..0.66f
+        if (!on || sx !in xs || sy !in ys) return null
+        var x = sx * w
+        val y = sy * h
+        if (abs(x - w / 2) < d(70f) && abs(y - h / 2) < d(60f)) x = w / 2 - d(96f)
+        return x to y
+    }
+
+    /**
+     * Ninhos, cristais caídos e portal: marcador 3D só na área central (longe dos botões) e uma bússola no topo
      * com a direção de todos os objetivos — nada de setas na borda por cima dos controles.
      */
     private fun drawObjectives(canvas: Canvas, w: Float, h: Float) {
-        val n = hud[Hud.OBJ_COUNT].toInt()
+        val n = hud[Hud.OBJ_COUNT].toInt().coerceIn(0, 4)
         val px = hud[Hud.PLAYER_X]
         val pz = hud[Hud.PLAYER_Z]
-        var target = -1
-        var targetDist = Float.MAX_VALUE
-        val portalOpen = hud[Hud.PORTAL_OPEN] > 0.5f
+        val pulse = 1f + 0.12f * sin(System.currentTimeMillis() / 200.0).toFloat()
+        var nest: Target? = null
+        var portal: Target? = null
+        var crystal: Target? = null
         for (i in 0 until n) {
             val o = Hud.OBJ + i * Hud.OBJ_STRIDE
             val state = hud[o + 2].toInt()
+            if (state != 1 && state != 4) continue          // destruído e portal fechado não têm marcador
             val dist = hypot(hud[o] - px, hud[o + 1] - pz)
-            val wanted = (state == 1 && !portalOpen) || state == 4
-            if (wanted && dist < targetDist) { targetDist = dist; target = i }
-            if (state == 2 || state == 3) continue
-            val sx = hud[o + 3]
-            val sy = hud[o + 4]
-            if (hud[o + 5] > 0.5f && sx in 0.18f..0.82f && sy in 0.16f..0.66f) {
-                val pulse = 1f + 0.12f * sin(System.currentTimeMillis() / 200.0).toFloat()
-                val color = if (state == 4) Palette.purple else Color.rgb(200, 60, 200)
-                drawMarker(canvas, sx * w, sy * h, color, (if (state == 4) "PORTAL " else "NINHO ") + formatDist(dist), pulse, state == 1)
+            val spot = markerSpot(hud[o + 3], hud[o + 4], hud[o + 5] > 0.5f, w, h, false)
+            if (spot != null) {
+                val label = (if (state == 4) "PORTAL " else "NINHO ") + formatDist(dist)
+                drawMarker(canvas, spot.first, spot.second, if (state == 4) Palette.purple else NEST_COLOR, label, pulse, state == 1)
             }
+            val tg = Target(if (state == 4) KIND_PORTAL else KIND_NEST, hud[o], hud[o + 1], dist, spot != null)
+            if (state == 4) portal = tg else if (nest == null || dist < nest.dist) nest = tg
         }
-        drawCompass(canvas, w, n, px, pz, target, targetDist)
+        for (k in 0 until crystalCount()) {
+            val o = Hud.CRYSTAL_ITEMS + k * Hud.CRYSTAL_STRIDE
+            val dist = hypot(hud[o] - px, hud[o + 1] - pz)
+            val spot = markerSpot(hud[o + 2], hud[o + 3], hud[o + 4] > 0.5f, w, h, true)
+            if (spot != null) drawMarker(canvas, spot.first, spot.second, Palette.cyan, "CRISTAL " + formatDist(dist), pulse, false)
+            if (crystal == null || dist < crystal.dist) crystal = Target(KIND_CRYSTAL, hud[o], hud[o + 1], dist, spot != null)
+        }
+        // Caixa perdida: a carga só tem marcador depois de revelada (estado 2); antes disso o chip dá a dica de distância.
+        var cargo: Target? = null
+        if (hud[Hud.CT_ID] > 0.5f && hud[Hud.CT_CARGO_STATE].toInt() == 2) {
+            val dist = hypot(hud[Hud.CT_CARGO_X] - px, hud[Hud.CT_CARGO_Z] - pz)
+            val spot = markerSpot(hud[Hud.CT_CARGO_SX], hud[Hud.CT_CARGO_SY], hud[Hud.CT_CARGO_ON] > 0.5f, w, h, true)
+            if (spot != null) drawMarker(canvas, spot.first, spot.second, CARGO_COLOR, "CARGA " + formatDist(dist), pulse, false)
+            cargo = Target(KIND_CARGO, hud[Hud.CT_CARGO_X], hud[Hud.CT_CARGO_Z], dist, spot != null)
+        }
+        // Portal aberto > (cristal caído ou ninho vivo); a carga revelada e não coletada vence quando está mais perto.
+        val base = portal ?: crystal ?: nest
+        val pick = if (cargo != null && (base == null || (portal == null && cargo.dist < base.dist))) cargo else base
+        drawCompass(canvas, w, n, px, pz, pick)
     }
 
     private fun wrapAngle(a: Float): Float {
@@ -664,11 +731,18 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         return x
     }
 
-    private fun drawCompass(canvas: Canvas, w: Float, n: Int, px: Float, pz: Float, target: Int, targetDist: Float) {
+    /**
+     * Bússola estreita sob a barra superior. A distância do alvo aparece UMA vez: no marcador do mundo
+     * ("NINHO 276 m") quando ele está visível; senão no rótulo abaixo da bússola.
+     * Alvo = portal aberto > cristal caído > ninho vivo mais próximo; a carga revelada (Caixa perdida) vence quando
+     * está mais perto que esse alvo (e o portal ainda não abriu). EXTENSÃO: o cartão do tutorial vai na faixa
+     * inferior (CoachPlacement); esta região (até COMPASS_TOP_DP + 16 + 28) não leva mais nada.
+     */
+    private fun drawCompass(canvas: Canvas, w: Float, n: Int, px: Float, pz: Float, target: Target?) {
         val yaw = hud[Hud.CAM_YAW]
-        val cw = d(320f)
-        val ch = d(20f)
-        val top = d(50f)
+        val cw = minOf(d(220f), w * 0.36f)
+        val ch = d(16f)
+        val top = d(COMPASS_TOP_DP)
         val left = w / 2 - cw / 2
         val half = (PI / 2).toFloat() // a bússola mostra 90° para cada lado
         fun xFor(rel: Float) = w / 2 + rel / half * (cw / 2 - d(8f))
@@ -692,20 +766,18 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                 canvas.drawRect(x - d(0.7f), top + ch - th - d(2f), x + d(0.7f), top + ch - d(2f), p)
             }
         }
-        for (i in 0 until n) {
-            val o = Hud.OBJ + i * Hud.OBJ_STRIDE
-            val state = hud[o + 2].toInt()
-            if (state == 2) continue
-            val rel = wrapAngle(atan2(hud[o] - px, -(hud[o + 1] - pz)) - yaw)
-            val color = when (state) { 4 -> Palette.purple; 3 -> Color.argb(150, 150, 120, 210); else -> Color.rgb(225, 75, 225) }
+        val cy = top + ch / 2
+        val coachHint = coach
+        fun mark(wx: Float, wz: Float, color: Int, isTarget: Boolean, ringIt: Boolean) {
+            val rel = wrapAngle(atan2(wx - px, -(wz - pz)) - yaw)
             p.color = color
-            val s = d(if (i == target) 7f else 5f)
-            val cy = top + ch / 2
+            val s = d(if (isTarget) 7f else 5f)
             if (abs(rel) <= half) {
                 val x = xFor(rel)
                 path.reset()
                 path.moveTo(x, cy - s); path.lineTo(x + s, cy); path.lineTo(x, cy + s); path.lineTo(x - s, cy); path.close()
                 canvas.drawPath(path, p)
+                if (ringIt && coachHint != null) focusRing(canvas, x, cy, s, color, 1f, 0.55f)
             } else {
                 // Fora do campo da bússola: triângulo na ponta indicando para que lado virar.
                 val right = rel > 0
@@ -717,33 +789,116 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                 canvas.drawPath(path, p)
             }
         }
+        for (i in 0 until n) {
+            val o = Hud.OBJ + i * Hud.OBJ_STRIDE
+            val state = hud[o + 2].toInt()
+            if (state == 2) continue
+            val color = when (state) { 4 -> Palette.purple; 3 -> Color.argb(150, 150, 120, 210); else -> NEST_COLOR }
+            val isTarget = target != null && target.x == hud[o] && target.z == hud[o + 1]
+            val ringIt = coachHint?.focus == CoachFocus.NEST_MARKER && coachHint.focusIndex == i && state == 1
+            mark(hud[o], hud[o + 1], color, isTarget, ringIt)
+        }
+        for (k in 0 until crystalCount()) {
+            val o = Hud.CRYSTAL_ITEMS + k * Hud.CRYSTAL_STRIDE
+            val isTarget = target != null && target.kind == KIND_CRYSTAL && target.x == hud[o] && target.z == hud[o + 1]
+            mark(hud[o], hud[o + 1], Palette.cyan, isTarget, coachHint?.focus == CoachFocus.CRYSTAL && isTarget)
+        }
+        if (hud[Hud.CT_ID] > 0.5f && hud[Hud.CT_CARGO_STATE].toInt() == 2) {
+            val isTarget = target != null && target.kind == KIND_CARGO
+            mark(hud[Hud.CT_CARGO_X], hud[Hud.CT_CARGO_Z], CARGO_COLOR, isTarget, false)
+        }
         canvas.restore()
         p.color = Color.WHITE
         canvas.drawRect(w / 2 - d(1f), top - d(2f), w / 2 + d(1f), top + ch + d(2f), p)
-        if (target >= 0) {
-            val state = hud[Hud.OBJ + target * Hud.OBJ_STRIDE + 2].toInt()
-            textPaint.textSize = d(11f)
+        if (target != null) {
+            val name = when (target.kind) { KIND_CRYSTAL -> "CRISTAL"; KIND_PORTAL -> "PORTAL"; KIND_CARGO -> "CARGA"; else -> "PRÓXIMO NINHO" }
+            val label = if (target.marked) name else "$name ${formatDist(target.dist)}"
+            textPaint.textSize = d(if (target.marked) 9f else 11f)
             textPaint.color = Color.argb(160, 0, 0, 0)
-            val label = (if (state == 4) "PORTAL " else "PRÓXIMO NINHO ") + formatDist(targetDist)
             canvas.drawText(label, w / 2 + d(1f), top + ch + d(14f), textPaint)
-            textPaint.color = if (state == 4) Color.rgb(200, 160, 255) else Color.rgb(240, 150, 240)
+            textPaint.color = when (target.kind) { KIND_CRYSTAL -> Palette.cyan; KIND_PORTAL -> Color.rgb(200, 160, 255); KIND_CARGO -> CARGO_COLOR; else -> Color.rgb(240, 150, 240) }
             canvas.drawText(label, w / 2, top + ch + d(13f), textPaint)
         }
     }
 
     private fun formatDist(m: Float): String = if (m >= 1000f) "%.1f km".format(m / 1000f) else "${m.toInt()} m"
 
+    /**
+     * Chip do contrato (só com contrato ativo na ilha): nome curto e, quando há regra, alertas e reserva de munição.
+     * Fica à direita da bússola (y = COMPASS_TOP_DP + 6 dp), numa faixa que nenhum outro elemento do HUD usa no layout padrão.
+     */
+    private fun drawContractChip(canvas: Canvas, w: Float) {
+        if (!island) return
+        val id = ContractId.fromCode(hud[Hud.CT_ID].toInt()) ?: return
+        if (id == ContractId.NONE) return
+        val def = Contracts.get(id)
+        val name = Contracts.chipName(id)
+        val clips = hud[Hud.CT_RESERVE_CLIPS]
+        val limited = clips >= 0f
+        val stats = StringBuilder()
+        when (id) {
+            ContractId.SILENT_RECOVERY -> stats.append("ALERTAS ${hud[Hud.CT_ALERTS].toInt()}")
+            ContractId.UNSTABLE_NEST -> stats.append("INCHADOS ${hud[Hud.CT_BOMBS].toInt()}")
+            ContractId.LOST_CRATE -> when (hud[Hud.CT_CARGO_STATE].toInt()) {
+                1 -> stats.append("CARGA ~${hud[Hud.CT_CARGO_SX].toInt()} m")   // oculta: só a dica de distância
+                2 -> stats.append("CARGA REVELADA")
+                3 -> stats.append("CARGA COLETADA ✓")
+            }
+            else -> Unit
+        }
+        if (limited) {
+            if (stats.isNotEmpty()) stats.append("  •  ")
+            stats.append("RESERVA ${hud[Hud.CT_RESERVE_ROUNDS].toInt()}")
+        }
+        val pad = d(6f)
+        val iconSize = d(14f)
+        textPaint.textSize = d(10f)
+        val nameW = textPaint.measureText(name)
+        textPaint.textSize = d(9f)
+        val statsW = if (stats.isEmpty()) 0f else textPaint.measureText(stats.toString())
+        val left = w / 2 + d(124f)
+        val maxW = (w - d(66f) - left).coerceAtLeast(d(80f))
+        val cw = minOf(maxW, maxOf(nameW + iconSize + d(6f), statsW) + pad * 2)
+        val ch = if (stats.isEmpty()) d(22f) else d(34f)
+        val top = d(COMPASS_TOP_DP) + d(6f)   // abaixo da faixa da sobrevivência (até 44 dp) e à direita da bússola
+        rect.set(left, top, left + cw, top + ch)
+        p.color = Color.argb(205, 8, 14, 26)
+        canvas.drawRoundRect(rect, d(9f), d(9f), p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(1.2f)
+        p.color = Color.argb(190, Color.red(def.color), Color.green(def.color), Color.blue(def.color))
+        canvas.drawRoundRect(rect, d(9f), d(9f), p)
+        p.style = Paint.Style.FILL
+        BrandIcons.draw(canvas, context, contractIconName(id), left + pad, top + d(4f), iconSize, def.color)
+        val saved = textPaint.textAlign
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.textSize = d(10f)
+        textPaint.color = def.color
+        canvas.drawText(name, left + pad + iconSize + d(4f), top + d(15f), textPaint)
+        if (stats.isNotEmpty()) {
+            textPaint.textSize = d(9f)
+            // Reserva baixa (<= 1 pente) fica dourada; zerada, vermelha.
+            textPaint.color = when {
+                limited && clips <= 0f -> Palette.red
+                limited && clips <= 1f -> Palette.gold
+                else -> Palette.text
+            }
+            canvas.drawText(stats.toString(), left + pad, top + d(28f), textPaint)
+        }
+        textPaint.textAlign = saved
+    }
+
     private fun drawNestBar(canvas: Canvas, w: Float) {
         val hp = hud[Hud.NEST_HP]
         if (hp < 0f) return
-        val bw = d(260f)
-        val top = d(90f)
+        val bw = minOf(d(240f), w * 0.4f)
+        val top = d(76f)
         rect.set(w / 2 - bw / 2 - d(6f), top, w / 2 + bw / 2 + d(6f), top + d(30f))
         p.color = Color.argb(210, 40, 8, 48)
         canvas.drawRoundRect(rect, d(10f), d(10f), p)
         textPaint.textSize = d(10f)
         textPaint.color = Color.rgb(230, 170, 255)
-        canvas.drawText("NINHO DE INFECÇÃO — ATIRE NO NÚCLEO", w / 2, top + d(12f), textPaint)
+        canvas.drawText("NÚCLEO DO NINHO", w / 2, top + d(12f), textPaint)
         rect.set(w / 2 - bw / 2, top + d(17f), w / 2 + bw / 2, top + d(25f))
         p.color = Color.argb(160, 0, 0, 0)
         canvas.drawRoundRect(rect, d(4f), d(4f), p)
@@ -769,26 +924,6 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         val pulse = if (ready) 1f + 0.05f * sin(System.currentTimeMillis() / 160.0).toFloat() else 1f
         textPaint.textSize = d(11f) * pulse
         canvas.drawText(if (ready) "▶ SUPRIMENTOS" else "SUPRIMENTOS...", supplyX, supplyY + d(4f), textPaint)
-    }
-
-    private fun drawPortalMarker(canvas: Canvas, w: Float, h: Float) {
-        if (hud[Hud.PORTAL_OPEN] < 0.5f) return
-        val dx = hud[Hud.PORTAL_X] - hud[Hud.PLAYER_X]
-        val dz = hud[Hud.PORTAL_Z] - hud[Hud.PLAYER_Z]
-        val dist = hypot(dx, dz).toInt()
-        val pulse = 1f + 0.15f * sin(System.currentTimeMillis() / 200.0).toFloat()
-        val x: Float
-        val y: Float
-        if (hud[Hud.PORTAL_ONSCREEN] > 0.5f) {
-            x = hud[Hud.PORTAL_SX] * w
-            y = hud[Hud.PORTAL_SY] * h
-        } else {
-            // Seta na borda apontando para o portal (ângulo relativo à câmera).
-            val rel = atan2(dx, -dz) - hud[Hud.CAM_YAW]
-            x = w / 2 + sin(rel) * w * 0.42f
-            y = h / 2 - cos(rel) * h * 0.38f
-        }
-        drawMarker(canvas, x, y, Palette.purple, "PORTAL ${dist}m", pulse, false)
     }
 
     private fun drawReticle(canvas: Canvas, w: Float, h: Float) {
@@ -878,6 +1013,13 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
                 p.color = when (state) { 1 -> Color.rgb(220, 70, 220); 2 -> Color.argb(150, 120, 120, 120); 4 -> Palette.purple; else -> Color.argb(170, 140, 110, 200) }
                 canvas.drawCircle(hud[o], hud[o + 1], 3.2f, p)
             }
+            for (k in 0 until crystalCount()) {
+                val o = Hud.CRYSTAL_ITEMS + k * Hud.CRYSTAL_STRIDE
+                p.color = Color.WHITE
+                canvas.drawCircle(hud[o], hud[o + 1], 3.6f, p)
+                p.color = Palette.cyan
+                canvas.drawCircle(hud[o], hud[o + 1], 2.6f, p)
+            }
             if (hud[Hud.SUPPLY_X] >= 0f) {
                 p.color = Color.rgb(120, 255, 90)
                 canvas.drawCircle(hud[Hud.SUPPLY_X], hud[Hud.SUPPLY_Z], 2.6f, p)
@@ -914,58 +1056,59 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.drawText("MAPA", mapX, top + mapSize - d(6f), textPaint)
     }
 
+    /** Vida, armadura e efeitos: painel compacto no canto superior esquerdo (acima do minimapa, nos dois modos de mão). */
     private fun drawStatus(canvas: Canvas, health: Float, maxHealth: Float) {
-        val left = if (leftHanded) width - d(28f) - d(112f) - d(176f) else d(150f)
-        val top = d(16f)
-        rect.set(left, top, left + d(168f), top + d(50f))
+        val left = d(6f)
+        val top = d(6f)
+        val pw = d(150f)
+        rect.set(left, top, left + pw, top + d(30f))
         p.color = Color.argb(200, 8, 14, 26)
-        canvas.drawRoundRect(rect, d(12f), d(12f), p)
-        // coração em pixel
-        drawHeart(canvas, left + d(18f), top + d(18f), d(2.2f))
+        canvas.drawRoundRect(rect, d(10f), d(10f), p)
+        drawHeart(canvas, left + d(13f), top + d(14f), d(1.7f))
+        val x0 = left + d(26f)
+        val bw = pw - d(26f) - d(8f)
+        // números à direita ("40/120"; diamantes só aqui quando a barra superior não os mostra)
+        val hpText = "${health.toInt()}/${maxHealth.toInt()}"
+        textPaint.textAlign = Paint.Align.RIGHT
+        textPaint.textSize = d(9f)
+        textPaint.color = Palette.muted
+        canvas.drawText(hpText, left + pw - d(7f), top + d(12f), textPaint)
+        val hpW = textPaint.measureText(hpText)
         textPaint.textAlign = Paint.Align.LEFT
-        textPaint.textSize = d(13f)
+        textPaint.textSize = d(11f)
         textPaint.color = Color.WHITE
-        canvas.drawText(playerName, left + d(34f), top + d(18f), textPaint)
-        val bw = d(124f)
+        canvas.drawText(fit(playerName, bw - hpW - d(6f)), x0, top + d(12f), textPaint)
         val ratio = (health / maxHealth).coerceIn(0f, 1f)
-        rect.set(left + d(34f), top + d(25f), left + d(34f) + bw, top + d(33f))
+        rect.set(x0, top + d(16f), x0 + bw, top + d(22f))
         p.color = Color.argb(160, 0, 0, 0)
-        canvas.drawRoundRect(rect, d(4f), d(4f), p)
+        canvas.drawRoundRect(rect, d(3f), d(3f), p)
         rect.right = rect.left + bw * ratio
         p.color = if (ratio > 0.5f) Palette.lime else if (ratio > 0.25f) Palette.gold else Palette.red
-        canvas.drawRoundRect(rect, d(4f), d(4f), p)
+        canvas.drawRoundRect(rect, d(3f), d(3f), p)
         val armorMax = hud[Hud.ARMOR_MAX]
         if (armorMax > 0f) {
-            rect.set(left + d(34f), top + d(35f), left + d(34f) + bw, top + d(38f))
+            rect.set(x0, top + d(24f), x0 + bw, top + d(27f))
             p.color = Color.argb(160, 0, 0, 0)
-            canvas.drawRoundRect(rect, d(2f), d(2f), p)
+            canvas.drawRoundRect(rect, d(1.5f), d(1.5f), p)
             rect.right = rect.left + bw * (hud[Hud.ARMOR] / armorMax).coerceIn(0f, 1f)
             p.color = Color.rgb(140, 170, 230)
-            canvas.drawRoundRect(rect, d(2f), d(2f), p)
+            canvas.drawRoundRect(rect, d(1.5f), d(1.5f), p)
         }
-        textPaint.textSize = d(10f)
-        textPaint.color = Palette.muted
-        canvas.drawText("${health.toInt()}/${maxHealth.toInt()}", left + d(34f), top + d(47f), textPaint)
-        if (hud[Hud.CRYSTAL_TOTAL] > 0f) {
-            textPaint.color = Palette.cyan
-            val crystals = "◆ ${hud[Hud.CRYSTALS].toInt()}/${hud[Hud.CRYSTAL_TOTAL].toInt()}"
-            canvas.drawText(crystals, left + d(110f), top + d(45f), textPaint)
-        }
-        // Efeitos ativos (ícones com tempo).
+        // Efeitos ativos (ícones com tempo): coluna à direita, abaixo da mochila; longe da mira e da barra superior.
         if (island) {
-            var x = left
-            val y = top + d(66f)
+            var y = d(132f)
             fun chip(label: String, seconds: Float, color: Int) {
                 if (seconds <= 0f) return
                 val txt = "$label ${seconds.toInt()}s"
                 textPaint.textSize = d(10f)
                 val tw = textPaint.measureText(txt) + d(14f)
+                val x = width - d(8f) - tw
                 rect.set(x, y - d(13f), x + tw, y + d(5f))
                 p.color = Color.argb(200, Color.red(color) / 4, Color.green(color) / 4, Color.blue(color) / 4)
                 canvas.drawRoundRect(rect, d(8f), d(8f), p)
                 textPaint.color = color
                 canvas.drawText(txt, x + d(7f), y, textPaint)
-                x += tw + d(5f)
+                y += d(22f)
             }
             chip("🔥 QUEIMANDO", hud[Hud.BURNING], Color.rgb(255, 150, 60))
             chip("🩸 SANGRANDO", hud[Hud.BLEEDING], Color.rgb(255, 90, 90))
@@ -976,6 +1119,15 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         textPaint.textAlign = Paint.Align.CENTER
     }
 
+    /** Corta o texto com reticências para caber em [maxW] (usa o tamanho de texto atual do textPaint). */
+    private fun fit(text: String, maxW: Float): String {
+        if (maxW <= 0f) return ""
+        if (textPaint.measureText(text) <= maxW) return text
+        var t = text
+        while (t.isNotEmpty() && textPaint.measureText("$t…") > maxW) t = t.dropLast(1)
+        return "$t…"
+    }
+
     private fun drawHeart(canvas: Canvas, cx: Float, cy: Float, px: Float) {
         val rows = arrayOf(".XX.XX.", "XXXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X...")
         p.color = Palette.red
@@ -984,38 +1136,142 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         }
     }
 
+    private class BarCell(
+        val label: String,
+        val value: String,
+        val color: Int,
+        val icon: String?,
+        val state: PillState?,
+        val attention: Boolean = false,
+    )
+
+    /** Objetivo lido do HUD no máximo a cada 100 ms (as pílulas não precisam de mais que isso). */
+    private fun currentObjective(now: Long): Objective {
+        if (now - objectiveAt >= 100L) {
+            objective = Objective.from(hud)
+            objectiveAt = now
+        }
+        return objective
+    }
+
+    /**
+     * Barra superior: as três pílulas do objetivo na ordem NINHOS → CRISTAIS → PORTAL (a atual destacada, as
+     * concluídas riscadas, a que pede ação pulsando), mais TEMPO e ABATES. O texto longo do objetivo
+     * (ObjectiveText.SENTENCE_UPPER) só aparece em pausa, mapa e carregamento. "◆" é só de diamantes (moeda).
+     */
     private fun drawObjective(canvas: Canvas, w: Float) {
-        val portal = hud[Hud.PORTAL_OPEN] > 0.5f
-        val kills = hud[Hud.KILLS].toInt()
-        val text = if (island) {
-            val done = hud[Hud.NESTS_DONE].toInt()
-            val total = hud[Hud.NEST_TOTAL].toInt()
-            val crystals = hud[Hud.CRYSTALS].toInt()
-            if (portal) "PORTAL ABERTO! Siga o marcador ◆   ☠ $kills"
-            else "NINHOS $done/$total   •   ◆ $crystals/$total   •   ☠ $kills"
-        } else {
-            val alive = hud[Hud.ALIVE].toInt()
-            val total = hud[Hud.TOTAL].toInt()
-            if (portal) "PORTAL ABERTO! Siga o marcador ◆   ☠ $kills" else "☠ $kills ABATES   •   RESTAM $alive DE $total"
+        val now = System.currentTimeMillis()
+        val obj = if (island) currentObjective(now) else Objective.INACTIVE
+        val portal = obj.portalOpen
+        val pillColors = intArrayOf(NEST_COLOR, Palette.cyan, Palette.purple)
+        val pillIcons = arrayOf(BrandIcons.NINHO, BrandIcons.CRISTAL, BrandIcons.PORTAL_EXTRACAO)
+        val core = ArrayList<BarCell>()
+        if (obj.active) {
+            for ((i, pill) in obj.pills.withIndex()) {
+                core.add(BarCell(pill.label, pill.value.ifEmpty { "FECHADO" }, pillColors[i], pillIcons[i], pill.state, pill.attention))
+            }
         }
         val elapsed = hud[Hud.ELAPSED].toInt()
-        val time = "%02d:%02d".format(elapsed / 60, elapsed % 60)
-        textPaint.textSize = d(14f)
-        val tw = textPaint.measureText(text) + d(70f)
-        rect.set(w / 2 - tw / 2, d(12f), w / 2 + tw / 2, d(44f))
-        p.color = if (portal) Color.argb(220, 60, 24, 110) else Color.argb(200, 8, 14, 26)
-        canvas.drawRoundRect(rect, d(16f), d(16f), p)
-        textPaint.color = if (portal) Color.WHITE else Palette.lime
-        canvas.drawText(text, w / 2 - d(22f), d(33f), textPaint)
-        textPaint.textSize = d(12f)
-        textPaint.color = Palette.muted
-        canvas.drawText(time, rect.right - d(26f), d(33f), textPaint)
+        core.add(BarCell("TEMPO", "%02d:%02d".format(elapsed / 60, elapsed % 60), Palette.muted, null, null))
+        val kills = BarCell("ABATES", "${hud[Hud.KILLS].toInt()}", Palette.muted, null, null)
+
+        val maxW = (w - 2f * d(166f)).coerceAtLeast(d(200f))
+        val chevron = d(9f)
+        fun cellWidth(c: BarCell, icons: Boolean): Float {
+            textPaint.textSize = d(8f)
+            val lw = textPaint.measureText(c.label)
+            textPaint.textSize = d(12f)
+            val vw = textPaint.measureText(c.value)
+            return maxOf(lw, vw) + d(16f) + if (icons && c.icon != null) d(17f) else 0f
+        }
+        fun total(cells: List<BarCell>, icons: Boolean): Float {
+            var t = 0f
+            for ((i, c) in cells.withIndex()) {
+                t += cellWidth(c, icons)
+                if (i < cells.size - 1 && c.state != null && cells[i + 1].state != null) t += chevron
+            }
+            return t
+        }
+        var cells: List<BarCell> = core + kills
+        var icons = true
+        if (total(cells, icons) > maxW) cells = core
+        if (total(cells, icons) > maxW) icons = false
+        val widths = FloatArray(cells.size) { cellWidth(cells[it], icons) }
+        val totalW = total(cells, icons)
+
+        val top = d(TOP_BAR_TOP_DP)
+        val bh = d(30f)
+        val left = w / 2 - totalW / 2
+        rect.set(left, top, left + totalW, top + bh)
+        p.color = if (portal) Color.argb(220, 60, 24, 110) else Color.argb(205, 8, 14, 26)
+        canvas.drawRoundRect(rect, d(12f), d(12f), p)
+        var x = left
+        for ((i, c) in cells.withIndex()) {
+            val cw = widths[i]
+            val cx = x + cw / 2
+            val st = c.state
+            if (st != null) {
+                val inset = d(2f)
+                rect.set(x + inset, top + inset, x + cw - inset, top + bh - inset)
+                if (st == PillState.CURRENT) {
+                    p.color = Color.argb(46, Color.red(c.color), Color.green(c.color), Color.blue(c.color))
+                    canvas.drawRoundRect(rect, d(10f), d(10f), p)
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = d(1.3f)
+                    p.color = Color.argb(200, Color.red(c.color), Color.green(c.color), Color.blue(c.color))
+                    canvas.drawRoundRect(rect, d(10f), d(10f), p)
+                    p.style = Paint.Style.FILL
+                }
+                if (c.attention) {
+                    // Cristal caído e ainda no chão: contorno ciano pulsando.
+                    val a = (0.45f + 0.45f * sin(now / 160.0).toFloat()).coerceIn(0f, 1f)
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = d(1.8f)
+                    p.color = Color.argb((a * 255).toInt(), 60, 230, 255)
+                    canvas.drawRoundRect(rect, d(10f), d(10f), p)
+                    p.style = Paint.Style.FILL
+                }
+            }
+            val hasIcon = icons && c.icon != null
+            val textCx = if (hasIcon) cx + d(8.5f) else cx
+            val dim = st == PillState.DONE
+            val accent = when (st) {
+                PillState.CURRENT -> c.color
+                PillState.DONE -> Color.argb(170, Color.red(c.color), Color.green(c.color), Color.blue(c.color))
+                PillState.TODO -> Palette.muted
+                null -> c.color
+            }
+            if (hasIcon) {
+                val isz = d(14f)
+                BrandIcons.draw(canvas, context, c.icon!!, x + d(8f), top + (bh - isz) / 2, isz, accent, if (st == PillState.TODO) 150 else 255)
+            }
+            textPaint.textSize = d(8f)
+            textPaint.color = Palette.muted
+            canvas.drawText(c.label, textCx, top + d(12f), textPaint)
+            textPaint.textSize = d(12f)
+            textPaint.color = if (st == null) (if (c === kills) Palette.muted else Palette.text) else accent
+            val ty = top + d(25f)
+            canvas.drawText(c.value, textCx, ty, textPaint)
+            if (dim) {
+                // Concluída: risco no valor.
+                val vw = textPaint.measureText(c.value)
+                p.color = Color.argb(200, 220, 230, 245)
+                canvas.drawRect(textCx - vw / 2, ty - d(4.5f), textCx + vw / 2, ty - d(3.3f), p)
+            }
+            x += cw
+            if (i < cells.size - 1 && st != null && cells[i + 1].state != null) {
+                textPaint.textSize = d(12f)
+                textPaint.color = Palette.muted
+                canvas.drawText("›", x + chevron / 2, top + d(21f), textPaint)
+                x += chevron
+            }
+        }
         if (island && hud[Hud.NEST_HP] < 0f) {
             textPaint.textSize = d(10f)
             textPaint.color = Color.argb(200, 255, 220, 120)
             val chests = hud[Hud.CHESTS].toInt()
             val gems = hud[Hud.CHEST_DIAMONDS].toInt()
-            canvas.drawText("BAÚS $chests (◆$gems)   •   ${formatDist(hud[Hud.DISTANCE])} percorridos", w / 2, d(100f), textPaint)
+            canvas.drawText("BAÚS $chests (◆$gems)   •   ${formatDist(hud[Hud.DISTANCE])} percorridos", w / 2, d(88f), textPaint)
         }
     }
 
@@ -1052,7 +1308,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         val local = hud[Hud.PVP_LOCAL].toInt()
         val rows = (0 until 8).filter { hud[Hud.PVP_PLAYERS + it * Hud.PVP_STRIDE] > 0.5f }
             .sortedByDescending { hud[Hud.PVP_PLAYERS + it * Hud.PVP_STRIDE + 3] }
-        val right = if (leftHanded) d(16f) + d(150f) else w - d(70f)
+        val right = w - d(70f)
         val left = right - d(150f)
         var y = d(64f)
         rect.set(left, y - d(6f), right, y + rows.size * d(17f) + d(4f))
@@ -1103,37 +1359,308 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         canvas.drawText("Renascendo em ${kotlin.math.ceil(left).toInt()}...", w / 2, h * 0.53f, textPaint)
     }
 
+    /**
+     * Só UM aviso de combate por vez (o mais recente), acima do centro; o COMBO fica abaixo dele, menor.
+     * Nada é desenhado na faixa da mira (h/2).
+     */
     private fun drawFeed(canvas: Canvas, w: Float, h: Float) {
         val now = System.currentTimeMillis()
-        feed.removeAll { now - it.second > 1800 }
-        var y = h * 0.27f
-        for ((text, at) in feed) {
-            val age = (now - at) / 1800f
-            val a = if (age < 0.8f) 1f else (1f - age) / 0.2f
+        val y = d(CombatFeed.noticeBaselineDp(h / d(1f)))
+        val notice = combatFeed.current(now)
+        val suppress = bannerShown
+        bannerShown = false
+        if (notice != null && !suppress) {
+            val age = (now - notice.shownAtMs) / CombatFeed.DURATION_MS.toFloat()
+            val a = if (age < 0.8f) 1f else ((1f - age) / 0.2f).coerceIn(0f, 1f)
             val scale = if (age < 0.08f) 1f + (0.08f - age) * 4f else 1f
-            textPaint.textSize = d(20f) * scale
+            // Frases longas (o objetivo inteiro) encolhem para caber na largura da tela.
+            var base = d(20f)
+            textPaint.textSize = base
+            val noticeW = textPaint.measureText(notice.text)
+            if (noticeW > w * 0.92f) base = base * (w * 0.92f) / noticeW
+            textPaint.textSize = base * scale
             textPaint.color = Color.argb((a * 140).toInt(), 0, 0, 0)
-            canvas.drawText(text, w / 2 + d(2f), y + d(2f), textPaint)
-            textPaint.color = Color.argb((a * 255).toInt(), Color.red(feedColor), Color.green(feedColor), Color.blue(feedColor))
-            canvas.drawText(text, w / 2, y, textPaint)
-            y += d(26f)
+            canvas.drawText(notice.text, w / 2 + d(2f), y + d(2f), textPaint)
+            textPaint.color = Color.argb((a * 255).toInt(), Color.red(notice.color), Color.green(notice.color), Color.blue(notice.color))
+            canvas.drawText(notice.text, w / 2, y, textPaint)
         }
         val combo = hud[Hud.COMBO].toInt()
         if (combo >= 2) {
-            textPaint.textSize = d(15f)
+            // À direita da mira (fora do braço de 48 dp), nunca sobre o aviso nem a barra do ninho.
+            val cx = w / 2 + d(100f)
+            val cy = h / 2 + d(4f)
+            textPaint.textSize = d(13f)
+            textPaint.color = Color.argb(150, 0, 0, 0)
+            canvas.drawText("COMBO x$combo", cx + d(1f), cy + d(1f), textPaint)
             textPaint.color = Palette.gold
-            canvas.drawText("COMBO x$combo", w / 2, h * 0.27f - d(26f), textPaint)
+            canvas.drawText("COMBO x$combo", cx, cy, textPaint)
+        }
+    }
+
+    // ------------------------------------------------------------------ tutorial (coach)
+
+    /** Chamado pelo CoachController (thread de UI, até 10 Hz). `null` remove o cartão. Idempotente. */
+    override fun showCoach(hint: CoachHint?) {
+        if (hint == coach) return
+        if (hint?.lesson != coach?.lesson || hint?.celebrate != coach?.celebrate) coachSince = SystemClock.uptimeMillis()
+        coach = hint
+        coachDirty = true
+        if (hint == null) coachSkipActive = false
+        postInvalidateOnAnimation()
+    }
+
+    private fun coachAccent(f: CoachFocus): Int = when (f) {
+        CoachFocus.NEST_MARKER, CoachFocus.NEST_CORE -> NEST_COLOR
+        CoachFocus.CRYSTAL -> Palette.cyan
+        CoachFocus.PORTAL -> Palette.purple
+        else -> Palette.lime
+    }
+
+    /** Retângulo do cartão (cacheado: muda só com o layout ou quando o cartão aparece). */
+    private fun coachCard(w: Float, h: Float): CoachPlacement.Rect? {
+        if (coachDirty) {
+            coachDirty = false
+            val blockers = HudControl.entries.filter { it != HudControl.HOTBAR && available(it) }.map { c ->
+                val gc = g(c)
+                HudTouch.area(c, gc.x, gc.y, gc.r, density)
+            }
+            val bottom = if (available(HudControl.HOTBAR)) hotbarY - slotSize / 2f - d(6f) else h - d(24f)
+            coachRect = CoachPlacement.place(w, h, bottom, blockers, density)
+            coachRect?.let { r ->
+                val t = CoachPlacement.skipTouch(r, density)
+                coachSkip.set(t.left, t.top, t.right, t.bottom)
+            } ?: coachSkip.setEmpty()
+        }
+        return coachRect
+    }
+
+    private fun wrapText(paint: Paint, text: String, maxW: Float): List<String> {
+        val lines = ArrayList<String>()
+        var line = ""
+        for (word in text.split(' ')) {
+            val cand = if (line.isEmpty()) word else "$line $word"
+            if (line.isEmpty() || paint.measureText(cand) <= maxW) line = cand else { lines.add(line); line = word }
+        }
+        if (line.isNotEmpty()) lines.add(line)
+        return lines
+    }
+
+    private fun drawCoach(canvas: Canvas, w: Float, h: Float) {
+        val hint = coach ?: return
+        val now = SystemClock.uptimeMillis()
+        val fade = ((now - coachSince) / 220f).coerceIn(0f, 1f)
+        val accent = coachAccent(if (hint.celebrate) CoachFocus.NONE else hint.focus)
+        if (!hint.celebrate) drawCoachFocus(canvas, w, h, hint, fade)
+
+        val card = coachCard(w, h)
+        if (card == null) {
+            // Nenhum retângulo legível (layout muito customizado): faixa curta de uma linha, abaixo da mira.
+            textPaint.textSize = d(12f)
+            val text = fit(if (hint.celebrate) hint.body else hint.title, w * 0.5f)
+            textPaint.color = Color.argb((fade * 255).toInt(), Color.red(accent), Color.green(accent), Color.blue(accent))
+            canvas.drawText(text, w / 2, h * 0.72f, textPaint)
+            return
+        }
+        val slide = (1f - fade) * d(8f)
+        val a = (fade * 255).toInt()
+        rect.set(card.left, card.top + slide, card.right, card.bottom + slide)
+        p.color = Color.argb((fade * 228).toInt(), 12, 8, 30)
+        canvas.drawRoundRect(rect, d(12f), d(12f), p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(1.4f)
+        p.color = Color.argb((fade * 170).toInt(), Color.red(accent), Color.green(accent), Color.blue(accent))
+        canvas.drawRoundRect(rect, d(12f), d(12f), p)
+        p.style = Paint.Style.FILL
+        // faixa de destaque à esquerda
+        p.color = Color.argb(a, Color.red(accent), Color.green(accent), Color.blue(accent))
+        rect.set(card.left + d(7f), card.top + slide + d(10f), card.left + d(10f), card.bottom + slide - d(10f))
+        canvas.drawRoundRect(rect, d(1.5f), d(1.5f), p)
+
+        val tx = card.left + d(18f)
+        val innerW = card.width - d(18f) - d(10f)
+        val y0 = card.top + slide
+        val headerPaint = coachPaint
+        headerPaint.textAlign = Paint.Align.LEFT
+        headerPaint.textSize = d(10f)
+        headerPaint.color = Color.argb(a, Color.red(accent), Color.green(accent), Color.blue(accent))
+        val header = if (hint.celebrate) "CONCLUÍDO · ${hint.title}" else "PASSO ${hint.step}/${hint.total} · ${hint.title}"
+        canvas.drawText(fit2(headerPaint, header, innerW), tx, y0 + d(16f), headerPaint)
+
+        // corpo: reduz a letra até caber em até 3 linhas
+        var size = 12f
+        var lines = emptyList<String>()
+        while (true) {
+            headerPaint.textSize = d(size)
+            lines = wrapText(headerPaint, hint.body, innerW)
+            if ((lines.size <= 3 && (lines.size - 1) * size * 1.2f <= 33f) || size <= 9.5f) break
+            size -= 0.5f
+        }
+        headerPaint.color = Color.argb(a, 244, 247, 255)
+        for ((i, line) in lines.take(3).withIndex()) canvas.drawText(line, tx, y0 + d(33f) + i * d(size * 1.2f), headerPaint)
+        headerPaint.textAlign = Paint.Align.CENTER
+
+        hint.progress?.let { f ->
+            val bx0 = tx
+            val bx1 = card.right - d(10f)
+            val by = card.bottom + slide - d(7f)
+            rect.set(bx0, by, bx1, by + d(3f))
+            p.color = Color.argb((fade * 120).toInt(), 255, 255, 255)
+            canvas.drawRoundRect(rect, d(1.5f), d(1.5f), p)
+            rect.right = bx0 + (bx1 - bx0) * f.coerceIn(0f, 1f)
+            p.color = Color.argb(a, Color.red(accent), Color.green(accent), Color.blue(accent))
+            canvas.drawRoundRect(rect, d(1.5f), d(1.5f), p)
+        }
+
+        coachSkipActive = hint.skippable && !hint.celebrate
+        if (coachSkipActive) {
+            val s = CoachPlacement.skipRect(card, density)
+            rect.set(s.left, s.top + slide, s.right, s.bottom + slide)
+            p.color = Color.argb((fade * 235).toInt(), 30, 22, 58)
+            canvas.drawRoundRect(rect, d(11f), d(11f), p)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = d(1f)
+            p.color = Color.argb((fade * 160).toInt(), 154, 166, 192)
+            canvas.drawRoundRect(rect, d(11f), d(11f), p)
+            p.style = Paint.Style.FILL
+            headerPaint.textSize = d(9f)
+            headerPaint.color = Color.argb(a, 200, 208, 226)
+            canvas.drawText("PULAR TUTORIAL", (s.left + s.right) / 2, s.top + slide + d(15f), headerPaint)
+        }
+    }
+
+    private fun fit2(paint: Paint, text: String, maxW: Float): String {
+        if (paint.measureText(text) <= maxW) return text
+        var t = text
+        while (t.isNotEmpty() && paint.measureText("$t…") > maxW) t = t.dropLast(1)
+        return "$t…"
+    }
+
+    /** Anel pulsante em volta de ([cx], [cy]); [grow] escala a expansão da pulsação (menor em alvos pequenos). */
+    private fun focusRing(canvas: Canvas, cx: Float, cy: Float, r: Float, color: Int, alpha: Float = 1f, grow: Float = 1f) {
+        val ph = (SystemClock.uptimeMillis() % 1100L) / 1100f
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(3f) * grow.coerceAtLeast(0.6f)
+        p.color = color
+        p.alpha = ((0.9f - 0.6f * ph) * 255f * alpha).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, r + d(4f) * grow + d(10f) * grow * ph, p)
+        p.strokeWidth = d(2f) * grow.coerceAtLeast(0.6f)
+        p.color = color
+        p.alpha = (230 * alpha).toInt().coerceIn(0, 255)
+        canvas.drawCircle(cx, cy, r + d(3f) * grow, p)
+        p.style = Paint.Style.FILL
+        p.alpha = 255
+    }
+
+    private fun focusLabel(canvas: Canvas, text: String, x: Float, y: Float, color: Int, alpha: Float) {
+        textPaint.textSize = d(11f)
+        textPaint.color = Color.argb((alpha * 170).toInt(), 0, 0, 0)
+        canvas.drawText(text, x + d(1f), y + d(1f), textPaint)
+        textPaint.color = Color.argb((alpha * 255).toInt(), Color.red(color), Color.green(color), Color.blue(color))
+        canvas.drawText(text, x, y, textPaint)
+    }
+
+    /** Seta na borda da tela apontando para um ponto do mundo que está fora da tela. */
+    private fun edgeArrow(canvas: Canvas, w: Float, h: Float, dx: Float, dz: Float, color: Int, alpha: Float) {
+        val rel = atan2(dx, -dz) - hud[Hud.CAM_YAW]
+        val x = w / 2 + sin(rel) * w * 0.40f
+        val y = h / 2 - cos(rel) * h * 0.36f
+        val s = d(12f)
+        val bob = 1f + 0.12f * sin(SystemClock.uptimeMillis() / 180.0).toFloat()
+        canvas.save()
+        canvas.translate(x, y)
+        canvas.rotate(Math.toDegrees(rel.toDouble()).toFloat())
+        canvas.scale(bob, bob)
+        path.reset()
+        path.moveTo(0f, -s); path.lineTo(s * 0.85f, s * 0.75f); path.lineTo(0f, s * 0.35f); path.lineTo(-s * 0.85f, s * 0.75f); path.close()
+        p.color = color
+        p.alpha = (alpha * 235).toInt().coerceIn(0, 255)
+        canvas.drawPath(path, p)
+        p.alpha = 255
+        canvas.restore()
+    }
+
+    /** Realce do que a lição ensina (anel/seta); só em controles visíveis. */
+    private fun drawCoachFocus(canvas: Canvas, w: Float, h: Float, hint: CoachHint, alpha: Float) {
+        val color = coachAccent(hint.focus)
+        val px = hud[Hud.PLAYER_X]
+        val pz = hud[Hud.PLAYER_Z]
+        when (hint.focus) {
+            CoachFocus.JOYSTICK -> if (g(HudControl.JOYSTICK).visible && !stickActive) focusRing(canvas, stickHomeX, stickHomeY, stickRadius, color, alpha)
+            CoachFocus.LOOK_AREA -> {
+                // Gesto de arrastar na metade oposta ao joystick (respeita o modo canhoto).
+                val cx = if (stickHomeX < w / 2) w * 0.76f else w * 0.24f
+                val cy = h * 0.40f
+                val t = SystemClock.uptimeMillis() / 700.0
+                val dx = sin(t).toFloat() * d(46f)
+                p.color = color
+                p.alpha = (alpha * 70).toInt().coerceIn(0, 255)
+                rect.set(cx - d(70f), cy - d(26f), cx + d(70f), cy + d(26f))
+                canvas.drawRoundRect(rect, d(26f), d(26f), p)
+                p.alpha = (alpha * 235).toInt().coerceIn(0, 255)
+                canvas.drawCircle(cx + dx, cy, d(13f), p)
+                for (side in intArrayOf(-1, 1)) {
+                    val ax = cx + side * d(58f)
+                    path.reset()
+                    path.moveTo(ax + side * d(8f), cy); path.lineTo(ax, cy - d(7f)); path.lineTo(ax, cy + d(7f)); path.close()
+                    canvas.drawPath(path, p)
+                }
+                p.alpha = 255
+            }
+            CoachFocus.FIRE_BUTTON -> {
+                val c = if (g(HudControl.FIRE).visible) HudControl.FIRE else HudControl.FIRE_LEFT
+                if (g(c).visible) focusRing(canvas, g(c).x, g(c).y, g(c).r, color, alpha)
+            }
+            CoachFocus.MAP_BUTTON -> if (g(HudControl.MAP).visible) focusRing(canvas, mapX, mapY, mapSize / 2f, color, alpha)
+            CoachFocus.NEST_MARKER -> {
+                val i = hint.focusIndex
+                if (i in 0 until hud[Hud.OBJ_COUNT].toInt().coerceIn(0, 4)) {
+                    val o = Hud.OBJ + i * Hud.OBJ_STRIDE
+                    val spot = markerSpot(hud[o + 3], hud[o + 4], hud[o + 5] > 0.5f, w, h, false)
+                    if (spot != null) focusRing(canvas, spot.first, spot.second, d(14f), color, alpha)
+                    else edgeArrow(canvas, w, h, hud[o] - px, hud[o + 1] - pz, color, alpha)
+                }
+            }
+            CoachFocus.NEST_CORE -> {
+                val i = hint.focusIndex
+                if (i in 0 until hud[Hud.OBJ_COUNT].toInt().coerceIn(0, 4)) {
+                    val o = Hud.OBJ + i * Hud.OBJ_STRIDE
+                    if (hud[o + 2].toInt() == 1 && hud[o + 5] > 0.5f) {
+                        // O marcador é projetado 1,5 m acima do núcleo: desce para o centro do núcleo.
+                        val dist = hypot(hud[o] - px, hud[o + 1] - pz).coerceAtLeast(2f)
+                        val focal = (h / 2) / tan(hud[Hud.FOV].coerceAtLeast(0.3f) / 2)
+                        val cx = hud[o + 3] * w
+                        val cy = hud[o + 4] * h + 1.5f * focal / dist
+                        val r = (focal * 1.1f / dist).coerceIn(d(14f), d(40f))
+                        focusRing(canvas, cx, cy, r, color, alpha)
+                        focusLabel(canvas, "NÚCLEO", cx, cy + r + d(20f), color, alpha)
+                    }
+                }
+            }
+            CoachFocus.CRYSTAL -> {
+                var best = -1
+                var bestD = Float.MAX_VALUE
+                for (k in 0 until crystalCount()) {
+                    val o = Hud.CRYSTAL_ITEMS + k * Hud.CRYSTAL_STRIDE
+                    val dd = hypot(hud[o] - px, hud[o + 1] - pz)
+                    if (dd < bestD) { bestD = dd; best = k }
+                }
+                if (best >= 0) {
+                    val o = Hud.CRYSTAL_ITEMS + best * Hud.CRYSTAL_STRIDE
+                    if (hud[o + 4] > 0.5f) focusRing(canvas, hud[o + 2] * w, hud[o + 3] * h, d(16f), color, alpha)
+                    else edgeArrow(canvas, w, h, hud[o] - px, hud[o + 1] - pz, color, alpha)
+                }
+            }
+            CoachFocus.PORTAL -> {
+                if (hud[Hud.PORTAL_ONSCREEN] > 0.5f) focusRing(canvas, hud[Hud.PORTAL_SX] * w, hud[Hud.PORTAL_SY] * h, d(22f), color, alpha)
+                else edgeArrow(canvas, w, h, hud[Hud.PORTAL_X] - px, hud[Hud.PORTAL_Z] - pz, color, alpha)
+            }
+            CoachFocus.NONE -> Unit
         }
     }
 
     private fun drawTip(canvas: Canvas, w: Float, h: Float) {
-        val (text, at) = tip ?: return
-        val age = System.currentTimeMillis() - at
-        if (age > 5000) {
-            tip = null
-            return
-        }
-        val a = if (age < 4300) 1f else (5000 - age) / 700f
+        val (text, age) = tipState.current(System.currentTimeMillis()) ?: return
+        val a = if (age < 4300) 1f else ((5000 - age) / 700f).coerceIn(0f, 1f)
         textPaint.textSize = d(13f)
         val tw = textPaint.measureText(text) + d(30f)
         val y = h * 0.72f
@@ -1153,6 +1680,10 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         p.strokeWidth = d(2.2f)
         p.color = if (active) Color.WHITE else Color.argb(170, Color.red(fill), Color.green(fill), Color.blue(fill))
         canvas.drawCircle(x, y, r, p)
+        // aro interno discreto: dá relevo sem mudar a área do botão
+        p.strokeWidth = d(1f)
+        p.color = Color.argb(if (active) 70 else 36, 255, 255, 255)
+        canvas.drawCircle(x, y, (r - d(4f)).coerceAtLeast(d(2f)), p)
         p.style = Paint.Style.FILL
     }
 
@@ -1195,6 +1726,14 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             val id = if (editing) listOf(Items.RIFLE, Items.PISTOL, Items.GRENADE, Items.BANDAGE, Items.MEDKIT, 0)[i] else hud[Hud.INV + i * 2].toInt()
             val count = if (editing) (if (i in 2..3) 3 else 1) else hud[Hud.INV + i * 2 + 1].toInt()
             val pressed = touches.values.any { it.role == Role.HOTBAR && it.slot == i }
+            val equipped = id != 0 && i == weaponSlot && Items.isWeapon(id)
+            if (equipped) {
+                // arma em mãos: fundo esverdeado e sublinhado
+                p.color = Color.argb(70, 168, 255, 62)
+                canvas.drawRoundRect(rect, d(5f), d(5f), p)
+                p.color = Palette.lime
+                canvas.drawRoundRect(rect.left + d(6f), rect.bottom + d(0.5f), rect.right - d(6f), rect.bottom + d(3f), d(1.2f), d(1.2f), p)
+            }
             val border = when {
                 pressed -> Color.WHITE
                 id != 0 && i == weaponSlot && Items.isWeapon(id) -> Palette.lime
@@ -1369,7 +1908,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         }
         textPaint.textSize = d(9f)
         textPaint.color = Color.argb(200, 255, 140, 120)
-        canvas.drawText("HORDA VINDO DAQUI", w / 2, top + d(28f), textPaint)
+        canvas.drawText("HORDA VINDO DAQUI", w / 2, top + d(26f), textPaint)
     }
 
     /** Sobrevivência: onda atual, barra de progresso com bandeira (estilo Plants vs Zombies), tempo e pontos. */
@@ -1431,9 +1970,12 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
             val pulse = 1f + 0.06f * sin(System.currentTimeMillis() / 120.0).toFloat()
             textPaint.textSize = d(24f) * pulse
             textPaint.color = Color.argb(160, 0, 0, 0)
-            canvas.drawText(banner, w / 2 + d(2f), h * 0.4f + d(2f), textPaint)
+            // Usa a faixa do aviso de combate (que fica suprimido enquanto o banner existe): um só aviso por vez.
+            bannerShown = true
+            val by = d(CombatFeed.noticeBaselineDp(h / d(1f)))
+            canvas.drawText(banner, w / 2 + d(2f), by + d(2f), textPaint)
             textPaint.color = if (big && state == 1) Palette.red else if (state == 2) Palette.lime else Palette.gold
-            canvas.drawText(banner, w / 2, h * 0.4f, textPaint)
+            canvas.drawText(banner, w / 2, by, textPaint)
         }
     }
 
@@ -1441,7 +1983,7 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
     private fun k(c: HudControl): Float = g(c).r / d(c.baseDp)
 
     private fun label(canvas: Canvas, text: String, x: Float, y: Float, size: Float, color: Int) {
-        textPaint.textSize = d(size)
+        textPaint.textSize = d(maxOf(size, 7f))   // legível mesmo com o controle reduzido
         textPaint.color = color
         canvas.drawText(text, x, y, textPaint)
     }
@@ -1530,7 +2072,9 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
         val mag = hud[Hud.MAG].toInt()
         val lowAmmo = ammo <= mag / 4
         drawButton(canvas, gc.x, gc.y, gc.r, if (lowAmmo) Palette.gold else Palette.lime, false)
-        label(canvas, if (hud[Hud.RELOAD] >= 0f) "..." else "$ammo", gc.x, gc.y + d(2f) * s, 13f * s, if (lowAmmo) Palette.gold else Color.WHITE)
+        val reserve = if (hud[Hud.CT_ID] > 0.5f) hud[Hud.CT_RESERVE_ROUNDS].toInt() else -1   // contrato de munição escassa
+        val ammoText = if (reserve >= 0) "$ammo/$reserve" else "$ammo"
+        label(canvas, if (hud[Hud.RELOAD] >= 0f) "..." else ammoText, gc.x, gc.y + d(2f) * s, (if (reserve >= 0) 11f else 13f) * s, if (lowAmmo || reserve == 0) Palette.gold else Color.WHITE)
         label(canvas, "RECARREGAR", gc.x, gc.y + d(16f) * s, 8f * s, Palette.muted)
     }
 
@@ -1718,5 +2262,16 @@ class HudView(context: Context, private val listener: Listener) : View(context) 
 
     companion object {
         private const val TAU = (PI * 2).toFloat()
+        private val NEST_COLOR = Color.rgb(225, 75, 225)
+        private val CARGO_COLOR = Palette.contractCrate   // dourado: a carga da Caixa perdida
+        private const val KIND_NEST = 0
+        private const val KIND_CRYSTAL = 1
+        private const val KIND_PORTAL = 2
+        private const val KIND_CARGO = 3
+
+        /** Regiões do centro superior (dp): barra superior, bússola e, abaixo, os pontos de extensão. */
+        const val TOP_BAR_TOP_DP = 6f
+        const val TOP_BAR_BOTTOM_DP = 36f
+        const val COMPASS_TOP_DP = 40f
     }
 }

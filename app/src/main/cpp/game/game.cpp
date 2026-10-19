@@ -120,6 +120,11 @@ void Game::emitSound(int sound, const Vec3& at, float volume) {
 void Game::enterLobby(uint32_t skin, int screen) {
     stopPvp();
     bool regenerate = mode_ != Mode::Lobby;
+    if (regenerate) {
+        prof_.skipFrames(3);
+        uploadUnlimitedFrames_ = 3;
+        streamStats_ = StreamStats{};
+    }
     mode_ = Mode::Lobby;
     paused_ = false;
     lobbyScreen_ = screen;
@@ -180,6 +185,7 @@ void Game::setSettings(float sensitivity, bool aimAssist, bool autoFire, bool in
 }
 
 void Game::setGraphics(int quality, bool cinematic) {
+    quality_ = quality;
     viewRadius_ = quality <= 0 ? 6 : (quality >= 2 ? 10 : 8);
     renderer_.setCinematic(cinematic);
 }
@@ -305,17 +311,20 @@ void Game::consumeInput(InputState& in) {
 // ----------------------------------------------------------------------------- quadro
 
 void Game::frame(double now) {
+    perf::FrameGuard guard(prof_, now);  // begin() agora, end() em qualquer saída
+    ZZ_TRACE_SCOPE("ZZ frame");
     float dt = lastTime_ < 0 ? 1.0f / 60.0f : static_cast<float>(now - lastTime_);
     lastTime_ = now;
     if (dt > 0) fps_ = lerpf(fps_, 1.0f / std::max(dt, 1e-3f), 0.05f);
     dt = clampf(dt, 0.0f, 0.05f);
-    time_ += dt;
-    static float fpsLogTimer = 0;
-    fpsLogTimer += dt;
-    if (fpsLogTimer > 5.0f) {
-        fpsLogTimer = 0;
-        LOGI("FPS %.1f (modo %d, chunks %zu, zumbis %zu, partículas %zu)", fps_, static_cast<int>(mode_), world_.chunks().size(), zombies_.size(), particles_.size());
+    if (autopilot_.active && mode_ != Mode::Mission) {  // saiu da missão no meio do autopiloto
+        prof_.endRun();
+        autopilot_.active = false;
+        noEnemies_ = false;
     }
+    if (autopilot_.active) dt = 1.0f / 60.0f;  // trajetória independente da taxa de quadros
+    time_ += dt;
+    prof_.setContext(static_cast<int>(mode_), quality_, renderer_.cinematic());  // o log ZZPerf (5 s) substitui o antigo "FPS"
 
     if (mode_ == Mode::Lobby) updateLobby(dt);
     else if (mode_ == Mode::Pvp) updatePvp(dt);
@@ -336,9 +345,41 @@ void Game::frame(double now) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         return;
     }
-    buildScene();
-    renderer_.render(scene_);
-    if (mode_ == Mode::Mission || mode_ == Mode::Pvp) publishHud();
+    {
+        perf::Scoped t(prof_, perf::Sec::Scene);
+        buildScene();
+    }
+    // Orçamento de upload só vale no mundo em streaming; lobby/PvP (mundo finito) e os quadros pós-carga sobem tudo.
+    scene_.upload.unlimited = uploadUnlimitedFrames_ > 0 || !world_.streaming();
+    if (uploadUnlimitedFrames_ > 0) --uploadUnlimitedFrames_;
+    {
+        perf::Scoped t(prof_, perf::Sec::Render);
+        renderer_.render(scene_);
+    }
+    const RenderStats& rs = renderer_.stats();
+    prof_.add(perf::Sec::Upload, rs.uploadMs);
+    prof_.count(perf::Cnt::Uploads, rs.uploads);
+    prof_.count(perf::Cnt::UploadBytes, static_cast<long long>(rs.uploadBytes));
+    prof_.count(perf::Cnt::ChunkDraws, rs.chunkDraws[0] + rs.chunkDraws[1] + rs.chunkDraws[2]);
+    prof_.count(perf::Cnt::CharDraws, rs.partDraws);
+    prof_.count(perf::Cnt::BoxDraws, rs.boxDraws);
+    prof_.count(perf::Cnt::BillboardDraws, rs.billboardFlushes);
+    prof_.count(perf::Cnt::Culled, rs.culledCharacters + rs.culledBoxes);
+    prof_.gauge(streamStats_.pending, streamStats_.pendingUrgent, rs.uploadsPending, static_cast<int>(world_.chunks().size()),
+                static_cast<float>(rs.gpuBytes) / (1024.0f * 1024.0f), perfFlags());
+    if (mode_ == Mode::Mission || mode_ == Mode::Pvp) {
+        perf::Scoped t(prof_, perf::Sec::Hud);
+        publishHud();
+    }
+}
+
+int Game::perfFlags() const {
+    int f = 0;
+    if (world_.streaming()) f |= 1;
+    if (streamStats_.timeCapped) f |= 2;
+    if (prof_.sustainedSlow()) f |= 4;
+    if (autopilot_.active) f |= 8;
+    return f;
 }
 
 void Game::updateLobby(float dt) {
@@ -387,9 +428,10 @@ void Game::updateMission(float dt) {
     consumeInput(in);
     aimStage_ = std::max(0, std::min(2, in.aimStage));
     aimToggle_ = in.aim || aimStage_ > 0;
+    if (autopilot_.active) perfDrive(in);
     if (!victory_) missionTime_ += dt;
 
-    streamWorld(2, 3);
+    streamWorld();
     for (int i = 0; i < in.tapCount; ++i) handleSlotTap(in.taps[i]);
     for (int i = 0; i < in.useCount; ++i) useItemSlot(in.uses[i]);
     updateCamera(dt, in);
@@ -406,11 +448,14 @@ void Game::updateMission(float dt) {
         if (!dead_) survivalTime_ += dt;
         updateWaves(dt);
     }
+    updateContract(dt);
 
     // Recalcula o campo de fluxo quando o jogador muda de coluna (ou periodicamente).
     navTimer_ -= dt;
     int px = static_cast<int>(std::floor(player_.position.x)), pz = static_cast<int>(std::floor(player_.position.z));
     if (navTimer_ <= 0 && (px != navX_ || pz != navZ_)) {
+        ZZ_TRACE_SCOPE("ZZ nav");
+        perf::Scoped navTimerScope(prof_, perf::Sec::Nav);
         nav_.compute(world_, px, pz, 60);
         navX_ = px;
         navZ_ = pz;
@@ -430,11 +475,16 @@ void Game::updateMission(float dt) {
     updateEffects(dt);
 
     minimapTimer_ -= dt;
-    if (minimapTimer_ <= 0 || std::fabs(player_.position.x - minimapCX_) > 26 || std::fabs(player_.position.z - minimapCZ_) > 26) rebuildMinimap();
+    if (minimapTimer_ <= 0 || std::fabs(player_.position.x - minimapCX_) > 26 || std::fabs(player_.position.z - minimapCZ_) > 26) {
+        ZZ_TRACE_SCOPE("ZZ minimap");
+        perf::Scoped minimapScope(prof_, perf::Sec::Minimap);
+        rebuildMinimap();
+    }
 
     int needed = (1 << static_cast<int>(nests_.size())) - 1;
     if (!portalOpen_ && needed > 0 && (crystalsCollectedMask_ & needed) == needed) {
         portalOpen_ = true;
+        LOGI("OBJ portal_aberto t=%.1f abates=%d", missionTime_, kills_);
         emit(EV_PORTAL_OPEN);
         emitSound(SND_PORTAL, camPos_, 0.9f);
     }
@@ -449,6 +499,7 @@ void Game::updateMission(float dt) {
             finishResult();
             spawnBurst(player_.position + Vec3(0, 1, 0), {0.75f, 0.45f, 1.0f, 1.0f}, 40, 5.0f, 0.16f, true, -1.0f);
             emitSound(SND_PORTAL, player_.position, 1.0f);
+            LOGI("OBJ vitoria t=%.1f abates=%d", missionTime_, kills_);
             emit(EV_VICTORY);
         }
     }
@@ -476,6 +527,10 @@ void Game::finishResult() {
     result_[R_NESTS] = static_cast<float>(nests);
     result_[R_WAVE] = static_cast<float>(wave_);
     result_[R_SCORE] = static_cast<float>(score_ + static_cast<int>(survivalTime_ * 2.0f));
+    result_[R_ALERTS] = static_cast<float>(alerts_);
+    result_[R_RESERVE_PCT] = static_cast<float>(reservePct_);
+    result_[R_CARGO] = cargo_.collected ? 1.0f : 0.0f;
+    result_[R_BOMBS] = static_cast<float>(bombs_);
 }
 
 // ----------------------------------------------------------------------------- jogador e câmera
@@ -857,7 +912,7 @@ void Game::updateWeapon(float dt, const InputState& in) {
         rackPlayed_ = false;
         emitSound(SND_RELOAD, player_.position, 0.9f);  // pente saindo e entrando
     };
-    if (in.reloads > 0 && ammo_ < magazine && reloadTimer_ <= 0 && meleeTime_ < 0 && !throwAiming_ && throwAnimTime_ < 0) startReload();
+    if (in.reloads > 0 && ammo_ < magazine && reloadTimer_ <= 0 && meleeTime_ < 0 && !throwAiming_ && throwAnimTime_ < 0 && canReloadNow(magazine)) startReload();
     if (reloadTimer_ > 0) {
         reloadTimer_ -= dt;
         if (!rackPlayed_ && reloadTimer_ <= reloadDuration_ * 0.3f) {
@@ -866,7 +921,7 @@ void Game::updateWeapon(float dt, const InputState& in) {
         }
         if (reloadTimer_ <= 0) {
             reloadTimer_ = 0;
-            ammo_ = magazine;
+            completeReload(magazine);  // contrato de munição escassa: gasta a reserva
         }
     }
 
@@ -936,7 +991,8 @@ void Game::updateWeapon(float dt, const InputState& in) {
             emitSound(SND_EMPTY, player_.position, 0.8f);  // clique de arma vazia
             emptyClick_ = 0.35f;
         }
-        startReload();
+        if (canReloadNow(magazine)) startReload();
+        else notifyOutOfAmmo();  // sem reserva: só a faca e as granadas
     }
     firingNow_ = trigger && ammo_ > 0 && reloadTimer_ <= 0 && meleeTime_ < 0;
     int fired = 0;
@@ -1263,6 +1319,7 @@ void Game::updatePickups(float dt) {
             p.taken = true;
             if (p.type == 0) {
                 crystalsCollectedMask_ |= 1 << p.crystalIndex;
+                LOGI("OBJ cristal idx=%d mascara=0x%x", p.crystalIndex, crystalsCollectedMask_);
                 emit(EV_CRYSTAL, p.crystalIndex);
                 emitSound(SND_PICKUP, p.position, 1.0f);
                 spawnBurst(p.position, {0.4f, 1.0f, 0.95f, 1.0f}, 16, 3.0f, 0.12f, true, -2.0f);
@@ -1278,8 +1335,11 @@ void Game::updatePickups(float dt) {
                 float heal = maxHealth_ * 0.3f;
                 health_ = std::min(maxHealth_, health_ + heal);
                 ammo_ = magazineFor(weaponId());
-                for (int w = IT_RIFLE; w <= IT_LAUNCHER; ++w) clipsInit_[w] = false;
-                clipsInit_[weaponId()] = true;
+                // Com reserva limitada (contrato) o suprimento só completa o pente atual: não repõe a reserva nem as outras armas.
+                if (!ammoLimited()) {
+                    for (int w = IT_RIFLE; w <= IT_LAUNCHER; ++w) clipsInit_[w] = false;
+                    clipsInit_[weaponId()] = true;
+                }
                 clips_[weaponId()] = ammo_;
                 reloadTimer_ = 0;
                 damageBoost_ = 45.0f;
@@ -1892,15 +1952,58 @@ void Game::buildScene() {
         float pulse = 1.0f + 0.08f * std::sin(time_ * 4.0f) + (n.hitFlash > 0 ? 0.12f : 0.0f);
         BoxDraw core;
         core.world = Mat4::translation(n.core + Vec3(0, std::sin(time_ * 1.5f) * 0.15f, 0)) * Mat4::rotationY(time_ * 0.8f) * Mat4::rotationX(0.6f) * Mat4::scale({1.1f * pulse, 1.1f * pulse, 1.1f * pulse});
-        core.color = n.hitFlash > 0 ? Vec4(1.0f, 0.9f, 0.9f, 1) : Vec4(0.62f, 0.16f, 0.78f, 1);
+        const bool unstable = config_.nestBomb > 0.0f;  // contrato Ninho instável: núcleo laranja
+        core.color = n.hitFlash > 0 ? Vec4(1.0f, 0.9f, 0.9f, 1) : (unstable ? Vec4(1.0f, 0.45f, 0.1f, 1) : Vec4(0.62f, 0.16f, 0.78f, 1));
         core.emissive = 0.8f;
         s.boxes.push_back(core);
         BoxDraw shell;
         shell.world = Mat4::translation(n.core) * Mat4::rotationY(-time_ * 0.5f) * Mat4::rotationZ(0.7f) * Mat4::scale({0.7f, 0.7f, 0.7f});
-        shell.color = {0.35f, 0.95f, 0.35f, 1};
+        shell.color = unstable ? Vec4(1.0f, 0.82f, 0.2f, 1) : Vec4(0.35f, 0.95f, 0.35f, 1);
         shell.emissive = 0.9f;
         s.boxes.push_back(shell);
-        s.particles.push_back({n.core, {0.75f, 0.3f, 1.0f, 0.55f}, 3.2f * pulse, true});
+        s.particles.push_back({n.core, unstable ? Vec4(1.0f, 0.5f, 0.1f, 0.55f) : Vec4(0.75f, 0.3f, 1.0f, 0.55f), 3.2f * pulse, true});
+    }
+
+    // Balizas didáticas: feixes verticais para achar o que importa de longe (independem do HUD).
+    if (mode_ == Mode::Mission && !survival()) {
+        auto ring = [&](const Vec3& at, float radius, const Vec4& color) {
+            const int gx = static_cast<int>(std::floor(at.x)), gz = static_cast<int>(std::floor(at.z));
+            const float gy = world_.columnReady(gx, gz) ? static_cast<float>(world_.standHeight(gx, gz)) : at.y;
+            s.decals.push_back({{at.x, gy, at.z}, radius, color, 1});
+        };
+        for (const Nest& n : nests_) {          // núcleo vivo a < 60 m
+            if (n.destroyed || distXZ(n.core, player_.position) > 60.0f) continue;
+            s.beams.push_back({n.core + Vec3(0, 0.9f, 0), n.core + Vec3(0, 9.0f, 0), config_.nestBomb > 0.0f ? Vec4(1.0f, 0.55f, 0.15f, 0.4f) : Vec4(0.85f, 0.4f, 1.0f, 0.35f), 0.18f});
+        }
+        for (const Pickup& p : pickups_) {      // cristal caído: sempre visível
+            if (p.type != 0 || p.taken) continue;
+            s.beams.push_back({p.position, p.position + Vec3(0, 9.0f, 0), {0.3f, 1.0f, 0.95f, 0.55f}, 0.22f});
+            ring(p.position, 1.8f, {0.3f, 1.0f, 0.95f, 0.7f});
+        }
+        if (cargo_.placed && cargo_.revealed && !cargo_.collected) {  // carga revelada (4D): sempre visível
+            s.beams.push_back({cargo_.pos, cargo_.pos + Vec3(0, 22.0f, 0), {1.0f, 0.62f, 0.12f, 0.6f}, 0.3f});
+            ring(cargo_.pos, 2.0f, {1.0f, 0.7f, 0.2f, 0.7f});
+        }
+        if (portalOpen_) {                      // portal aberto: sempre visível
+            s.beams.push_back({layout_.portalBase + Vec3(0, 4.0f, 0), layout_.portalBase + Vec3(0, 18.0f, 0), {0.75f, 0.45f, 1.0f, 0.5f}, 0.5f});
+            ring(layout_.portalBase, 3.2f, {0.75f, 0.45f, 1.0f, 0.7f});
+        }
+    }
+
+    // Carga do contrato Caixa perdida: caixa laranja sem colisão (o jogador a atravessa e coleta por proximidade).
+    if (cargo_.placed && !cargo_.collected && length(cargo_.pos - camPos_) < 110.0f) {
+        const Vec3 at = cargo_.pos + Vec3(0, 0.35f + std::sin(time_ * 2.0f) * 0.05f, 0);
+        BoxDraw crate;
+        crate.world = Mat4::translation(at) * Mat4::rotationY(0.4f) * Mat4::scale({0.9f, 0.7f, 0.9f});
+        crate.color = {1.0f, 0.5f, 0.12f, 1};
+        crate.emissive = 0.45f;
+        s.boxes.push_back(crate);
+        BoxDraw strap;
+        strap.world = Mat4::translation(at + Vec3(0, 0.02f, 0)) * Mat4::rotationY(0.4f) * Mat4::scale({0.94f, 0.2f, 0.94f});
+        strap.color = {0.18f, 0.12f, 0.08f, 1};
+        s.boxes.push_back(strap);
+        s.particles.push_back({at + Vec3(0, 0.9f, 0), {1.0f, 0.65f, 0.2f, 0.5f}, 1.0f, true});
+        s.shadows.push_back({cargo_.pos, 0.7f, 0.3f});
     }
 
     // Baús escondidos nos pontos de interesse.
@@ -2117,11 +2220,18 @@ void Game::stopPvp() {
 }
 
 void Game::startPvp(const PvpConfig& c) {
+    prof_.skipFrames(3);
+    uploadUnlimitedFrames_ = 3;
+    streamStats_ = StreamStats{};
     stopPvp();
     pvp_ = c;
     mode_ = Mode::Pvp;
     paused_ = false;
     config_ = MissionConfig{};
+    reservePct_ = -1;  // PvP não herda reserva de munição nem alertas da missão anterior
+    alerts_ = 0;
+    bombs_ = 0;        // nem Inchados de ninho nem carga: contratos não existem no PvP
+    cargo_ = Cargo{};
     config_.stage = 0;
     config_.skin = c.looks[c.localId];
     config_.playerHealth = 100;
@@ -2178,8 +2288,10 @@ void Game::startPvp(const PvpConfig& c) {
     nc.hostIp = c.hostIp;
     nc.killLimit = c.killLimit;
     nc.timeLimit = c.timeLimit;
-    for (int i = 0; i < kMaxNetPlayers; ++i) nc.skins[i] = c.skins[i];
+    for (int i = 0; i < kMaxNetPlayers; ++i) { nc.skins[i] = c.skins[i]; nc.ips[i] = c.ips[i]; }
     bool ok = net_.start(nc, layout_.spawnPoints);
+    // Anfitrião: tiros remotos que atravessam blocos sólidos do mundo da arena são rejeitados (ver pvp_rules.h).
+    net_.setLineOfSight([this](const Vec3& a, const Vec3& b) { return world_.lineOfSight(a, b); });
     pvpSpawnSeq_ = 0;
     pvpHealthSeen_ = 100;
     pvpEnded_ = false;
@@ -2436,8 +2548,23 @@ void Game::publishHud() {
     h[H_STATE] = dead_ ? 1.0f : (victory_ ? 2.0f : 0.0f);
     h[H_IN_WATER] = player_.inWater ? 1.0f : 0.0f;
     h[H_FOV] = fov_;
-    h[H_FPS] = fps_;
-    h[H_CRYSTAL_TOTAL] = static_cast<float>(nests_.empty() ? config_.crystalTotal : static_cast<int>(nests_.size()));
+    {
+        // O texto "NN FPS" do HUD reflete a janela real (~5 s); antes de ter amostras usa a média exponencial.
+        const perf::Snapshot& ps = prof_.snapshot();
+        h[H_FPS] = ps.frames >= 30 ? ps.fps : fps_;
+        h[H_PERF_FPS] = ps.fps;
+        h[H_PERF_AVG_MS] = ps.intAvg;
+        h[H_PERF_P95_MS] = ps.intP95;
+        h[H_PERF_MAX_MS] = ps.intMax;
+        h[H_PERF_WORK_MS] = ps.workAvg;
+        h[H_PERF_STREAM_MS] = ps.sec[static_cast<int>(perf::Sec::Stream)];
+        h[H_PERF_PENDING] = static_cast<float>(streamStats_.pending);
+        h[H_PERF_GEN_PS] = prof_.genPerSecond();
+        h[H_PERF_UP_PS] = prof_.uploadsPerSecond();
+        h[H_PERF_FLAGS] = static_cast<float>(perfFlags());
+    }
+    // Sobrevivência não tem ninhos nem cristais: o HUD não deve mostrar "0/3".
+    h[H_CRYSTAL_TOTAL] = survival() ? 0.0f : static_cast<float>(nests_.empty() ? config_.crystalTotal : static_cast<int>(nests_.size()));
     h[H_COMBO] = static_cast<float>(combo_);
     h[H_CROUCH] = crouching_ ? 1.0f : 0.0f;
     h[H_SHOULDER] = shoulder_;
@@ -2588,6 +2715,21 @@ void Game::publishHud() {
         h[H_CHESTS] = static_cast<float>(chestsOpened_);
         h[H_CHEST_DIAMONDS] = static_cast<float>(chestDiamonds_);
         h[H_SHAKE] = shake_;
+        // Cristais caídos ainda não recolhidos: posição e projeção (HUD, minimapa, mapa e tutorial).
+        int cn = 0;
+        for (const Pickup& p : pickups_) {
+            if (p.type != 0 || p.taken || cn >= kMaxHudCrystals) continue;
+            const int o = H_CRYSTAL_ITEMS + cn * kHudCrystalStride;
+            float cx = 0, cy = 0;
+            const bool on = project(p.position + Vec3(0, 0.6f, 0), cx, cy);
+            h[o] = p.position.x;
+            h[o + 1] = p.position.z;
+            h[o + 2] = cx;
+            h[o + 3] = cy;
+            h[o + 4] = on ? 1.0f : 0.0f;
+            ++cn;
+        }
+        h[H_CRYSTAL_COUNT] = static_cast<float>(cn);
         h[H_SUPPLY_X] = -1.0f;
         h[H_SUPPLY_Z] = -1.0f;
         for (const Pickup& p : pickups_) {
@@ -2596,6 +2738,8 @@ void Game::publishHud() {
             h[H_SUPPLY_Z] = p.position.z;
         }
     }
+
+    if (mode_ == Mode::Mission) publishContractHud(h);
 
     if (mode_ == Mode::Pvp) {
         const NetPlayer& me = net_.player(pvp_.localId);

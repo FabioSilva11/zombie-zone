@@ -167,8 +167,10 @@ Zombie Game::makeZombie(ZombieKind kind, uint8_t mutations, const Vec3& pos) {
     return z;
 }
 
-void Game::spawnZombie(const Vec3& pos, bool alerted, int nest, bool forceElite) {
-    ZombieKind kind = rollKind();
+void Game::spawnZombie(const Vec3& pos, bool alerted, int nest, bool forceElite, int forceKind) {
+    if (noEnemies_) return;  // autopiloto de desempenho sem inimigos
+    // forceKind >= 0 ignora a tabela de sorteio (e o `minStage` dela): usado pelo ninho instável.
+    ZombieKind kind = forceKind >= 0 ? static_cast<ZombieKind>(forceKind) : rollKind();
     uint8_t mut = rollMutations();
     if (forceElite && !mut) mut = static_cast<uint8_t>(1 << rng_.rangeInt(0, 5));
     Zombie z = makeZombie(kind, mut, pos);
@@ -232,10 +234,7 @@ void Game::separateBodies() {
 void Game::alertNear(const Vec3& at, float radius) {
     for (auto& z : zombies_) {
         if (z.state == ZState::Dead || z.alerted) continue;
-        if (distXZ(z.body.position, at) < radius) {
-            z.alerted = true;
-            z.lostSight = 0;
-        }
+        if (distXZ(z.body.position, at) < radius) alertZombie(z);
     }
 }
 
@@ -290,13 +289,15 @@ void Game::updateZombie(Zombie& z, size_t index, float dt) {
     z.perceptionTimer -= dt;
     if (z.perceptionTimer <= 0) {
         z.perceptionTimer = 0.25f + static_cast<float>(index % 5) * 0.02f;
-        float sight = theme_.sky.night > 0.5f ? 14.0f : 21.0f;
+        // Noite vermelha: o escuro só atrapalha o jogador (os zumbis enxergam como de dia) e a atenção cresce com `aggression`.
+        float sight = (theme_.sky.night > 0.5f && !config_.redSky) ? 14.0f : 21.0f;
         if (isRanged(z.kind)) sight += 6.0f;
         if (crouching_) sight *= 0.6f;  // agachado: furtivo
+        sight *= config_.aggression;
+        const float notice = (crouching_ ? 3.5f : 6.5f) * config_.aggression;
         z.canSee = dist < sight + 10.0f && clearLineOfSight(pos + Vec3(0, 1.5f * z.scale, 0), player_.position + Vec3(0, 1.5f, 0));
-        if (!z.alerted && !dead_ && ((z.canSee && dist < sight) || dist < (crouching_ ? 3.5f : 6.5f))) {
-            z.alerted = true;
-            z.lostSight = 0;
+        if (!z.alerted && !dead_ && ((z.canSee && dist < sight) || dist < notice)) {
+            alertZombie(z);
             emitSound(SND_GROAN, pos, 0.8f);
             z.groanTimer = rng_.range(4.0f, 8.0f);
             if (z.kind == ZombieKind::Screamer) z.abilityTimer = 0;
@@ -304,7 +305,7 @@ void Game::updateZombie(Zombie& z, size_t index, float dt) {
         if (z.alerted) {
             if (z.canSee || dist < 12.0f) z.lostSight = 0;
             else z.lostSight += 0.25f;
-            if (z.lostSight > 10.0f && dist > 40.0f && z.nest < 0) z.alerted = false;
+            if (z.lostSight > 10.0f * config_.aggression && dist > 40.0f && z.nest < 0) z.alerted = false;
         }
     }
 
@@ -555,7 +556,7 @@ void Game::zombieAbility(Zombie& z, float dist, float dt) {
                 shake_ = std::max(shake_, 0.3f);
                 for (Zombie& o : zombies_) {
                     if (o.state == ZState::Dead || distXZ(o.body.position, pos) > 38.0f) continue;
-                    o.alerted = true;
+                    alertZombie(o);
                     o.lostSight = 0;
                     o.frenzy = 8.0f;
                 }
@@ -730,7 +731,7 @@ void Game::impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer)
                     if (z.state == ZState::Dead || distXZ(z.body.position, ground) > h.radius) continue;
                     z.burn = std::max(z.burn, 3.0f);
                     z.burnDps = std::max(z.burnDps, h.zombieDps);
-                    z.alerted = true;
+                    alertZombie(z);
                 }
             }
             spawnBurst(at, {1.0f, 0.55f, 0.15f, 1.0f}, 30, 6.0f, 0.3f, true, -1.0f);
@@ -877,7 +878,7 @@ void Game::damageZombie(Zombie& z, float amount, bool headshot, const Vec3& dir,
     if (z.kind == ZombieKind::Brute && !headshot) amount *= 0.85f;
     z.health -= amount;
     z.hitFlash = 0.12f;
-    z.alerted = true;
+    alertZombie(z);
     z.lostSight = 0;
     z.barTimer = 2.5f;
     z.regenDelay = 3.0f;

@@ -30,7 +30,20 @@ object Cfg {
     const val HEADSHOT = 25
     const val LUCK = 26
     const val EXPLOSIVES = 27
-    const val COUNT = 28
+    const val PERF = 28          // diagnóstico: 0 desligado, 1 autopiloto sem inimigos, 2 com inimigos
+    const val PERF_FRAMES = 29   // duração do autopiloto em quadros (0 = 7200)
+
+    // Contrato de expedição (etapa 4): bloco reservado 40..55. 0 = neutro/ilimitado.
+    const val CONTRACT_ID = 40    // ContractId.code
+    const val AMMO_CLIPS = 41     // reserva de munição em pentes (0 = ilimitada)
+    const val CHEST_AMMO = 42     // reserva por baú, em centésimos de pente
+    const val VISION_MUL = 43     // x alcance da névoa (0 = 1)
+    const val AGGRESSION = 44     // x percepção e persistência dos zumbis (0 = 1)
+    const val RED_SKY = 45        // 1 = céu da noite vermelha
+    const val GUARD_MUL = 46      // x guardas dos pontos de interesse (0 = 1)
+    const val NEST_BOMB = 47      // (4C) chance de o ninho gerar Inchado
+    const val CARGO = 48          // (4D) 1 = existe carga opcional
+    const val COUNT = 56
 
     const val MODE_CAMPAIGN = 0
     const val MODE_SURVIVAL = 1
@@ -147,7 +160,38 @@ object Hud {
     const val SCORE = 638
     const val FRONT_COUNT = 639
     const val FRONTS = 640
-    const val SIZE = 660
+
+    // Desempenho (somente leitura; o HUD pode exibir se quiser).
+    const val PERF_FPS = 650        // quadros/s na janela deslizante (~5 s)
+    const val PERF_AVG_MS = 651     // intervalo médio entre quadros
+    const val PERF_P95_MS = 652     // p95 do intervalo
+    const val PERF_MAX_MS = 653     // pior intervalo da janela
+    const val PERF_WORK_MS = 654    // CPU média dentro do quadro nativo
+    const val PERF_STREAM_MS = 655  // média do streaming de mundo por quadro
+    const val PERF_PENDING = 656    // chunks pendentes de geração/malha
+    const val PERF_GEN_PS = 657     // chunks gerados por segundo
+    const val PERF_UP_PS = 658      // uploads de malha por segundo
+    const val PERF_FLAGS = 659      // bit0 streaming, bit1 orçamento esgotado, bit2 degradação sustentada, bit3 autopiloto
+
+    // Cristais caídos e ainda não recolhidos (objetivo/tutorial): contagem + (x, z, sx, sy, naTela) x 3.
+    const val CRYSTAL_COUNT = 660
+    const val CRYSTAL_ITEMS = 661
+    const val CRYSTAL_STRIDE = 5
+    const val MAX_CRYSTALS = 3
+
+    // Contrato de expedição (etapa 4): bloco reservado 700..719. Só vale quando CT_ID != 0.
+    const val CT_ID = 700
+    const val CT_RESERVE_ROUNDS = 701   // balas de reserva para a arma em mãos (-1 = ilimitada)
+    const val CT_RESERVE_CLIPS = 702    // pentes de reserva (-1 = ilimitada)
+    const val CT_ALERTS = 703           // zumbis alertados até agora
+    const val CT_CARGO_STATE = 704      // (4D) 0 sem carga, 1 oculta, 2 revelada, 3 coletada
+    const val CT_CARGO_X = 705
+    const val CT_CARGO_Z = 706
+    const val CT_CARGO_SX = 707
+    const val CT_CARGO_SY = 708
+    const val CT_CARGO_ON = 709
+    const val CT_BOMBS = 710            // (4C) Inchados gerados por ninhos
+    const val SIZE = 720
 }
 
 /** Configuração da partida PvP (espelha PvpConfigIndex em protocol.h). */
@@ -189,6 +233,7 @@ object Ev {
     const val ITEM_USED = 23   // a = item, b = 1 usado / 0 recusado
     const val WEAPON = 24      // a = arma equipada
     const val WAVE = 25        // a = onda, b = grande horda, c = 0 preparando / 1 começou / 2 vencida
+    const val CONTRACT = 40    // a = 1 sem munição e sem reserva, 2 reserva no fim, 3/4 carga (4D), 5 Inchado de ninho (4C)
 }
 
 object Snd {
@@ -244,7 +289,12 @@ object Res {
     const val NESTS = 12
     const val WAVE = 13
     const val SCORE = 14
-    const val SIZE = 15
+    // Contrato de expedição (etapa 4): bloco reservado 24..31.
+    const val ALERTS = 24       // zumbis alertados pelo jogador
+    const val CARGO = 25        // (4D) 1 = carga coletada
+    const val RESERVE_PCT = 26  // reserva restante em centésimos de pente (-1 = ilimitada)
+    const val BOMBS = 27        // (4C) Inchados gerados por ninhos
+    const val SIZE = 32
 }
 
 /** Tipos de ponto de interesse (CampKind em structures.h). */

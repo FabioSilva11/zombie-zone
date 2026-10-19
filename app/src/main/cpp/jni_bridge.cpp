@@ -8,6 +8,9 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
+#include "game/perf_bench.h"
+#include "game/contract_rules.h"
+#include "game/pvp_rules.h"
 #include "game/protocol.h"
 
 using zz::Game;
@@ -78,6 +81,18 @@ JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray val
     cfg.headshotMul = c[C_HEADSHOT] > 0 ? c[C_HEADSHOT] : 1.0f;
     cfg.luck = c[C_LUCK] > 0 ? c[C_LUCK] : 1.0f;
     cfg.explosives = static_cast<int>(c[C_EXPLOSIVES]);
+    // Contrato de expedição: "0 = neutro" protege chamadas antigas e arrays zerados.
+    cfg.contractId = static_cast<int>(c[C_CONTRACT_ID]);
+    cfg.ammoClips = c[C_AMMO_CLIPS] > 0 ? c[C_AMMO_CLIPS] : -1.0f;
+    cfg.chestAmmoPct = static_cast<int>(c[C_CHEST_AMMO]);
+    cfg.visionMul = c[C_VISION_MUL] > 0 ? c[C_VISION_MUL] : 1.0f;
+    cfg.aggression = c[C_AGGRESSION] > 0 ? c[C_AGGRESSION] : 1.0f;
+    cfg.redSky = c[C_RED_SKY] > 0.5f;
+    cfg.guardMul = c[C_GUARD_MUL] > 0 ? c[C_GUARD_MUL] : 1.0f;
+    cfg.nestBomb = c[C_NEST_BOMB];
+    cfg.cargo = c[C_CARGO] > 0.5f;
+    cfg.perfMode = static_cast<int>(c[C_PERF]);
+    cfg.perfFrames = static_cast<int>(c[C_PERF_FRAMES]);
     game().setGraphics(static_cast<int>(c[C_QUALITY]), c[C_CINEMATIC] > 0.5f);
     game().startMission(cfg);
 }
@@ -98,9 +113,14 @@ JNIEXPORT void JNICALL ZZ_FN(startPvp)(JNIEnv* env, jobject, jfloatArray values,
     for (int i = 0; i < zz::kMaxNetPlayers; ++i) cfg.skins[i] = static_cast<uint8_t>(c[P_SKINS + i]);
     if (looks) {
         jint l[zz::kMaxNetPlayers] = {0};
-        jsize ln = std::min<jsize>(env->GetArrayLength(looks), zz::kMaxNetPlayers);
-        env->GetIntArrayRegion(looks, 0, ln, l);
-        for (int i = 0; i < ln; ++i) cfg.looks[i] = static_cast<uint32_t>(l[i]);
+        jint buf[2 * zz::kMaxNetPlayers] = {0};
+        jsize ln = std::min<jsize>(env->GetArrayLength(looks), 2 * zz::kMaxNetPlayers);
+        env->GetIntArrayRegion(looks, 0, ln, buf);
+        for (int i = 0; i < zz::kMaxNetPlayers; ++i) {
+            l[i] = buf[i];
+            cfg.looks[i] = static_cast<uint32_t>(buf[i]);
+            cfg.ips[i] = static_cast<uint32_t>(buf[zz::kMaxNetPlayers + i]);
+        }
     }
     if (hostIp) {
         const char* ip = env->GetStringUTFChars(hostIp, nullptr);
@@ -196,6 +216,34 @@ JNIEXPORT void JNICALL ZZ_FN(copyBigMap)(JNIEnv* env, jobject, jintArray out) {
     std::vector<uint32_t> buffer(static_cast<size_t>(n));
     game().copyBigMap(buffer.data(), n);
     env->SetIntArrayRegion(out, 0, n, reinterpret_cast<const jint*>(buffer.data()));
+}
+
+// Autoteste das regras de validação do PvP (diagnóstico; só o Kotlin de depuração chama).
+// Retorna 0 se tudo passou; senão (linha da primeira falha em pvp_rules.h) * 1000 + número de falhas.
+JNIEXPORT jint JNICALL ZZ_FN(pvpSelfTest)(JNIEnv*, jobject) {
+    int line = 0;
+    int failed = zz::pvp::selfTest(&line);
+    return failed == 0 ? 0 : line * 1000 + std::min(failed, 999);
+}
+
+// Autoteste das regras de reserva de munição dos contratos (diagnóstico; só o Kotlin de depuração chama).
+// Retorna 0 se tudo passou; senão (linha da primeira falha em contract_rules.h) * 1000 + número de falhas.
+JNIEXPORT jint JNICALL ZZ_FN(contractSelfTest)(JNIEnv*, jobject) {
+    int line = 0;
+    int failed = zz::contractrules::selfTest(&line);
+    return failed == 0 ? 0 : line * 1000 + std::min(failed, 999);
+}
+
+// Bancada headless de streaming (diagnóstico; só o Kotlin de depuração chama). Roda na thread GL, sem renderizar.
+JNIEXPORT jint JNICALL ZZ_FN(perfBench)(JNIEnv*, jobject, jint seed, jint stage, jint radius, jint meters, jint policy, jint flags) {
+    zz::perf::BenchConfig c;
+    c.seed = static_cast<uint32_t>(seed);
+    c.stage = stage;
+    c.radius = std::max(3, std::min(12, static_cast<int>(radius)));
+    c.meters = std::max(50, static_cast<int>(meters));
+    c.policy = std::max(0, std::min(2, static_cast<int>(policy)));
+    c.selfTest = (flags & 1) != 0;
+    return zz::perf::runBench(c);
 }
 
 }  // extern "C"

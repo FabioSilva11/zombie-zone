@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "../core/math.h"
+#include "../core/perf.h"
 #include "../core/platform.h"
 #include "../world/theme.h"
 #include "../world/world.h"
@@ -84,6 +85,25 @@ struct PointLight {
     Vec3 color{1.0f, 0.72f, 0.42f};
 };
 
+// Orçamento de upload de malhas para a GPU por quadro (o mais próximo sempre sobe: piso de 1).
+struct UploadBudget {
+    int maxChunks = 4;
+    size_t maxBytes = 384 * 1024;
+    bool unlimited = false;
+};
+
+// Contadores do último quadro desenhado (diagnóstico).
+struct RenderStats {
+    int uploads = 0, uploadsPending = 0, gpuDeletes = 0;
+    size_t uploadBytes = 0, gpuBytes = 0;      // gpuBytes: VBOs de chunk residentes
+    float uploadMs = 0;
+    int chunkDraws[3] = {0, 0, 0};             // opaco, recorte, água (passe principal)
+    int shadowChunkDraws = 0;                  // mapa de sombras (cinematic)
+    int characterDraws = 0, partDraws = 0;     // personagens e partes (1 draw por parte)
+    int boxDraws = 0, billboardFlushes = 0;
+    int culledCharacters = 0, culledBoxes = 0;
+};
+
 struct FrameScene {
     World* world = nullptr;
     Mat4 view, proj;
@@ -106,6 +126,7 @@ struct FrameScene {
     float portalOpen = 0;
     float drawDistance = 140;
     Vec3 focus;  // centro da área de sombras (o jogador)
+    UploadBudget upload;
 };
 
 class Renderer {
@@ -123,6 +144,8 @@ public:
     void ensureCharacter(CharacterAsset& asset);
     // Libera a GPU de um personagem que saiu do cache.
     void releaseCharacter(CharacterAsset& asset);
+    const RenderStats& stats() const { return stats_; }
+    int pendingUploads() const { return stats_.uploadsPending; }
 
 private:
     struct Target {
@@ -133,12 +156,13 @@ private:
     void createPrograms();
     void createStaticBuffers();
     void uploadBlockTextures();
-    void syncChunks(World& world);
+    void syncChunks(World& world, const FrameScene& scene);
+    void uploadChunk(Chunk& chunk, size_t bytes);
     void ensureQuadIndices(size_t quads);
     bool ensurePostTargets();
     void drawSky(const FrameScene& scene, const Mat4& viewProj);
     void drawClouds(const FrameScene& scene, const Mat4& viewProj);
-    void drawChunks(const FrameScene& scene, int pass, const Vec4* planes, float maxDist, const Vec3& center);
+    void drawChunks(const FrameScene& scene, int pass, const Vec4* planes, float maxDist, const Vec3& center, int* drawCounter);
     void drawCharacters(const FrameScene& scene, const ShaderProgram& program, bool depthOnly);
     void drawBoxes(const FrameScene& scene, const ShaderProgram& program);
     void drawBillboards(const FrameScene& scene, const Mat4& viewProj);
@@ -172,6 +196,9 @@ private:
     size_t billboardCapacity_ = 0;
     std::vector<float> billboardData_;
     std::vector<ChunkGpu> garbage_;
+    std::vector<Chunk*> uploadQueue_;  // reuso entre quadros
+    size_t gpuBytes_ = 0;
+    RenderStats stats_;
     Theme theme_ = themeForStage(1);
     bool themeDirty_ = true;
     Vec4 frustum_[6];

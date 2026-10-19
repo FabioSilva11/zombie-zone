@@ -4,6 +4,7 @@ import com.fabiosilva.ecosdeeldra.data.Campaign
 import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
+import com.fabiosilva.ecosdeeldra.data.Settings
 import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -141,7 +142,7 @@ class RulesTest {
     @Test
     fun stagesAreInfiniteAndKeepUnlocking() {
         val p = Progress()
-        for (n in 1..25) Rules.applyResult(p, Campaign.stage(n), win(n))
+        for (d in 1..25) Rules.applyResult(p, Campaign.stage(1 shl (d - 1)), win(d))
         assertEquals(26, p.highestUnlockedStage())
         val far = Campaign.stage(137)
         assertEquals(137, far.number)
@@ -189,20 +190,48 @@ class RulesTest {
     }
 
     @Test
-    fun adRevenueDifficultyIsOptInAndBounded() {
-        val baseline = Campaign.difficulty(5, 0, 0, 0)
-        val disabledDespiteRevenue = Campaign.difficulty(5, 0, 0, 0, estimatedAdRevenueMicros = 9_000_000L, adRevenueDifficultyEnabled = false)
-        assertEquals(baseline.zombieCount, disabledDespiteRevenue.zombieCount)
-        assertEquals(baseline.zombieHealth, disabledDespiteRevenue.zombieHealth, 0.001f)
-        assertEquals(baseline.zombieDamage, disabledDespiteRevenue.zombieDamage, 0.001f)
-        assertEquals(baseline.zombieSpeed, disabledDespiteRevenue.zombieSpeed, 0.001f)
+    fun difficultyIgnoresAnyAdState() {
+        val clean = Progress()
+        val noisy = Progress().apply {
+            stats.adsWatched = 5_000; adsDay = "2026-10-18"; adsToday = 5; supplyAdsToday = 6
+            lastAdAt = 123L; playTapsSinceAd = 4; missionsSinceInterstitial = 9
+        }
+        for (stage in listOf(1, 5, 20, 137)) {
+            assertEquals(Campaign.difficulty(stage, clean), Campaign.difficulty(stage, noisy))
+        }
+        assertEquals(Campaign.survivalDifficulty(clean), Campaign.survivalDifficulty(noisy))
+    }
 
-        val enabled = Campaign.difficulty(5, 0, 0, 0, estimatedAdRevenueMicros = 500_000L, adRevenueDifficultyEnabled = true)
-        assertTrue(enabled.zombieCount > baseline.zombieCount)
-        assertTrue(enabled.zombieHealth > baseline.zombieHealth)
-        assertTrue(enabled.zombieDamage > baseline.zombieDamage)
-        assertTrue(enabled.zombieSpeed > baseline.zombieSpeed)
-        assertEquals(Campaign.MAX_AD_REVENUE_DIFFICULTY_LEVEL, Campaign.adRevenueDifficultyTier(Long.MAX_VALUE))
+    @Test
+    fun difficultyBaselineIsPinned() {
+        val d = Campaign.difficulty(5, 0, 0, 0)
+        assertEquals(10, d.zombieCount)
+        assertEquals(108f, d.zombieHealth, 0.001f)
+        assertEquals(10.4f, d.zombieDamage, 0.001f)
+        assertEquals(1.088f, d.zombieSpeed, 0.001f)
+    }
+
+    @Test
+    fun progressCampaignAndSettingsCarryNoAdRevenueState() {
+        val names = (Progress::class.java.declaredFields + Settings::class.java.declaredFields).map { it.name.lowercase() } +
+            Campaign::class.java.declaredMethods.map { it.name.lowercase() } + Campaign::class.java.declaredFields.map { it.name.lowercase() }
+        assertTrue(names.none { "revenue" in it || "ilrd" in it })
+    }
+
+    @Test
+    fun magazineUpgradeReachesTheCampaignDifficulty() {
+        val p = Progress().also { it.upgrades["magazine"] = 5 }
+        assertTrue(Campaign.difficulty(3, p).magazine > Campaign.difficulty(3, Progress()).magazine)
+    }
+
+    @Test
+    fun campaignPlayAdIsRequestedEveryFifthTap() {
+        val progress = Progress()
+
+        repeat(4) { assertFalse(Rules.registerCampaignPlayTap(progress)) }
+        assertTrue(Rules.registerCampaignPlayTap(progress))
+        assertEquals(0, progress.playTapsSinceAd)
+        assertFalse(Rules.registerCampaignPlayTap(progress))
     }
 
     @Test

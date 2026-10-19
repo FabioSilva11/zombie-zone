@@ -8,9 +8,12 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <chrono>
+#include <cstdio>
 #include <cstring>
 
 #include "../core/log.h"
+#include "items.h"
 
 namespace zz {
 
@@ -44,6 +47,7 @@ struct Reader {
     const uint8_t* p;
     size_t n, i = 0;
     bool fail = false;
+    bool bad = false;  // algum float não era finito (NaN/inf)
     Reader(const uint8_t* data, size_t len) : p(data), n(len) {}
     void raw(void* out, size_t s) {
         if (i + s > n) { fail = true; std::memset(out, 0, s); return; }
@@ -53,7 +57,7 @@ struct Reader {
     uint8_t u8() { uint8_t v; raw(&v, 1); return v; }
     uint16_t u16() { uint16_t v; raw(&v, 2); return v; }
     uint32_t u32() { uint32_t v; raw(&v, 4); return v; }
-    float f32() { float v; raw(&v, 4); return std::isfinite(v) ? v : 0.0f; }
+    float f32() { float v; raw(&v, 4); if (!std::isfinite(v)) { bad = true; return 0.0f; } return v; }
     Vec3 vec() { float x = f32(), y = f32(), z = f32(); return {x, y, z}; }
 };
 
@@ -64,7 +68,55 @@ void header(Writer& w, uint8_t type) {
     w.u8(type);
 }
 
+double nowSeconds() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+bool sameEndpoint(const sockaddr_in& a, const sockaddr_in& b) {
+    return a.sin_addr.s_addr == b.sin_addr.s_addr && a.sin_port == b.sin_port;
+}
+
 }  // namespace
+
+// Limites do fuzil (a única arma do PvP) vindos da definição real da arma.
+pvp::Limits NetSession::limits() const {
+    const WeaponDef& w = weaponDef(IT_RIFLE);
+    pvp::Limits l;
+    l.interval = w.interval;
+    l.magazine = w.magazine;
+    l.reload = w.reload;
+    l.range = w.range;
+    return l;
+}
+
+void NetSession::reject(pvp::Reject why) {
+    if (why > pvp::OK && why < pvp::kRejectCount) ++guard_.rejected[why];
+}
+
+// Uma linha de resumo no máximo a cada 5 s, e só quando houve rejeições novas (sem spam).
+void NetSession::logGuard(bool force) {
+    if (!config_.host) return;
+    if (!force && clock_ < nextGuardLog_) return;
+    nextGuardLog_ = clock_ + 5.0;
+    uint32_t fresh = guard_.total() - guardLogged_.total();
+    if (fresh == 0) return;
+    char line[320];
+    line[0] = 0;
+    size_t n = 0;
+    for (int i = 1; i < pvp::kRejectCount && n < sizeof(line) - 32; ++i) {
+        if (guard_.rejected[i] == 0) continue;
+        n += static_cast<size_t>(std::snprintf(line + n, sizeof(line) - n, " %s=%u", pvp::rejectName(i), guard_.rejected[i]));
+    }
+    LOGW("[PVP_GUARD] +%u rejeitados (total %u):%s | aceitos: tiros=%u acertos=%u cabeca_rebaixada=%u", fresh, guard_.total(), line,
+         guard_.firesAccepted, guard_.hitsAccepted, guard_.headDowngraded);
+    guardLogged_ = guard_;
+}
+
+bool NetSession::endpointBoundElsewhere(int id, const sockaddr_in& from) const {
+    for (int i = 0; i < kMaxNetPlayers; ++i)
+        if (i != id && players_[i].hasAddr && sameEndpoint(players_[i].addr, from)) return true;
+    return false;
+}
 
 bool NetSession::start(const NetConfig& config, const std::vector<Vec3>& spawnPoints) {
     stop();
@@ -84,6 +136,10 @@ bool NetSession::start(const NetConfig& config, const std::vector<Vec3>& spawnPo
     }
     recent_.clear();
     localQueue_.clear();
+    guard_ = pvp::Counters{};
+    guardLogged_ = pvp::Counters{};
+    clock_ = nowSeconds();
+    nextGuardLog_ = clock_ + 5.0;
     timeLeft_ = config.timeLimit;
     ended_ = false;
     winner_ = -1;
@@ -124,6 +180,7 @@ bool NetSession::start(const NetConfig& config, const std::vector<Vec3>& spawnPo
 }
 
 void NetSession::stop() {
+    if (socket_ >= 0) logGuard(true);
     if (socket_ >= 0) ::close(socket_);
     socket_ = -1;
 }
@@ -221,6 +278,7 @@ int NetSession::chooseSpawn(int id) const {
 }
 
 void NetSession::hostTick(float dt, std::vector<NetEvent>& out) {
+    clock_ = nowSeconds();
     receive(out);
     NetPlayer& me = players_[config_.localId];
     me.active = true;
@@ -254,9 +312,11 @@ void NetSession::hostTick(float dt, std::vector<NetEvent>& out) {
                 p.spawnIndex = static_cast<uint8_t>(chooseSpawn(i));
                 if (!spawns_.empty()) p.pos = spawns_[p.spawnIndex];
                 p.invulnerable = 2.0f;
+                p.shooter = pvp::ShooterState{};  // renasce com o pente cheio
             }
         }
     }
+    logGuard(false);
     if (!ended_) {
         timeLeft_ -= dt;
         int activeCount = 0;
@@ -285,23 +345,67 @@ void NetSession::hostTick(float dt, std::vector<NetEvent>& out) {
     }
 }
 
+// Pacote de estado de um cliente. Só o anfitrião chama. Ordem: remetente -> formato -> taxa -> sequência -> eventos.
 void NetSession::handleState(const uint8_t* data, size_t len, const sockaddr_in& from, std::vector<NetEvent>& out) {
+    if (!pvp::statePacketSizeOk(len)) {
+        reject(pvp::FORMAT);
+        return;
+    }
     Reader r(data, len);
     int id = r.u8();
-    r.u16();  // seq
+    uint16_t seq = r.u16();
     Vec3 pos = r.vec();
     float yaw = r.f32(), pitch = r.f32();
     uint8_t flags = r.u8();
     float speed = r.f32();
     int count = r.u8();
-    if (r.fail || id <= 0 || id >= kMaxNetPlayers || id == config_.localId || !players_[id].present) return;
+
+    // Remetente: o id precisa existir na partida e o pacote vir do endpoint (IP:porta) já associado a ele.
+    if (r.fail || id <= 0 || id >= kMaxNetPlayers || id == config_.localId || !players_[id].present) {
+        reject(pvp::SENDER);
+        return;
+    }
     NetPlayer& p = players_[id];
+    // O anfitrião sabe o IP de cada jogador da sala: quem fala por este id precisa vir desse IP, mesmo no
+    // primeiro pacote e depois de um silêncio (impede que outro aparelho da rede tome o id).
+    if (config_.host && config_.ips[id] != 0 && ntohl(from.sin_addr.s_addr) != config_.ips[id]) {
+        reject(pvp::SENDER);
+        return;
+    }
+    const bool known = p.hasAddr && sameEndpoint(p.addr, from);
+    if (p.hasAddr && !known && p.active) {
+        reject(pvp::SENDER);  // id trocado/forjado enquanto o dono verdadeiro ainda está ativo
+        return;
+    }
+    if (!known && endpointBoundElsewhere(id, from)) {
+        reject(pvp::SENDER);  // o mesmo endpoint não pode falar por dois ids
+        return;
+    }
+    // Formato.
+    if (r.bad || r.fail || count > pvp::kMaxEventsPerPacket || !pvp::validStateFields(pos, yaw, pitch, speed, flags)) {
+        reject(pvp::FORMAT);
+        return;
+    }
+    if (!pvp::packetAllowed(p.packets, clock_)) {
+        reject(pvp::PACKET_RATE);
+        return;
+    }
+    if (!known) {
+        // Primeiro pacote ou reconexão (o dono anterior sumiu): associa o endpoint e recomeça a sequência.
+        p.addr = from;
+        p.hasAddr = true;
+        p.hasSeq = false;
+    }
+    if (p.hasSeq && !pvp::seqIsNewer(p.lastSeq, seq)) {
+        reject(pvp::STALE);
+        return;
+    }
+    p.lastSeq = seq;
+    p.hasSeq = true;
     if (!p.active) {
         p.active = true;
         LOGI("Jogador %d reconectado", id);
     }
-    p.addr = from;
-    p.hasAddr = true;
     p.lastHeard = 0;
     if (p.alive) p.pos = pos;
     p.yaw = yaw;
@@ -309,6 +413,7 @@ void NetSession::handleState(const uint8_t* data, size_t len, const sockaddr_in&
     p.flags = flags;
     p.speed = speed;
     ++p.version;
+    const pvp::Limits lim = limits();
     for (int i = 0; i < count && !r.fail; ++i) {
         NetEvent e;
         e.kind = r.u8();
@@ -321,20 +426,83 @@ void NetSession::handleState(const uint8_t* data, size_t len, const sockaddr_in&
             e.b = r.u8();
             e.c = r.u8();
         } else {
+            reject(pvp::FORMAT);
             return;
         }
-        if (r.fail) return;
+        if (r.fail || r.bad) {
+            reject(pvp::FORMAT);
+            return;
+        }
         bool dup = false;
         for (int k = 0; k < std::min(p.seenCount, 32); ++k)
             if (p.seen[k] == e.id) { dup = true; break; }
         if (dup) continue;
         p.seen[p.seenCount % 32] = e.id;
         ++p.seenCount;
+        pvp::Reject why = pvp::OK;
         if (e.kind == NE_FIRE) {
             e.a = static_cast<uint8_t>(id);
+            if (!p.alive || ended_) why = pvp::DEAD;
+            else why = pvp::validateFire(e.from, e.to, p.pos, lim);
+            if (why == pvp::OK) {
+                pvp::shooterAdvance(p.shooter, lim, clock_);
+                why = pvp::shooterTryFire(p.shooter, lim, clock_);  // cadência, pente e recarga
+            }
+            if (why == pvp::OK && los_) {
+                Vec3 a, b;
+                pvp::losSegment(e.from, e.to, a, b);
+                if (!los_(a, b)) why = pvp::LINE_OF_SIGHT;
+            }
+            if (why != pvp::OK) {
+                reject(why);
+                continue;
+            }
+            pvp::creditAdd(p.shooter, e.from, e.to, clock_);
+            ++guard_.firesAccepted;
             pushHostEvent(e, out);
         } else {
-            applyHit(id, e.a, e.b, e.c != 0, out);
+            const int target = e.a;
+            if (!p.alive || ended_) {
+                why = pvp::DEAD;
+            } else if (target < 0 || target >= kMaxNetPlayers || target == id) {
+                why = pvp::TARGET;
+            } else {
+                const NetPlayer& t = players_[target];
+                if (!t.present || !t.active || !t.alive || t.invulnerable > 0) {
+                    why = pvp::TARGET;
+                } else {
+                    int ci = pvp::creditFind(p.shooter, t.pos, clock_);
+                    if (ci == -1) {
+                        why = pvp::NO_SHOT;
+                    } else if (ci < 0) {
+                        why = pvp::AIM;
+                    } else {
+                        pvp::ShotCredit& c = p.shooter.credits[ci];
+                        why = pvp::validateHitRange(c, t.pos, lim);
+                        if (why == pvp::OK && los_) {
+                            // Linha de tiro até o ALVO (peito), não só até o impacto declarado pelo cliente.
+                            Vec3 a, b;
+                            pvp::losSegment(c.from, t.pos + Vec3(0, 1.0f, 0), a, b);
+                            if (!los_(a, b)) {
+                                c.open = false;
+                                why = pvp::LINE_OF_SIGHT;
+                            }
+                        }
+                        if (why == pvp::OK) {
+                            c.open = false;  // um tiro vale um acerto
+                            bool head = e.c != 0;
+                            if (head && !pvp::headPlausible(c.to, t.pos)) {
+                                head = false;
+                                ++guard_.headDowngraded;
+                            }
+                            ++guard_.hitsAccepted;
+                            // O dano é decidido aqui: o valor enviado pelo cliente (e.b) é ignorado.
+                            applyHit(id, target, pvp::hitDamage(head, lim), head, out);
+                        }
+                    }
+                }
+            }
+            if (why != pvp::OK) reject(why);
         }
     }
 }
@@ -525,6 +693,11 @@ void NetSession::receive(std::vector<NetEvent>& out) {
         ssize_t n = recvfrom(socket_, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (n <= 0) break;
         if (n < 4 || buf[0] != 'Z' || buf[1] != 'Z' || buf[2] != kVersion) continue;
+        // Cliente: só vale o que vem do IP do anfitrião (snapshots de terceiros são descartados).
+        if (!config_.host && from.sin_addr.s_addr != hostAddr_.sin_addr.s_addr) {
+            reject(pvp::SENDER);
+            continue;
+        }
         if (config_.host && buf[3] == kTypeState) handleState(buf + 4, static_cast<size_t>(n - 4), from, out);
         else if (!config_.host && buf[3] == kTypeSnapshot) handleSnapshot(buf + 4, static_cast<size_t>(n - 4), out);
     }

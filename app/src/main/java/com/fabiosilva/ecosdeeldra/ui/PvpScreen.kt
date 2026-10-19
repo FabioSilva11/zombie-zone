@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.text.InputFilter
 import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -12,9 +13,11 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import com.fabiosilva.ecosdeeldra.BuildConfig
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Look
 import com.fabiosilva.ecosdeeldra.data.LookPainter
+import com.fabiosilva.ecosdeeldra.engine.NativeBridge
 import com.fabiosilva.ecosdeeldra.net.LanLobby
 
 /** PvP em Wi-Fi local: procurar/criar sala, sala de espera e regras da partida. */
@@ -29,10 +32,24 @@ class PvpScreen(private val app: MainActivity, private val lobby: LanLobby) : Fr
         Ui.blockTouches(this)
         val column = Ui.column(app)
         column.addView(Header.build(app, "PvP LOCAL", "MESMO WI-FI • 2 A 8 JOGADORES • SEM MIRA ASSISTIDA") { onBack() })
-        column.addView(body, Ui.lp(Ui.MATCH, 0, 1f).apply { setMargins(app.dpi(20), app.dpi(10), app.dpi(20), app.dpi(14)) })
+        column.addView(body, Ui.lp(Ui.MATCH, 0, 1f).apply { setMargins(app.dpi(20), app.dpi(10), app.dpi(20), app.dpi(4)) })
+        // Aviso discreto: o PvP é diversão entre amigos, sem ranking nem pretensão competitiva.
+        column.addView(Ui.text(app, "PvP casual entre amigos no mesmo Wi-Fi — não é competitivo e não vale ranking.", 10f, Palette.muted).apply {
+            gravity = Gravity.CENTER
+            setPadding(app.dpi(20), 0, app.dpi(20), app.dpi(8))
+        }, Ui.lp(Ui.MATCH, Ui.WRAP))
+        if (BuildConfig.DEBUG) runPvpSelfTest()
         addView(column, Ui.frame(Ui.MATCH, Ui.MATCH))
         val last = app.lastLobbyState
         if (last != null) showRoom(last.players, last.rules, last.localId, last.isHost) else showBrowse()
+    }
+
+    /** Só em builds de depuração: roda o autoteste das regras de validação do anfitrião (resultado no logcat, tag PvpSelfTest). */
+    private fun runPvpSelfTest() {
+        runCatching {
+            val r = NativeBridge.pvpSelfTest()
+            if (r == 0) Log.i("PvpSelfTest", "regras do anfitrião: OK") else Log.e("PvpSelfTest", "FALHOU: código $r (linha*1000+falhas em pvp_rules.h)")
+        }.onFailure { Log.w("PvpSelfTest", "indisponível: ${it.message}") }
     }
 
     private fun onBack() {

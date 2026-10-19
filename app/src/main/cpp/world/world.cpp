@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace zz {
 
@@ -28,6 +29,16 @@ constexpr int kPad = kChunkSize + 2;
 
 bool isLeaf(uint8_t b) { return isLeafBlock(b); }
 
+// FNV-1a de 64 bits sobre os blocos do chunk, semeado com a posição. A soma entre chunks é independente da ordem.
+uint64_t hashChunk(const Chunk& c) {
+    uint64_t h = 1469598103934665603ull ^ (static_cast<uint64_t>(static_cast<uint32_t>(c.cx)) << 32) ^ static_cast<uint32_t>(c.cz);
+    for (uint8_t b : c.blocks) {
+        h ^= b;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
 }  // namespace
 
 void World::clear() {
@@ -36,6 +47,9 @@ void World::clear() {
     list_.clear();
     grid_.clear();
     unloadCursor_ = 0;
+    genEmaMs_ = 2.0f;
+    meshEmaMs_ = 1.2f;
+    contentHash_ = 0;
 }
 
 void World::reset(int width, int height, int depth) {
@@ -185,8 +199,11 @@ int World::rebuildDirty(int maxChunks) {
     return rebuilt;
 }
 
-int World::stream(float fx, float fz, int radius, int maxGenerate, int maxMesh) {
-    if (!source_) return 0;
+StreamStats World::stream(float fx, float fz, int radius, const StreamBudget& b) {
+    StreamStats st;
+    if (!source_) return st;
+    ZZ_TRACE_SCOPE("ZZ stream");
+    const double t0 = perf::nowMs();
     const int genRadius = radius + 1;
     if (spiralRadius_ != genRadius) {
         spiral_.clear();
@@ -201,37 +218,77 @@ int World::stream(float fx, float fz, int radius, int maxGenerate, int maxMesh) 
     }
     const int pcx = static_cast<int>(std::floor(fx)) >> 4, pcz = static_cast<int>(std::floor(fz)) >> 4;
     const float meshLim = (radius + 0.5f) * (radius + 0.5f);
-    int generated = 0, meshed = 0, pending = 0;
+    // Faixa urgente em distância de Chebyshev: geração até urgentRadius+1 (5x5), malha até urgentRadius (3x3).
+    // -1 desliga (nenhum 'cheb' >= 0 é <= -1), que é o caso do modo legado/bulk.
+    const int urgentMeshCheb = b.urgentRadius >= 0 ? b.urgentRadius : -1;
+    const int urgentGenCheb = b.urgentRadius >= 0 ? b.urgentRadius + 1 : -1;
+
+    // Pode executar mais uma unidade? 'done' = unidades já feitas nesta chamada deste tipo.
+    auto allowed = [&](bool urgent, int done, int floorUnits, int capUnits, float predictedMs) {
+        if (!b.timed) return done < capUnits;                        // modo legado: só contagem
+        const float spent = static_cast<float>(perf::nowMs() - t0);
+        if (urgent) return spent < b.urgentMaxMs;                    // urgente: ignora contagem e maxMs
+        if (done >= capUnits) return false;
+        if (done < floorUnits) return true;                          // piso: sempre progride
+        return spent + predictedMs <= b.maxMs;                       // cabe no orçamento?
+    };
+
     for (const auto& off : spiral_) {
-        int cx = pcx + off.first, cz = pcz + off.second;
+        const int cx = pcx + off.first, cz = pcz + off.second;
         if (cx < 0 || cz < 0 || cx >= chunksX_ || cz >= chunksZ_) continue;
-        bool inMesh = static_cast<float>(off.first * off.first + off.second * off.second) <= meshLim;
+        const float d2 = static_cast<float>(off.first * off.first + off.second * off.second);
+        const int cheb = std::max(std::abs(off.first), std::abs(off.second));
+        const bool inMesh = d2 <= meshLim;
         Chunk* c = chunkAt(cx, cz);
         if (!c) c = createChunk(cx, cz);
         if (!c->generated) {
-            if (generated >= maxGenerate) {
-                if (inMesh) ++pending;
+            if (!allowed(cheb <= urgentGenCheb, st.generated, b.minGenerate, b.maxGenerate, genEmaMs_)) {
+                st.timeCapped = true;
+                if (inMesh) {
+                    ++st.pending;
+                    if (cheb <= urgentMeshCheb) ++st.pendingUrgent;
+                }
                 continue;
             }
+            const double g0 = perf::nowMs();
             c->blocks.assign(static_cast<size_t>(kChunkSize) * kChunkSize * height_, B_AIR);
             std::fill(std::begin(c->ground), std::end(c->ground), static_cast<int16_t>(0));
             c->lights.clear();
             c->campfires.clear();
-            source_->generate(*c, height_);
+            {
+                ZZ_TRACE_SCOPE("ZZ genChunk");
+                source_->generate(*c, height_);
+            }
             updateMaxY(*c);
             c->generated = true;
             c->dirty = true;
-            ++generated;
+            const float ms = static_cast<float>(perf::nowMs() - g0);
+            genEmaMs_ += (ms - genEmaMs_) * 0.2f;
+            st.genMs += ms;
+            ++st.generated;
+            if (trace_) trace_->genMs.push_back(ms);
+            if (hashContent_) contentHash_ += hashChunk(*c);
         }
         if (inMesh && c->dirty) {
-            if (meshed < maxMesh && neighborsReady(cx, cz)) {
-                buildChunk(*c);
+            const bool ready = neighborsReady(cx, cz);
+            if (ready && allowed(cheb <= urgentMeshCheb, st.meshed, b.minMesh, b.maxMesh, meshEmaMs_)) {
+                const double m0 = perf::nowMs();
+                {
+                    ZZ_TRACE_SCOPE("ZZ meshChunk");
+                    buildChunk(*c);
+                }
                 c->dirty = false;
                 c->meshed = true;
                 ++c->version;
-                ++meshed;
+                const float ms = static_cast<float>(perf::nowMs() - m0);
+                meshEmaMs_ += (ms - meshEmaMs_) * 0.2f;
+                st.meshMs += ms;
+                ++st.meshed;
+                if (trace_) trace_->meshMs.push_back(ms);
             } else {
-                ++pending;
+                ++st.pending;
+                if (cheb <= urgentMeshCheb) ++st.pendingUrgent;
+                if (ready) st.timeCapped = true;  // adiado pelo orçamento, não por vizinho faltando
             }
         }
     }
@@ -242,14 +299,31 @@ int World::stream(float fx, float fz, int radius, int maxGenerate, int maxMesh) 
         if (unloadCursor_ >= list_.size()) unloadCursor_ = 0;
         Chunk* c = list_[unloadCursor_];
         int dx = c->cx - pcx, dz = c->cz - pcz;
-        if (dx * dx + dz * dz > unloadDist * unloadDist) destroyChunk(c);
-        else ++unloadCursor_;
+        if (dx * dx + dz * dz > unloadDist * unloadDist) {
+            destroyChunk(c);
+            ++st.unloaded;
+        } else {
+            ++unloadCursor_;
+        }
     }
-    return pending;
+    st.totalMs = static_cast<float>(perf::nowMs() - t0);
+    return st;
+}
+
+uint64_t World::residentHash(float fx, float fz, int radius) const {
+    const int pcx = static_cast<int>(std::floor(fx)) >> 4, pcz = static_cast<int>(std::floor(fz)) >> 4;
+    uint64_t sum = 0;
+    for (const Chunk* c : list_) {
+        if (!c->generated) continue;
+        const int dx = c->cx - pcx, dz = c->cz - pcz;
+        if (dx * dx + dz * dz > radius * radius) continue;
+        sum += hashChunk(*c);
+    }
+    return sum;
 }
 
 void World::buildChunk(Chunk& chunk) {
-    ChunkMesh& mesh = chunk.mesh;
+    ChunkMesh& mesh = scratch_;  // capacidade reaproveitada; ao final copia com tamanho exato para o chunk
     mesh.opaque.clear();
     mesh.cutout.clear();
     mesh.water.clear();
@@ -374,6 +448,9 @@ void World::buildChunk(Chunk& chunk) {
             }
         }
     }
+    chunk.mesh.opaque.assign(mesh.opaque.begin(), mesh.opaque.end());
+    chunk.mesh.cutout.assign(mesh.cutout.begin(), mesh.cutout.end());
+    chunk.mesh.water.assign(mesh.water.begin(), mesh.water.end());
 }
 
 bool World::raycast(const Vec3& origin, const Vec3& direction, float maxDistance, RayHit& hit) const {

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "../core/math.h"
+#include "../core/perf.h"
 #include "blocks.h"
 
 namespace zz {
@@ -45,6 +46,7 @@ struct ChunkGpu {
     int quads[3] = {0, 0, 0};
     uint32_t version = 0;
     int contextId = -1;
+    uint32_t bytes = 0;  // tamanho dos VBOs enviados (diagnóstico)
 };
 
 struct Chunk {
@@ -71,6 +73,43 @@ class ChunkSource {
 public:
     virtual ~ChunkSource() = default;
     virtual void generate(Chunk& chunk, int height) = 0;
+};
+
+// Contadores do último World::stream (diagnóstico e entrada do orçamento adaptativo).
+struct StreamStats {
+    int pending = 0;          // chunks do raio de malha ainda sem geração/malha
+    int pendingUrgent = 0;    // idem, dentro da faixa urgente (deve ser 0 em regime)
+    int generated = 0, meshed = 0, unloaded = 0;
+    float genMs = 0, meshMs = 0, totalMs = 0;
+    bool timeCapped = false;  // o orçamento de tempo adiou trabalho nesta chamada
+};
+
+// Orçamento de uma chamada a World::stream.
+struct StreamBudget {
+    float maxMs = 3.0f;          // tempo (geração + malha) permitido por chamada, fora urgente/piso
+    int minGenerate = 1;         // piso por chamada, se houver pendência
+    int minMesh = 1;
+    int maxGenerate = 4;         // teto absoluto por chamada
+    int maxMesh = 6;
+    int urgentRadius = 1;        // chunks; < 0 desliga a faixa urgente
+    float urgentMaxMs = 12.0f;   // teto de segurança do trabalho urgente numa chamada
+    bool timed = true;           // false = só contagem (comportamento antigo)
+
+    static StreamBudget legacy(int gen, int mesh) {
+        StreamBudget b;
+        b.timed = false;
+        b.minGenerate = b.minMesh = 0;
+        b.maxGenerate = gen;
+        b.maxMesh = mesh;
+        b.urgentRadius = -1;
+        return b;
+    }
+    static StreamBudget bulk() { return legacy(48, 48); }  // carga inicial
+};
+
+// Registro opcional de amostras por chunk (diagnóstico).
+struct StreamTrace {
+    std::vector<float> genMs, meshMs;
 };
 
 struct RayHit {
@@ -146,8 +185,20 @@ public:
     // Remalha até maxChunks chunks sujos (com vizinhos prontos); retorna quantos foram reconstruídos.
     int rebuildDirty(int maxChunks);
     // Streaming: gera/malha os chunks mais próximos de (x,z) e descarta os distantes.
-    // Retorna quantos chunks dentro do raio ainda faltam ficar prontos.
-    int stream(float x, float z, int radius, int maxGenerate, int maxMesh);
+    // Retorna estatísticas da chamada (inclusive quantos chunks dentro do raio ainda faltam ficar prontos).
+    StreamStats stream(float x, float z, int radius, const StreamBudget& budget);
+    // Compatibilidade: delega para o modo legado (só contagem) e devolve apenas 'pending'.
+    int stream(float x, float z, int radius, int maxGenerate, int maxMesh) {
+        return stream(x, z, radius, StreamBudget::legacy(maxGenerate, maxMesh)).pending;
+    }
+    // Diagnóstico
+    void setTrace(StreamTrace* t) { trace_ = t; }
+    void enableContentHash(bool on) {
+        hashContent_ = on;
+        contentHash_ = 0;
+    }
+    // Soma ordem-independente do hash do conteúdo dos chunks gerados dentro do raio (em chunks) de (x,z).
+    uint64_t residentHash(float x, float z, int radius) const;
     // Recursos de GPU de chunks descartados (o renderer apaga).
     void drainGpuGarbage(std::vector<ChunkGpu>& out) {
         out.insert(out.end(), gpuGarbage_.begin(), gpuGarbage_.end());
@@ -177,6 +228,11 @@ private:
     int spiralRadius_ = -1;
     size_t unloadCursor_ = 0;
     std::vector<uint8_t> pad_;  // cópia 18x18xH do chunk + vizinhos para a malha
+    ChunkMesh scratch_;         // malha em construção (capacidade reaproveitada entre chunks)
+    float genEmaMs_ = 2.0f, meshEmaMs_ = 1.2f;  // previsão de custo por unidade (orçamento de tempo)
+    StreamTrace* trace_ = nullptr;
+    bool hashContent_ = false;
+    uint64_t contentHash_ = 0;
 };
 
 // Movimento de uma caixa (pés no centro da base) contra blocos sólidos, com subida automática de degrau.

@@ -65,6 +65,15 @@ object NativeBridge {
     external fun bigMapSize(): Int
     external fun copyBigMap(out: IntArray)
 
+    /** Diagnóstico (builds debug): bancada headless de streaming, loga na tag ZZPerf. Rode em engine { }. */
+    external fun perfBench(seed: Int, stage: Int, radius: Int, meters: Int, policy: Int, flags: Int): Int
+
+    /** Diagnóstico (builds debug): autoteste das regras de validação do PvP no anfitrião. 0 = ok; senão linha*1000+falhas. */
+    external fun pvpSelfTest(): Int
+
+    /** Diagnóstico (builds debug): autoteste da reserva de munição dos contratos. 0 = ok; senão linha*1000+falhas. */
+    external fun contractSelfTest(): Int
+
     /**
      * Chamado pelo C++ para decodificar PNGs dos assets com BitmapFactory.
      * Retorna [largura, altura, pixels ARGB...].

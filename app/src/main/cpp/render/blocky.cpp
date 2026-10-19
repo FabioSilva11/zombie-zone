@@ -2,12 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <functional>
 #include <vector>
 
 #include "../core/math.h"
-#include "../core/platform.h"
 #include "../core/random.h"
 #include "renderer.h"
 
@@ -751,76 +749,6 @@ std::vector<AnimClip> buildClips() {
     return clips;
 }
 
-void appendRetargetedClips(std::vector<AnimClip>& clips) {
-    static bool loaded = false;
-    static std::vector<AnimClip> imported;
-    if (!loaded) {
-        loaded = true;
-        std::vector<uint8_t> bytes;
-        if (!platform::readAsset("animations/tactical-retarget.zzan", bytes) || bytes.size() < 8 ||
-            std::memcmp(bytes.data(), "ZZAN", 4) != 0) return;
-        size_t offset = 4;
-        auto readU8 = [&](uint8_t& value) {
-            if (offset >= bytes.size()) return false;
-            value = bytes[offset++];
-            return true;
-        };
-        auto readU16 = [&](uint16_t& value) {
-            if (offset + 2 > bytes.size()) return false;
-            value = static_cast<uint16_t>(bytes[offset]) | (static_cast<uint16_t>(bytes[offset + 1]) << 8);
-            offset += 2;
-            return true;
-        };
-        auto readFloat = [&](float& value) {
-            if (offset + sizeof(float) > bytes.size()) return false;
-            std::memcpy(&value, bytes.data() + offset, sizeof(float));
-            offset += sizeof(float);
-            return std::isfinite(value);
-        };
-        uint16_t version = 0, clipCount = 0;
-        if (!readU16(version) || version != 1 || !readU16(clipCount) || clipCount > 64) return;
-        std::vector<AnimClip> parsed;
-        parsed.reserve(clipCount);
-        for (uint16_t ci = 0; ci < clipCount; ++ci) {
-            uint8_t nameLength = 0, channelCount = 0;
-            if (!readU8(nameLength) || nameLength == 0 || offset + nameLength > bytes.size()) return;
-            AnimClip clip;
-            clip.name.assign(reinterpret_cast<const char*>(bytes.data() + offset), nameLength);
-            offset += nameLength;
-            if (!readFloat(clip.duration) || clip.duration <= 0 || !readU8(channelCount) || channelCount == 0) return;
-            for (uint8_t channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
-                uint8_t node = 0, path = 0;
-                uint16_t keyCount = 0;
-                if (!readU8(node) || node >= N_COUNT || !readU8(path) || path != 1 ||
-                    !readU16(keyCount) || keyCount < 2 || keyCount > 4096) return;
-                AnimChannel channel;
-                channel.node = node;
-                channel.path = path;
-                channel.times.reserve(keyCount);
-                channel.values.reserve(static_cast<size_t>(keyCount) * 4);
-                float previous = -1.0f;
-                for (uint16_t key = 0; key < keyCount; ++key) {
-                    float time = 0, x = 0, y = 0, z = 0, w = 1;
-                    if (!readFloat(time) || !readFloat(x) || !readFloat(y) || !readFloat(z) || !readFloat(w) ||
-                        time < previous || time < 0 || time > clip.duration + 0.001f) return;
-                    previous = time;
-                    channel.times.push_back(time);
-                    channel.values.insert(channel.values.end(), {x, y, z, w});
-                }
-                clip.channels.push_back(std::move(channel));
-            }
-            parsed.push_back(std::move(clip));
-        }
-        if (offset != bytes.size()) return;
-        imported = std::move(parsed);
-    }
-    for (const AnimClip& source : imported) {
-        auto existing = std::find_if(clips.begin(), clips.end(), [&](const AnimClip& clip) { return clip.name == source.name; });
-        if (existing != clips.end()) *existing = source;
-        else clips.push_back(source);
-    }
-}
-
 }  // namespace
 
 Look Look::decode(uint32_t c) {
@@ -941,9 +869,7 @@ void buildBlockyCharacter(uint32_t code, CharacterAsset& out) {
         n.mesh = addMesh(hatMesh);
         nodes.push_back(n);
     }
-    std::vector<AnimClip> clips = buildClips();
-    if (!l.zombie) appendRetargetedClips(clips);
-    out.model.build(std::move(nodes), std::move(meshes), std::move(clips), 32.0f * px);
+    out.model.build(std::move(nodes), std::move(meshes), buildClips(), 32.0f * px);
     out.pixelArt = true;
 }
 

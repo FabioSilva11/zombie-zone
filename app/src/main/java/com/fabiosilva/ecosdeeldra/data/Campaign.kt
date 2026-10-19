@@ -16,6 +16,9 @@ data class Stage(
     val targetSeconds: Int,
     val firstClearDiamonds: Int,
 ) {
+    /** Nível de dificuldade do nó (1 = raiz). [number] é o id do nó na árvore. */
+    val depth: Int get() = StageTree.depth(number)
+
     /** Cristais = ninhos de infecção a destruir na ilha. */
     val crystalTotal: Int get() = 3
     val islandKm: String get() = "5,1 km"
@@ -89,16 +92,19 @@ object Campaign {
         "Explore: cada ruína e cada depósito pode guardar diamantes.",
     )
 
+    /** Zona de um nó da árvore: as zonas são de 5 níveis de profundidade. */
     fun zone(stageNumber: Int): Zone {
-        val index = (stageNumber.coerceAtLeast(1) - 1) / STAGES_PER_ZONE
+        val index = (StageTree.depth(stageNumber) - 1) / STAGES_PER_ZONE
         val biome = index % 4
         val cycle = index / 4
         return Zone(index, biomeNames[biome] + romans[min(cycle, romans.size - 1)], biomeColors[biome], biome)
     }
 
+    /** Fase de um nó da árvore. Título, história e dificuldade dependem da profundidade, não do id. */
     fun stage(number: Int): Stage {
-        val n = number.coerceAtLeast(1)
-        val zone = zone(n)
+        val id = number.coerceAtLeast(1)
+        val n = StageTree.depth(id)
+        val zone = zone(id)
         val title = if (n <= firstTitles.size) firstTitles[n - 1] else {
             val h = (n * 2654435761L).toInt() ushr 1
             "${places[zone.biome][h % places[zone.biome].size]} ${complements[(h / 7) % complements.size]}"
@@ -110,7 +116,7 @@ object Campaign {
             if (fresh.isNotEmpty()) add("Novo inimigo: ${fresh.joinToString { it.name }} — ${fresh.first().ability}")
         }
         return Stage(
-            number = n,
+            number = id,
             title = title,
             zone = zone,
             speaker = if (n % 2 == 1) "Nyra" else "Kael",
@@ -120,44 +126,22 @@ object Campaign {
         )
     }
 
-    fun stage(number: Int): Stage = stages[(number - 1).coerceIn(0, stages.size - 1)]
-
-    /**
-     * Receita por impressão (ILRD) é uma estimativa do AdMob, não receita consolidada.
-     * O ajuste é opcional, afeta apenas novas fases e tem limite para não escalar sem fim.
-     */
-    const val AD_REVENUE_MICROS_PER_LEVEL = 100_000L
-    const val MAX_AD_REVENUE_DIFFICULTY_LEVEL = 5
-
-    fun adRevenueDifficultyTier(revenueMicros: Long): Int =
-        (revenueMicros.coerceAtLeast(0L) / AD_REVENUE_MICROS_PER_LEVEL)
-            .coerceAtMost(MAX_AD_REVENUE_DIFFICULTY_LEVEL.toLong())
-            .toInt()
-
     fun difficulty(
         stageNumber: Int,
         vitality: Int,
         power: Int,
         reload: Int,
         magazineLevel: Int = 0,
-        estimatedAdRevenueMicros: Long = 0L,
-        adRevenueDifficultyEnabled: Boolean = false,
     ): Difficulty {
         val step = stageNumber.coerceAtLeast(1) - 1
         val late = (step - 19).coerceAtLeast(0)
         // Cada zona nova deixa a horda um pouco mais resistente e perigosa.
         val zoneMul = 1f + (step / STAGES_PER_ZONE) * 0.04f
-        // Adaptive difficulty baseada em receita de anúncios (opcional)
-        val adTier = if (adRevenueDifficultyEnabled) adRevenueDifficultyTier(estimatedAdRevenueMicros) else 0
-        val healthMultiplier = (1f + adTier * 0.035f)
-        val damageMultiplier = (1f + adTier * 0.025f)
-        val speedMultiplier = (1f + adTier * 0.02f)
-        
         return Difficulty(
-            zombieCount = ((8 + min(step, 30) * 0.6f + late / 10).toInt().coerceAtMost(30) + adTier),
-            zombieHealth = (60f + min(step, 19) * 12f + late * 4f) * zoneMul * healthMultiplier,
-            zombieDamage = ((8f + min(step, 40) * 0.6f + (step - 40).coerceAtLeast(0) * 0.25f) * zoneMul * damageMultiplier).coerceAtMost(60f),
-            zombieSpeed = (1f + min(0.45f, step * 0.022f)) * speedMultiplier,
+            zombieCount = (8 + min(step, 30) * 0.6f + late / 10).toInt().coerceAtMost(30),
+            zombieHealth = (60f + min(step, 19) * 12f + late * 4f) * zoneMul,
+            zombieDamage = ((8f + min(step, 40) * 0.6f + (step - 40).coerceAtLeast(0) * 0.25f) * zoneMul).coerceAtMost(60f),
+            zombieSpeed = 1f + min(0.45f, step * 0.022f),
             // A vida e o pente também evoluem a cada fase; as melhorias somam por cima.
             playerHealth = (100f + min(step, 40) * 12f + min(vitality, 5) * 20f) * (1f + 0.06f * (vitality - 5).coerceAtLeast(0)),
             magazine = ((30 + min(step, 30) * 2) * Upgrades.magazine(magazineLevel)).toInt(),
@@ -167,10 +151,9 @@ object Campaign {
         )
     }
 
+    /** A dificuldade depende só da fase e das melhorias compradas; nunca de anúncios nem de receita. */
     fun difficulty(stageNumber: Int, p: Progress): Difficulty =
-        difficulty(stageNumber, p.vitality, p.power, p.reload, p.upgrade("magazine"), 
-                   estimatedAdRevenueMicros = p.adRevenueMicros,
-                   adRevenueDifficultyEnabled = p.settings.adRevenueDifficulty)
+        difficulty(stageNumber, p.vitality, p.power, p.reload, p.upgrade("magazine"))
 
     /** Sobrevivência: zumbis começam fracos (as ondas os fortalecem); o jogador usa suas melhorias. */
     fun survivalDifficulty(p: Progress): Difficulty {

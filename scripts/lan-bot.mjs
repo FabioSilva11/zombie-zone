@@ -1,6 +1,10 @@
 // Jogador-robô para testar o PvP em Wi-Fi local sem um segundo celular.
-// Uso: node scripts/lan-bot.mjs <ip-do-celular-anfitrião> [nome] [segundos]
+// Uso: node scripts/lan-bot.mjs <ip-do-celular-anfitrião> [nome] [segundos] [abuso]
 // O celular cria a sala; o robô entra, anda em volta do anfitrião e atira nele de vez em quando.
+// Com o 4º argumento "abuso", depois de ~8 s o robô também manda pacotes inválidos de propósito
+// (id forjado, NaN, rajada além da cadência, acerto sem tiro, pacote gigante) para conferir que o anfitrião
+// os rejeita: veja no logcat do anfitrião a linha com a tag [PVP_GUARD] (adb logcat -s ZombieZoneNative).
+// O PvP é casual entre amigos; o anfitrião valida remetente, cadência, munição, alcance e linha de tiro.
 // Implementa o mesmo protocolo de app/src/main/java/.../net/LanLobby.kt (sala) e
 // app/src/main/cpp/game/net.cpp (partida).
 import dgram from 'node:dgram';
@@ -8,6 +12,7 @@ import dgram from 'node:dgram';
 const hostIp = process.argv[2];
 const name = process.argv[3] ?? 'Robo';
 const duration = Number(process.argv[4] ?? 120);
+const abuse = process.argv[5] === 'abuso';
 if (!hostIp) {
   console.log('uso: node scripts/lan-bot.mjs <ip-do-anfitrião> [nome] [segundos]');
   process.exit(1);
@@ -128,6 +133,41 @@ function startGame() {
     queue.push({ kind: 2, id: eventId++, target: 0, damage: 16, head: 0 });
     log('robô atirou no anfitrião (-16)');
   }, 2500);
+
+  // Pacote de estado "cru" para os testes de abuso.
+  function rawState({ id = localId, seqNo = seq++ & 0xffff, p = pos, events = [], pad = 0 } = {}) {
+    const b = Buffer.alloc(64 + events.length * 32 + pad);
+    let o = 0;
+    const w8 = (v) => { b.writeUInt8(v, o); o += 1; };
+    const w16 = (v) => { b.writeUInt16LE(v, o); o += 2; };
+    const wf = (v) => { b.writeFloatLE(v, o); o += 4; };
+    w8(0x5a); w8(0x5a); w8(1); w8(1);
+    w8(id); w16(seqNo);
+    wf(p.x); wf(p.y); wf(p.z); wf(0); wf(0); w8(1); wf(4.5);
+    w8(events.length);
+    for (const e of events) {
+      w8(e.kind); w16(e.id);
+      if (e.kind === 1) { wf(e.from.x); wf(e.from.y); wf(e.from.z); wf(e.to.x); wf(e.to.y); wf(e.to.z); }
+      else { w8(e.target); w8(e.damage); w8(e.head); }
+    }
+    return b.subarray(0, o + pad);
+  }
+  if (abuse) {
+    setTimeout(() => {
+      log('modo abuso: enviando pacotes inválidos (o anfitrião deve rejeitar todos)');
+      const send = (buf) => game.send(buf, GAME_PORT, hostIp);
+      const from = { x: pos.x, y: pos.y + 1.4, z: pos.z };
+      const to = target ? { x: target.x, y: target.y + 1.2, z: target.z } : { x: 64, y: 21, z: 64 };
+      send(rawState({ id: localId === 1 ? 2 : 1 }));                           // id de outro jogador (remetente)
+      send(rawState({ p: { x: NaN, y: 0, z: 0 } }));                           // NaN (formato)
+      send(rawState({ pad: 1300 }));                                            // pacote gigante (formato)
+      send(rawState({ events: [{ kind: 2, id: eventId++, target: 0, damage: 60, head: 1 }] }));  // acerto sem tiro
+      const burst = [];
+      for (let i = 0; i < 20; i++) burst.push({ kind: 1, id: eventId++, from, to });             // rajada (cadência/munição)
+      for (let k = 0; k < burst.length; k += 10) send(rawState({ events: burst.slice(k, k + 10) }));
+      send(rawState({ events: [{ kind: 1, id: eventId++, from: { x: from.x + 90, y: from.y, z: from.z }, to }] })); // origem longe
+    }, 8000);
+  }
 
   setTimeout(() => { log('tempo do teste esgotado'); process.exit(0); }, duration * 1000);
   log(`enviando estados para ${hostIp}:${GAME_PORT}`);

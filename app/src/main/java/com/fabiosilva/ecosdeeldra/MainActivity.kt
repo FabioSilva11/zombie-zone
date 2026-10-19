@@ -19,6 +19,12 @@ import com.fabiosilva.ecosdeeldra.ads.InterstitialAds
 import com.fabiosilva.ecosdeeldra.ads.RewardedAds
 import com.fabiosilva.ecosdeeldra.audio.GameAudio
 import com.fabiosilva.ecosdeeldra.data.Campaign
+import com.fabiosilva.ecosdeeldra.data.ContractId
+import com.fabiosilva.ecosdeeldra.data.ContractRun
+import com.fabiosilva.ecosdeeldra.data.Contracts
+import com.fabiosilva.ecosdeeldra.data.ExpeditionKind
+import com.fabiosilva.ecosdeeldra.data.ExpeditionPlan
+import com.fabiosilva.ecosdeeldra.data.ExpeditionRules
 import com.fabiosilva.ecosdeeldra.data.Inventory
 import com.fabiosilva.ecosdeeldra.data.Items
 import com.fabiosilva.ecosdeeldra.data.MissionResult
@@ -29,17 +35,31 @@ import com.fabiosilva.ecosdeeldra.data.Cosmetic
 import com.fabiosilva.ecosdeeldra.data.SurvivalResult
 import com.fabiosilva.ecosdeeldra.data.Upgrades
 import com.fabiosilva.ecosdeeldra.data.ZombieKinds
+import com.fabiosilva.ecosdeeldra.data.save.LoadResult
+import com.fabiosilva.ecosdeeldra.data.save.RecoveryReport
+import com.fabiosilva.ecosdeeldra.data.save.SaveMessages
+import com.fabiosilva.ecosdeeldra.data.save.SaveNotice
 import com.fabiosilva.ecosdeeldra.engine.Cfg
+import com.fabiosilva.ecosdeeldra.engine.applyContract
 import com.fabiosilva.ecosdeeldra.engine.Ev
 import com.fabiosilva.ecosdeeldra.engine.GameSurfaceView
 import com.fabiosilva.ecosdeeldra.engine.Hud
 import com.fabiosilva.ecosdeeldra.engine.NativeBridge
+import com.fabiosilva.ecosdeeldra.engine.PerfRun
 import com.fabiosilva.ecosdeeldra.engine.PoiKind
 import com.fabiosilva.ecosdeeldra.engine.PvpCfg
 import com.fabiosilva.ecosdeeldra.engine.Res
 import com.fabiosilva.ecosdeeldra.net.LanLobby
 import com.fabiosilva.ecosdeeldra.notify.Reminders
+import com.fabiosilva.ecosdeeldra.tutorial.CoachController
+import com.fabiosilva.ecosdeeldra.tutorial.Lesson
+import com.fabiosilva.ecosdeeldra.tutorial.Objective
+import com.fabiosilva.ecosdeeldra.tutorial.ObjectiveText
+import com.fabiosilva.ecosdeeldra.tutorial.TutorialPolicy
+import com.fabiosilva.ecosdeeldra.ui.CombatFeed
 import com.fabiosilva.ecosdeeldra.ui.DefeatOverlay
+import com.fabiosilva.ecosdeeldra.ui.ExpeditionPrepScreen
+import com.fabiosilva.ecosdeeldra.ui.ExpeditionResultOverlay
 import com.fabiosilva.ecosdeeldra.ui.HomeScreen
 import com.fabiosilva.ecosdeeldra.ui.HudEditorScreen
 import com.fabiosilva.ecosdeeldra.ui.CharacterScreen
@@ -54,21 +74,19 @@ import com.fabiosilva.ecosdeeldra.ui.PvpPauseOverlay
 import com.fabiosilva.ecosdeeldra.ui.PvpResultOverlay
 import com.fabiosilva.ecosdeeldra.ui.PvpScreen
 import com.fabiosilva.ecosdeeldra.ui.Popup
+import com.fabiosilva.ecosdeeldra.ui.RecoveryScreen
 import com.fabiosilva.ecosdeeldra.ui.RewardCongratsOverlay
 import com.fabiosilva.ecosdeeldra.ui.RewardPreviewOverlay
 import com.fabiosilva.ecosdeeldra.ui.SettingsScreen
 import com.fabiosilva.ecosdeeldra.ui.StagesScreen
-import com.fabiosilva.ecosdeeldra.ui.StoryOverlay
 import com.fabiosilva.ecosdeeldra.ui.SurvivalDefeatOverlay
 import com.fabiosilva.ecosdeeldra.ui.SurvivalResultOverlay
 import com.fabiosilva.ecosdeeldra.ui.SurvivalScreen
 import com.fabiosilva.ecosdeeldra.ui.Ui
 import com.fabiosilva.ecosdeeldra.ui.UpgradesScreen
-import com.fabiosilva.ecosdeeldra.ui.VictoryOverlay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.random.Random
 
 class MainActivity : ComponentActivity(), HudView.Listener {
     lateinit var progress: Progress
@@ -78,16 +96,15 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     lateinit var ads: RewardedAds
         private set
     private lateinit var interstitials: InterstitialAds
-    private lateinit var store: SaveStore
+    lateinit var store: SaveStore
+        private set
     private lateinit var surface: GameSurfaceView
     private lateinit var hud: HudView
     private lateinit var uiLayer: FrameLayout
     private lateinit var overlayLayer: FrameLayout
 
-    /** Bônus de combate comprado com anúncio (vale para a próxima fase iniciada). */
-    var boostReady = false
-
     private var inMission = false
+    private var stageLaunchPending = false
     private var missionStage = 1
     private var missionPaused = false
     private var reviveUsed = false
@@ -102,6 +119,17 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     private var worldSize = 0f
     private var survivalMode = false
     private var survivalWave = 0
+
+    /** Expedição escolhida/em curso: tipo, fase, ilha (semente) e contrato. */
+    var plan: ExpeditionPlan = ExpeditionPlan.standard(1)
+        private set
+
+    // Tutorial jogável (fase 1): o controlador vive só enquanto a missão está rodando.
+    private var coach: CoachController? = null
+    /** Em "rever tutorial": lições feitas em memória; nada é gravado no save enquanto não for null. */
+    private var replayMask: Int? = null
+    private var eventNests = 0
+    private var eventCrystals = 0
     private var inventoryOpen = false
 
     // PvP em Wi-Fi local
@@ -146,31 +174,23 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             window.attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         store = SaveStore(this)
-        progress = store.load()
+        store.onSaveFailed = {
+            Popup.show(this, "Não foi possível salvar", "O armazenamento do aparelho parece cheio ou indisponível. Libere espaço para não perder o progresso.", "OK")
+        }
+        val loaded = store.load()
+        // Em recuperação o Progress é provisório: store.recoveryPending bloqueia qualquer gravação até o usuário escolher.
+        progress = when (loaded) {
+            is LoadResult.Loaded -> loaded.progress
+            is LoadResult.Fresh -> Progress()
+            is LoadResult.NeedsRecovery -> Progress()
+        }
         audio = GameAudio(this)
         audio.sfxVolume = progress.settings.sfxVolume
         audio.musicVolume = progress.settings.musicVolume
         Ui.clickSound = { audio.playUi("click", 0.6f) }
         ads = RewardedAds(this)
         ads.onStateChanged = { runOnUiThread { homeScreen?.refresh() } }
-<<<<<<< HEAD
         interstitials = InterstitialAds(this)
-=======
-        ads.onRevenueEstimated = { valueMicros, currencyCode ->
-            runOnUiThread {
-                if (currencyCode.isNotBlank() && valueMicros >= 0L) {
-                    // Nunca somamos moedas diferentes: se a moeda do AdMob mudar, reiniciamos a base local.
-                    if (progress.adRevenueCurrency.isBlank() || progress.adRevenueCurrency == currencyCode) {
-                        progress.adRevenueMicros = (progress.adRevenueMicros + valueMicros).coerceAtLeast(0L)
-                    } else {
-                        progress.adRevenueMicros = valueMicros
-                    }
-                    progress.adRevenueCurrency = currencyCode
-                    store.save(progress)
-                }
-            }
-        }
->>>>>>> main
 
         NativeBridge.init(assets)
         val root = FrameLayout(this).apply { setBackgroundColor(Palette.bg) }
@@ -192,17 +212,69 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             override fun handleOnBackPressed() = onBack()
         })
 
-        val newDay = Rules.onAppOpen(progress, today())
-        Rules.refreshCosmeticUnlocks(progress)
-        store.save(progress)
         AdConsent.gather(this) {
             ads.load()
             interstitials.load()
         }
+        if (loaded is LoadResult.NeedsRecovery) {
+            showRecovery(loaded.report)
+            return
+        }
+        startSession((loaded as? LoadResult.Loaded)?.notices.orEmpty())
+        // Diagnóstico de desempenho: extras de Intent só existem/valem em build de depuração.
+        if (BuildConfig.DEBUG) {
+            perfRun = PerfRun.parse { key, def -> intent.getIntExtra(key, def) }
+            perfRun?.let { run -> surface.postDelayed({ startPerfRun(run) }, 1500) }
+        }
+    }
+
+    private var perfRun: PerfRun? = null
+
+    private fun startPerfRun(run: PerfRun) {
+        if (run.quality >= 0) surface.setQuality(run.quality)  // a escala de resolução vive no Kotlin
+        if (run.mode == PerfRun.MODE_BENCH) {
+            perfRun = null
+            engine { NativeBridge.perfBench(run.seed, run.stage, 8, run.meters, run.policy, run.flags) }
+            return
+        }
+        survivalMode = false
+        missionStage = run.stage
+        plan = ExpeditionPlan.standard(run.stage)
+        launchMission()  // sem startExpedition: ele contaria o toque em JOGAR e poderia exibir o intersticial
+    }
+
+    /** Tudo que o arranque fazia depois de carregar o save; também roda ao sair da tela de recuperação. */
+    private fun startSession(notices: List<SaveNotice>) {
+        val newDay = Rules.onAppOpen(progress, today())
+        Rules.refreshCosmeticUnlocks(progress)
+        store.save(progress)
         showHome()
+        showSaveNotices(notices)
         if (Rules.canClaimCalendar(progress, today())) {
             surface.postDelayed({ showDailyReward() }, if (newDay) 900L else 600L)
         }
+    }
+
+    private fun showRecovery(report: RecoveryReport) {
+        hud.visibility = View.GONE
+        showScreen(RecoveryScreen(this, report))
+    }
+
+    /** Chamado pela RecoveryScreen quando o usuário resolveu (restaurou, tentou de novo com sucesso ou começou novo). */
+    fun onRecoveryResolved(newProgress: Progress, notices: List<SaveNotice> = emptyList()) {
+        progress = newProgress
+        applySettings()      // volume, qualidade e HUD vêm do Progress real; também grava
+        startSession(notices)
+    }
+
+    private fun showSaveNotices(notices: List<SaveNotice>) {
+        val texts = notices.mapNotNull { SaveMessages.describe(it) }
+        fun next(i: Int) {
+            if (i >= texts.size) return
+            val (title, body) = texts[i]
+            Popup.show(this, title, body, "OK") { next(i + 1) }
+        }
+        next(0)
     }
 
     // ------------------------------------------------------------------ ciclo de vida
@@ -215,7 +287,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         audio.resume()
         Reminders.cancel(this)
         // Virou o dia com o app em segundo plano.
-        if (Rules.onAppOpen(progress, today())) {
+        if (!store.recoveryPending && Rules.onAppOpen(progress, today())) {
             store.save(progress)
             homeScreen?.refresh()
         }
@@ -227,8 +299,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         surface.stop()
         surface.onPause()
         audio.pause()
-        store.save(progress)
-        Reminders.schedule(this, progress.chestReadyAt, progress.settings.reminders)
+        store.saveNow(progress)
+        if (!store.recoveryPending) Reminders.schedule(this, progress.chestReadyAt, progress.settings.reminders)
         super.onPause()
     }
 
@@ -260,6 +332,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     private fun onBack() {
         when {
+            store.recoveryPending -> finish()
             loading != null || defeatShown -> Unit
             inventoryOpen && inMission -> (overlayLayer.getChildAt(0) as? InventoryScreen)?.let { closeInventoryInMatch(it, -1) } ?: Unit
             inPvp && !pvpEnded -> if (overlayLayer.childCount > 0) resumePvp() else showPvpPause()
@@ -267,6 +340,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             overlayLayer.childCount > 0 && !inMission -> closeOverlay()
             inMission && !missionEnded -> if (missionPaused) resumeMission() else pauseMission()
             currentScreen is InventoryScreen -> (currentScreen as InventoryScreen).close()
+            currentScreen is ExpeditionPrepScreen -> (currentScreen as ExpeditionPrepScreen).goBack()
             currentScreen !is HomeScreen -> showHome()
             else -> finish()
         }
@@ -376,6 +450,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     // ------------------------------------------------------------------ telas
 
     fun showHome() {
+        replayMask = null
         closeOverlay()
         hud.visibility = View.GONE
         audio.setMusic(GameAudio.Music.MENU)
@@ -385,6 +460,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     }
 
     fun showStages() {
+        replayMask = null
         closeOverlay()
         hud.visibility = View.GONE
         audio.setMusic(GameAudio.Music.MENU)
@@ -405,12 +481,37 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     fun showMissions() = showScreen(MissionsScreen(this))
 
     fun showSurvival() {
+        replayMask = null
         closeOverlay()
         hud.visibility = View.GONE
         audio.setMusic(GameAudio.Music.MENU)
         val look = progress.lookCode
         engine { NativeBridge.enterLobby(look, 0) }
         showScreen(SurvivalScreen(this))
+    }
+
+    /**
+     * JOGAR / SOBREVIVER: abre a preparação (contrato, equipamento e código da ilha). Antes da primeira vitória o jogo
+     * parte direto, sem tela de contratos. [countPlayTap] só vale na campanha (intersticial a cada 5º toque em JOGAR).
+     */
+    fun showExpeditionPrep(
+        kind: ExpeditionKind = ExpeditionKind.CAMPAIGN,
+        stage: Int = progress.frontierStage(),
+        initial: ExpeditionPlan? = null,
+        countPlayTap: Boolean = true,
+        back: () -> Unit = { showHome() },
+    ) {
+        if (kind == ExpeditionKind.CAMPAIGN && initial == null && !Contracts.prepUnlocked(progress)) {
+            startExpedition(ExpeditionPlan.standard(stage), countPlayTap)   // jogador novo: parte direto
+            return
+        }
+        replayMask = null
+        closeOverlay()
+        hud.visibility = View.GONE
+        audio.setMusic(GameAudio.Music.MENU)
+        val look = progress.lookCode
+        engine { NativeBridge.enterLobby(look, 0) }
+        showScreen(ExpeditionPrepScreen(this, kind, stage, initial, countPlayTap, back))
     }
 
     /** Inventário (mochila / arsenal / loja) fora da partida: tela própria com o herói em 3D. */
@@ -432,7 +533,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         if (!canClaim && !force) return
         showOverlay(
             RewardPreviewOverlay(this, canClaim, onClaim = {
-                val day = progress.calendarClaims % 7 + 1
+                val day = progress.calendarClaims + 1
                 val got = Rules.claimCalendar(progress, today())
                 if (got > 0) audio.playUi("reward", 1f)
                 save()
@@ -468,31 +569,51 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     // ------------------------------------------------------------------ missão
 
-    fun startStage(number: Int, skipStory: Boolean = false) {
-        survivalMode = false
-        missionStage = number
-        val stage = Campaign.stage(number)
-        if (skipStory) {
+    /** PARTIR: fixa o plano e lança a missão. [countPlayTap] só vale na campanha (intersticial a cada 5º toque). */
+    fun startExpedition(chosen: ExpeditionPlan, countPlayTap: Boolean = true) {
+        if (stageLaunchPending) return
+        plan = chosen
+        progress.expeditions.remember(chosen)
+        survivalMode = chosen.kind == ExpeditionKind.SURVIVAL
+        survivalWave = 0
+        missionStage = chosen.stage
+        closeOverlay()
+        val showPlayAd = countPlayTap && !survivalMode && Rules.registerCampaignPlayTap(progress)
+        save()
+        val launch = {
+            stageLaunchPending = false
             launchMission()
-        } else {
-            showOverlay(StoryOverlay(this, stage) { closeOverlay(); launchMission() })
+        }
+        if (!showPlayAd || !interstitials.enabled || !interstitials.isReady) {
+            if (showPlayAd) interstitials.load()
+            launch()
+            return
+        }
+        progress.lastAdAt = System.currentTimeMillis()
+        progress.missionsSinceInterstitial = 0
+        save()
+        stageLaunchPending = true
+        audio.pause()
+        interstitials.show {
+            runOnUiThread {
+                audio.resume()
+                enterImmersive()
+                launch()
+            }
         }
     }
 
     private fun launchMission() {
         val stage = Campaign.stage(missionStage)
         val p = progress
-        val diff = if (survivalMode) {
-            Campaign.survivalDifficulty(p)
-        } else {
-            Campaign.difficulty(
-                stage.number, p.vitality, p.power, p.reload,
-                estimatedAdRevenueMicros = p.adRevenueMicros,
-                adRevenueDifficultyEnabled = p.settings.adRevenueDifficulty,
-            )
-        }
+        // Tutorial: só em campanha; veteranos nunca veem. O ajuste de dificuldade vale só nesta corrida.
+        val teachMask: Int? = if (survivalMode) null
+            else (replayMask ?: TutorialPolicy.maskToTeach(p.tutorialVersion, p.tutorialMask, p.completedStages()))?.takeIf { it != Lesson.ALL }
+        val baseDiff = if (survivalMode) Campaign.survivalDifficulty(p) else Campaign.difficulty(stage.depth, p)
+        val rules = Contracts.engineRules(plan.contract, stage.depth)
+        val diff = rules.applyTo(if (teachMask != null) TutorialPolicy.tune(baseDiff) else baseDiff)
         val config = FloatArray(Cfg.COUNT)
-        config[Cfg.STAGE] = stage.number.toFloat()
+        config[Cfg.STAGE] = stage.depth.toFloat()
         config[Cfg.SKIN] = 0f  // a aparência vai à parte (32 bits não cabem num float)
         val look = p.lookCode
         config[Cfg.ZOMBIES] = diff.zombieCount.toFloat()
@@ -503,16 +624,16 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         config[Cfg.MAGAZINE] = diff.magazine.toFloat()
         config[Cfg.POWER] = diff.power
         config[Cfg.CRYSTAL_MASK] = 0f
-        config[Cfg.CRYSTAL_TOTAL] = stage.crystalTotal.toFloat()
+        config[Cfg.CRYSTAL_TOTAL] = if (survivalMode) 0f else stage.crystalTotal.toFloat()
         config[Cfg.SENSITIVITY] = p.settings.sensitivity
         config[Cfg.AIM_ASSIST] = if (p.settings.aimAssist) 1f else 0f
         config[Cfg.AUTO_FIRE] = if (p.settings.autoFire) 1f else 0f
         config[Cfg.INVERT_Y] = if (p.settings.invertY) 1f else 0f
-        // Semente nova a cada partida: a ilha nunca se repete (até 2^24 cabe exato em float).
-        config[Cfg.SEED] = Random.nextInt(1, 16_000_000).toFloat()
+        // A semente vem do plano (sorteada na preparação ou colada de um código); até 2^24 cabe exato em float.
+        config[Cfg.SEED] = plan.seed.toFloat()
         config[Cfg.RELOAD_SPEED] = diff.reloadSpeed
-        config[Cfg.BOOST_HEALTH] = if (boostReady) 1.3f else 1f
-        config[Cfg.BOOST_DAMAGE] = if (boostReady) 1.2f else 1f
+        config[Cfg.BOOST_HEALTH] = 1f
+        config[Cfg.BOOST_DAMAGE] = 1f
         config[Cfg.QUALITY] = p.settings.quality.toFloat()
         config[Cfg.CINEMATIC] = if (p.settings.cinematic) 1f else 0f
         config[Cfg.MODE] = if (survivalMode) Cfg.MODE_SURVIVAL.toFloat() else Cfg.MODE_CAMPAIGN.toFloat()
@@ -522,11 +643,11 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         config[Cfg.HEADSHOT] = Upgrades.headshot(p.upgrade("headshot"))
         config[Cfg.LUCK] = Upgrades.luck(p.upgrade("luck"))
         config[Cfg.EXPLOSIVES] = p.upgrade("explosives").toFloat()
+        config.applyContract(plan, rules)
+        perfRun?.applyTo(config)  // diagnóstico (só debug): semente fixa e autopiloto
+        perfRun = null            // vale só para esta partida
         p.inventory.normalize()
         val inventory = p.inventory.toIntArray()
-        val boosted = boostReady
-        boostReady = false
-
         inMission = true
         missionPaused = false
         missionEnded = false
@@ -534,11 +655,35 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         reviveUsed = false
         bestCombo = 0
         missionKills = 0
+        eventNests = 0
+        eventCrystals = 0
         bigMap = null
+        coach?.stop()
+        coach = teachMask?.let { mask ->
+            CoachController(
+                mask, sink = hud,
+                onMask = { m ->
+                    if (replayMask != null) replayMask = m
+                    else { p.tutorialVersion = TutorialPolicy.VERSION; p.tutorialMask = m; save() }
+                },
+                onFinished = {
+                    if (replayMask == null) {
+                        p.tutorialVersion = TutorialPolicy.VERSION
+                        p.tutorialMask = Lesson.ALL
+                        p.tutorialSeen = true
+                        save()
+                    }
+                },
+                onCelebrate = { audio.playUi("reward", 0.5f); hud.haptic(false) },
+            )
+        }
         uiLayer.removeAllViews()
         currentScreen = null
         homeScreen = null
-        loading = (if (survivalMode) LoadingOverlay(this, "SOBREVIVÊNCIA • ONDAS INFINITAS", "Ilha aleatória", Palette.gold, stage.number) else LoadingOverlay(this, stage)).also { showOverlay(it) }
+        val contractTag = if (plan.contract == ContractId.NONE) "" else " • " + Contracts.get(plan.contract).name.uppercase()
+        loading = (if (survivalMode) LoadingOverlay(this, "SOBREVIVÊNCIA • ONDAS INFINITAS$contractTag", "Ilha aleatória", Palette.gold, stage.number)
+        else LoadingOverlay(this, "ZONA ${stage.zone.index + 1} • ${stage.zone.name.uppercase()}$contractTag", "Fase ${stage.depth} · ${stage.title}", stage.zone.color, if (teachMask != null) 0 else stage.number)
+        ).also { showOverlay(it) }
         hud.reset()
         hud.playerName = p.currentHero.name
         hud.applySettings(p.settings.leftHanded, p.settings.vibration, p.settings.showFps, p.settings.hudLayout, p.settings.hudOpacity)
@@ -550,7 +695,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 NativeBridge.setInventory(inventory)
             }
         }, 120)
-        if (boosted) surface.postDelayed({ if (inMission) hud.message("BÔNUS DE COMBATE ATIVO!", Palette.cyan) }, 2500)
     }
 
     /** Chamado na thread GL com eventos do motor. */
@@ -610,21 +754,26 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         loading = null
         hud.visibility = View.VISIBLE
         when {
-            inPvp -> hud.message("QUE VENÇA O MELHOR!", Palette.lime)
+            inPvp -> hud.message("QUE VENÇA O MELHOR!", Palette.lime, 2)
             survivalMode -> {
-                hud.message("SOBREVIVA ÀS ONDAS!", Palette.gold)
+                hud.message("SOBREVIVA ÀS ONDAS!", Palette.gold, 2)
                 hud.tip("A 1ª onda chega em 25 s • explore, ache uma construção e prepare-se")
             }
             else -> {
-                hud.message("DESTRUA OS 3 NINHOS!", Palette.lime)
-                hud.tip("Siga as setas roxas até os ninhos • explore para achar baús")
+                hud.message(ObjectiveText.SENTENCE_UPPER, Palette.lime, 2)
+                if (coach == null) hud.tip("Explore: baús escondidos guardam diamantes e itens")
             }
         }
-        if (!progress.tutorialSeen) {
-            progress.tutorialSeen = true
-            save()
-            hud.message("Arraste à direita para mirar", Color.WHITE)
-        }
+        // Contratos não existem no PvP; na sobrevivência o briefing não pode apagar a dica das ondas.
+        if (!inPvp && !survivalMode) Contracts.briefing(plan)?.let { hud.tip(it) }
+        coach?.start()
+    }
+
+    /** O objetivo lido do HUD (o HUD já está publicado quando um evento é tratado). */
+    private fun currentObjective(): Objective {
+        val h = FloatArray(Hud.SIZE)
+        NativeBridge.copyHud(h)
+        return Objective.from(h)
     }
 
     private fun onGameEvent(type: Int, a: Int, b: Int, c: Int) {
@@ -633,19 +782,24 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             return
         }
         if (!inMission) return
+        coach?.onEngineEvent(type, a, b, c)
         when (type) {
             Ev.KILL -> {
                 bestCombo = maxOf(bestCombo, c)
                 missionKills += 1
-                hud.message(if (a == 1) "TIRO NA CABEÇA! ☠ $missionKills" else "+1 ABATE ☠ $missionKills", if (a == 1) Palette.gold else Palette.lime)
+                hud.message(if (a == 1) "TIRO NA CABEÇA! ☠ $missionKills" else "+1 ABATE ☠ $missionKills", if (a == 1) Palette.gold else Palette.lime, CombatFeed.PRIORITY_LOW)
                 hud.haptic(false)
             }
             Ev.CRYSTAL -> {
-                hud.message("CRISTAL COLETADO ◆", Palette.cyan)
+                eventCrystals += 1
+                val total = currentObjective().nestTotal.takeIf { it > 0 } ?: 3
+                hud.message(ObjectiveText.crystalPicked(eventCrystals.coerceAtMost(total), total), Palette.cyan)
                 audio.playUi("reward", 0.7f)
             }
             Ev.NEST_DESTROYED -> {
-                hud.message("NINHO DESTRUÍDO! PEGUE O CRISTAL", Palette.purple)
+                eventNests += 1
+                val total = currentObjective().nestTotal.takeIf { it > 0 } ?: 3
+                hud.message(ObjectiveText.nestDestroyed(eventNests.coerceAtMost(total), total), Palette.purple, CombatFeed.PRIORITY_HIGH)
                 hud.haptic(true)
             }
             Ev.CHEST -> {
@@ -688,7 +842,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 when (c) {
                     0 -> hud.tip("Prepare-se: a onda $a está a caminho")
                     1 -> {
-                        hud.message(if (b == 1) "GRANDE HORDA! ONDA $a" else "ONDA $a", if (b == 1) Palette.red else Palette.gold)
+                        // O banner da onda (HudView.drawSurvivalTop) já anuncia; sem segundo aviso.
                         hud.haptic(true)
                     }
                     else -> {
@@ -745,7 +899,14 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 }
                 hud.haptic(true)
             }
-            Ev.PORTAL_OPEN -> hud.message("PORTAL ABERTO!", Palette.purple)
+            Ev.CONTRACT -> when (a) {
+                1 -> hud.message("SEM MUNIÇÃO! USE A FACA E AS GRANADAS", Palette.red, CombatFeed.PRIORITY_HIGH)
+                2 -> hud.message("MUNIÇÃO ACABANDO!", Palette.gold, CombatFeed.PRIORITY_HIGH)
+                3 -> { hud.message("CARGA COLETADA! EXTRAIA PARA RECEBER ◆", Palette.gold, CombatFeed.PRIORITY_HIGH); hud.haptic(true) }
+                4 -> hud.message("CARGA REVELADA NO MAPA!", Palette.gold, CombatFeed.PRIORITY_HIGH)
+                5 -> hud.tip("NINHO INSTÁVEL: os Inchados explodem perto de você — derrube-os de longe")
+            }
+            Ev.PORTAL_OPEN -> hud.message(ObjectiveText.PORTAL_OPEN, Palette.purple, CombatFeed.PRIORITY_HIGH)
             Ev.HEAL -> hud.message("+$a VIDA", Palette.red)
             Ev.VICTORY -> surface.postDelayed({ finishMission(true) }, 700)
             Ev.DEFEAT -> surface.postDelayed({ if (survivalMode) showSurvivalDefeat() else showDefeat() }, 900)
@@ -773,6 +934,18 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         )
     }
 
+    /** Alertas, carga e ninhos da missão, lidos do resultado do motor (o contrato só paga na extração). */
+    private fun readContractRun(): ContractRun {
+        val r = FloatArray(Res.SIZE)
+        NativeBridge.copyResult(r)
+        return ContractRun(
+            alerts = r[Res.ALERTS].toInt(),
+            cargoCollected = r[Res.CARGO] > 0.5f,
+            nestsDestroyed = r[Res.NESTS].toInt(),
+            nestsTotal = Campaign.stage(missionStage).crystalTotal,
+        )
+    }
+
     /** A mochila da partida (itens ganhos/gastos) volta para o progresso salvo. */
     private fun syncInventoryFromEngine() {
         val h = FloatArray(Hud.SIZE)
@@ -783,27 +956,32 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     private fun finishMission(victory: Boolean) {
         if (missionEnded) return
         missionEnded = true
+        coach?.stop(); coach = null
         syncInventoryFromEngine()
         hud.visibility = View.GONE
         hud.reset()
         val stage = Campaign.stage(missionStage)
         val result = readResult(victory)
-        val summary = Rules.applyResult(progress, stage, result)
+        val summary = ExpeditionRules.applyCampaign(progress, plan, stage, result, readContractRun(), today())
         val unlocked = Rules.refreshCosmeticUnlocks(progress)
         progress.missionsSinceInterstitial += 1
         save()
         audio.playUi(if (victory) "victory" else "defeat", 1f)
         audio.setMusic(GameAudio.Music.MENU)
-        showOverlay(VictoryOverlay(this, stage, result, summary, unlocked))
+        showOverlay(ExpeditionResultOverlay(this, plan, stage, result, summary, unlocked))
     }
 
     private fun showDefeat() {
         if (missionEnded || !inMission) return
         defeatShown = true
+        coach?.pause()
         hud.visibility = View.GONE
         NativeBridge.setFire(false)
         audio.playUi("defeat", 1f)
-        showOverlay(DefeatOverlay(this, Campaign.stage(missionStage), canRevive = !reviveUsed, canSkip = Rules.canSkip(progress, missionStage, pendingFails = 1)))
+        val r = readResult(false)
+        val secs = r.elapsedSeconds.toInt()
+        val line = "Ninhos ${r.nests.coerceAtMost(3)}/3 • ☠ ${r.kills} • %d:%02d".format(secs / 60, secs % 60)
+        showOverlay(DefeatOverlay(this, Campaign.stage(missionStage), plan, line, canRevive = !reviveUsed, canSkip = Rules.canSkip(progress, missionStage, pendingFails = 1)))
     }
 
     fun reviveWithAd() {
@@ -813,6 +991,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             missionPaused = false
             closeOverlay()
             hud.reset()
+            coach?.resume()
             hud.visibility = View.VISIBLE
             hud.message("DE VOLTA À LUTA!", Palette.lime)
             engine {
@@ -826,9 +1005,10 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     private fun recordDefeat() {
         if (missionEnded) return
         missionEnded = true
+        coach?.stop(); coach = null
         syncInventoryFromEngine()
         val result = readResult(false)
-        Rules.applyResult(progress, Campaign.stage(missionStage), result)
+        ExpeditionRules.applyCampaign(progress, plan, Campaign.stage(missionStage), result, readContractRun(), today())
         progress.missionsSinceInterstitial += 1
         checkUnlocks()
         save()
@@ -839,13 +1019,13 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         if (survivalMode) {
             recordSurvival()
             endMissionUi()
-            maybeInterstitial { if (retry) startSurvival() else showSurvival() }
+            maybeInterstitial { if (retry) startExpedition(plan.retry(), countPlayTap = false) else showSurvival() }
             return
         }
         recordDefeat()
         endMissionUi()
         maybeInterstitial {
-            if (retry) startStage(missionStage, skipStory = true) else showStages()
+            if (retry) startExpedition(plan.retry(), countPlayTap = false) else showStages()
         }
     }
 
@@ -856,20 +1036,22 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 save()
                 audio.playUi("unlock", 1f)
                 endMissionUi()
-                startStage(missionStage + 1)
+                showExpeditionPrep(ExpeditionKind.CAMPAIGN, progress.frontierStage(), countPlayTap = false, back = { showStages() })
             }
         }
     }
 
     fun leaveAfterVictory(next: Boolean) {
+        replayMask = null
         endMissionUi()
         maybeInterstitial {
-            if (next && progress.isStageCompleted(missionStage)) startStage(missionStage + 1)
+            if (next && progress.isStageCompleted(missionStage)) showExpeditionPrep(ExpeditionKind.CAMPAIGN, progress.frontierStage(), countPlayTap = false, back = { showStages() })
             else showStages()
         }
     }
 
     private fun endMissionUi() {
+        coach?.stop(); coach = null
         inMission = false
         missionPaused = false
         defeatShown = false
@@ -898,6 +1080,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     fun openInventoryInMatch() {
         if (!inMission || missionEnded || defeatShown || loading != null) return
         missionPaused = true
+        coach?.pause()
         engine { NativeBridge.setPaused(true) }
         hud.reset()
         val h = FloatArray(Hud.SIZE)
@@ -928,18 +1111,10 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     // ------------------------------------------------------------------ sobrevivência
 
-    fun startSurvival() {
-        survivalMode = true
-        survivalWave = 0
-        // Bioma aleatório a cada partida (floresta, deserto, neve ou terra devastada).
-        missionStage = Random.nextInt(0, 4) * Campaign.STAGES_PER_ZONE + 1
-        closeOverlay()
-        launchMission()
-    }
-
     private fun showSurvivalDefeat() {
         if (missionEnded || !inMission) return
         defeatShown = true
+        coach?.pause()
         hud.visibility = View.GONE
         NativeBridge.setFire(false)
         audio.playUi("defeat", 1f)
@@ -962,13 +1137,13 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     }
 
     /** Registra a partida de sobrevivência no ranking e paga a recompensa. */
-    private fun recordSurvival(): Pair<SurvivalResult, com.fabiosilva.ecosdeeldra.data.SurvivalSummary>? {
+    private fun recordSurvival(): Pair<SurvivalResult, com.fabiosilva.ecosdeeldra.data.SurvivalExpeditionSummary>? {
         if (missionEnded) return null
         missionEnded = true
         syncInventoryFromEngine()
         val result = readSurvivalResult()
         val name = progress.currentHero.name
-        val summary = Rules.applySurvivalResult(progress, name, today(), result)
+        val summary = ExpeditionRules.applySurvival(progress, plan, name, today(), result, ContractRun())
         progress.missionsSinceInterstitial += 1
         save()
         return result to summary
@@ -981,21 +1156,22 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         defeatShown = false
         hud.visibility = View.GONE
         hud.reset()
-        audio.playUi(if (summary.newRecord) "victory" else "defeat", 1f)
+        audio.playUi(if (summary.base.newRecord) "victory" else "defeat", 1f)
         audio.setMusic(GameAudio.Music.MENU)
         val ranking = Rules.survivalRanking(progress)
-        showOverlay(SurvivalResultOverlay(this, result, summary, ranking, ranking.getOrNull(summary.rank - 1)))
+        showOverlay(SurvivalResultOverlay(this, result, summary.base, ranking, ranking.getOrNull(summary.base.rank - 1), plan, summary.contract))
         if (unlocked.isNotEmpty()) surface.postDelayed({ announceUnlocks(unlocked) }, 1500)
     }
 
     fun leaveSurvival(again: Boolean) {
         endMissionUi()
-        maybeInterstitial { if (again) startSurvival() else showSurvival() }
+        maybeInterstitial { if (again) startExpedition(plan.retry(), countPlayTap = false) else showSurvival() }
     }
 
     private fun pauseSubtitle(): String =
-        if (survivalMode) "Sobrevivência • Onda ${survivalWave.coerceAtLeast(1)}"
-        else Campaign.stage(missionStage).let { "Fase ${it.number} · ${it.title}" }
+        (if (survivalMode) "Sobrevivência • Onda ${survivalWave.coerceAtLeast(1)}"
+        else Campaign.stage(missionStage).let { "Fase ${it.depth} · ${it.title}\n${ObjectiveText.SENTENCE_UPPER}" }) +
+            if (plan.contract != ContractId.NONE) " · ${Contracts.get(plan.contract).name}" else ""
 
     override fun onMapRequested() {
         if (inPvp && !pvpEnded) {
@@ -1005,6 +1181,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         }
         if (!inMission || missionEnded) return
         missionPaused = true
+        coach?.onMapOpened()
+        coach?.pause()
         engine { NativeBridge.setPaused(true) }
         hud.reset()
         showOverlay(MapOverlay(this, bigMap ?: hud.minimap, worldSize) {
@@ -1022,6 +1200,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
             return
         }
         missionPaused = true
+        coach?.pause()
         engine { NativeBridge.setPaused(true) }
         hud.reset()
         watchAd(onClosed = { if (inMission && !missionEnded) resumeMission() }) {
@@ -1031,12 +1210,14 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     fun openMapFromPause() {
         if (!inMission || missionEnded) return
+        coach?.onMapOpened()
         showOverlay(MapOverlay(this, bigMap ?: hud.minimap, worldSize) { showOverlay(PauseOverlay(this, pauseSubtitle(), survivalMode)) })
     }
 
     fun pauseMission() {
         if (!inMission || missionEnded) return
         missionPaused = true
+        coach?.pause()
         engine { NativeBridge.setPaused(true) }
         hud.reset()
         showOverlay(PauseOverlay(this, pauseSubtitle(), survivalMode))
@@ -1047,7 +1228,20 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         missionPaused = false
         closeOverlay()
         hud.visibility = View.VISIBLE
+        coach?.resume()
         engine { NativeBridge.setPaused(false) }
+    }
+
+    /** Botão PULAR TUTORIAL do cartão: marca o tutorial como concluído (ou só encerra a revisão). */
+    override fun onCoachSkipRequested() {
+        coach?.skip()
+    }
+
+    /** Ajustes > REVER TUTORIAL: joga a fase 1 com as dicas desde o início, sem tocar no progresso salvo. */
+    fun replayTutorial() {
+        if (inMission || inPvp) return
+        replayMask = 0
+        startExpedition(ExpeditionPlan.standard(1), countPlayTap = false)
     }
 
     fun showPauseSettings() {
@@ -1100,6 +1294,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         pvpInfo = info
         inPvp = true
         pvpEnded = false
+        plan = ExpeditionPlan.standard(1)  // sem contrato do último plano vazando para o PvP
         val cfg = FloatArray(PvpCfg.COUNT)
         cfg[PvpCfg.LOCAL_ID] = info.localId.toFloat()
         cfg[PvpCfg.IS_HOST] = if (info.isHost) 1f else 0f
@@ -1110,7 +1305,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         cfg[PvpCfg.INVERT_Y] = if (progress.settings.invertY) 1f else 0f
         // Vagas ocupadas (255 = vazia) e a aparência de cada jogador.
         for (i in 0 until 8) cfg[PvpCfg.SKINS + i] = 255f
-        val looks = IntArray(8)
+        val looks = IntArray(16)  // [0..7] aparência; [8..15] IPv4 de cada jogador (só o anfitrião usa)
+        info.memberIps.forEach { (id, ip) -> if (id in 0..7) looks[8 + id] = ip }
         info.players.forEach {
             cfg[PvpCfg.SKINS + it.id] = 0f
             looks[it.id] = it.skin

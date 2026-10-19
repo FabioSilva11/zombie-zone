@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "../core/math.h"
+#include "../core/perf.h"
 #include "../core/random.h"
 #include "../render/blocky.h"
 #include "../render/character.h"
@@ -19,9 +20,11 @@
 #include "../world/terrain.h"
 #include "../world/theme.h"
 #include "../world/world.h"
+#include "contract_rules.h"
 #include "items.h"
 #include "nav.h"
 #include "net.h"
+#include "perf_scenario.h"
 #include "protocol.h"
 
 namespace zz {
@@ -54,6 +57,19 @@ struct MissionConfig {
     float headshotMul = 1.0f;
     float luck = 1.0f;         // chance de itens dos zumbis
     int explosives = 0;        // nível de explosivos
+    // Diagnóstico de desempenho (só builds de depuração enviam isto): 0 desligado, 1 autopiloto sem inimigos, 2 com inimigos
+    int perfMode = 0;
+    int perfFrames = 0;        // 0 = 7200
+    // Contrato de expedição (etapa 4). Valores padrão = expedição padrão (PvP também usa o padrão).
+    int contractId = 0;         // ContractId do Kotlin
+    float ammoClips = -1.0f;    // reserva em pentes; < 0 = ilimitada
+    int chestAmmoPct = 0;       // reserva ganha por baú (centésimos de pente)
+    float visionMul = 1.0f;     // x alcance da névoa
+    float aggression = 1.0f;    // x percepção/persistência dos zumbis
+    bool redSky = false;
+    float guardMul = 1.0f;      // x guardas dos pontos de interesse
+    float nestBomb = 0.0f;      // 4C: chance de o ninho gerar Inchado (> 0 = ninho instável)
+    bool cargo = false;         // 4D: existe carga opcional (caixa perdida)
 };
 
 struct PvpConfig {
@@ -67,6 +83,7 @@ struct PvpConfig {
     bool invertY = false;
     uint8_t skins[kMaxNetPlayers] = {255, 255, 255, 255, 255, 255, 255, 255};  // 255 = vaga vazia
     uint32_t looks[kMaxNetPlayers] = {};  // aparência de cada jogador
+    uint32_t ips[kMaxNetPlayers] = {};    // IPv4 (ordem de host) de cada jogador; 0 = desconhecido (anfitrião)
 };
 
 struct RemoteSample {
@@ -194,6 +211,7 @@ struct Zombie {
     float burnDps = 14.0f;  // dano do fogo por segundo
     bool exploded = false;
     bool announced = false; // jogador já foi avisado deste tipo/elite
+    bool counted = false;   // já entrou na contagem de alertas do contrato
 };
 
 struct Pickup {
@@ -264,6 +282,15 @@ struct Nest {
     float spawnTimer = 3;
     float hitFlash = 0;
     bool awake = false;
+    int spawnCount = 0;     // zumbis gerados por este ninho (diagnóstico do ninho instável)
+};
+
+// Carga opcional do contrato Caixa perdida: posição fixa por semente, sem colisão.
+struct Cargo {
+    Vec3 pos;
+    bool placed = false;
+    bool revealed = false;   // revelada ao destruir o primeiro ninho
+    bool collected = false;
 };
 
 struct Chest {
@@ -301,6 +328,9 @@ struct Tracer {
     float life = 0;
     Vec4 color{1.0f, 0.9f, 0.6f, 1.0f};
 };
+
+// Céu e névoa do contrato (game_contract.cpp). O terreno da ilha não lê theme.sky: a semente gera a mesma ilha em qualquer contrato.
+Theme applyContractTheme(Theme t, const MissionConfig& c);
 
 class Game {
 public:
@@ -427,7 +457,9 @@ private:
     void finishResult();
 
     // Ilha (game_mission.cpp)
-    void streamWorld(int maxGenerate, int maxMesh);
+    void streamWorld();                       // orçamento de tempo adaptativo (world.h: StreamBudget)
+    int streamRadius() const;                 // raio de mundo efetivo em chunks (derivado da névoa)
+    int perfFlags() const;
     void updateSpawner(float dt);
     void updatePois(float dt);
     void updateNests(float dt);
@@ -446,12 +478,25 @@ private:
     void spawnWaveZombie();
     bool survival() const { return config_.mode == 1; }
 
+    // Contrato de expedição (game_contract.cpp)
+    void startContractState();
+    void updateContract(float dt);
+    void alertZombie(Zombie& z);              // único lugar que vira alerted=true por percepção/ruído
+    bool ammoLimited() const { return mode_ == Mode::Mission && reservePct_ >= 0; }
+    bool canReloadNow(int magazine) const;
+    void completeReload(int magazine);
+    void notifyOutOfAmmo();
+    void grantReserve(int pct);
+    void placeCargo();                        // 4D: escolhe o ponto da carga (determinístico por semente)
+    void revealCargo();                       // 4D: chamado quando um ninho é destruído
+    void publishContractHud(std::array<float, proto::H_SIZE>& h) const;
+
     // Zumbis (game_zombies.cpp)
     void loadZombieAssets();
     Zombie makeZombie(ZombieKind kind, uint8_t mutations, const Vec3& pos);
     ZombieKind rollKind();
     uint8_t rollMutations();
-    void spawnZombie(const Vec3& pos, bool alerted, int nest = -1, bool forceElite = false);
+    void spawnZombie(const Vec3& pos, bool alerted, int nest = -1, bool forceElite = false, int forceKind = -1);
     void updateZombies(float dt);
     void separateBodies();
     void updateZombie(Zombie& z, size_t index, float dt);
@@ -485,11 +530,29 @@ private:
     Mode mode_ = Mode::None;
     bool paused_ = false;
     MissionConfig config_;
+    // Contrato de expedição
+    int reservePct_ = -1;          // reserva de munição em centésimos de pente; < 0 = ilimitada
+    int alerts_ = 0;               // zumbis alertados pelo jogador (sem ninhos nem ondas)
+    float noAmmoTimer_ = 0;
+    float contractLogTimer_ = 0;
+    int bombs_ = 0;                // 4C: Inchados gerados por ninhos
+    Cargo cargo_;                  // 4D
     std::map<uint32_t, std::unique_ptr<CharacterAsset>> characters_;
     CharacterAsset ak47Asset_;
     bool ak47Loaded_ = false;
     std::vector<Vec3> layerColors_;
     int viewRadius_ = 8;
+    int quality_ = 1;
+    // Desempenho (core/perf.h)
+    perf::FrameProfiler prof_;
+    StreamStats streamStats_;            // último resultado de World::stream (antes: 'static int pending')
+    int uploadUnlimitedFrames_ = 3;      // quadros pós-carga sem orçamento de upload de malhas
+    // Autopiloto de depuração (game_perf.cpp): rota fixa e dt fixo para medir desempenho de forma reproduzível
+    perf::AutopilotState autopilot_;
+    bool noEnemies_ = false;
+    void perfBegin();
+    void perfDrive(InputState& in);
+    void perfEnd();
 
     // Entrada
     std::mutex inputMutex_;
@@ -625,6 +688,8 @@ private:
     std::unordered_set<int> visitedPois_;
     std::unordered_set<int> announcedPois_;
     std::vector<const IslandPoi*> poiScratch_;
+    std::vector<const IslandPoi*> prewarmScratch_;  // moldes de POI construídos antes de o jogador chegar
+    float prewarmTimer_ = 0;
     std::vector<uint32_t> zombieLooks_;
     std::vector<Vec3> pendingSpawns_;
     SupplyDrop supply_;

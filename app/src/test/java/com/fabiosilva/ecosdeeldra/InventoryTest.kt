@@ -89,7 +89,7 @@ class InventoryTest {
         val p = Progress()
         p.diamonds = 5000
         assertFalse(Rules.buyWeapon(p, Items.SNIPER)) // libera na fase 6
-        for (n in 1..5) Rules.applyResult(p, Campaign.stage(n), MissionResult(true, 60f, 100f, 100f, 0, 0, 0, 0))
+        winLeftmostPath(p, 5)
         val before = p.diamonds
         assertTrue(Rules.buyWeapon(p, Items.SNIPER))
         assertEquals(before - Items.get(Items.SNIPER)!!.price, p.diamonds)
@@ -105,7 +105,7 @@ class InventoryTest {
         assertEquals(5, Rules.upgradeCap(p))
         repeat(5) { assertTrue(Rules.buyUpgrade(p, "armor")) }
         assertFalse(Rules.buyUpgrade(p, "armor"))
-        for (n in 1..5) Rules.applyResult(p, Campaign.stage(n), MissionResult(true, 60f, 100f, 100f, 0, 0, 0, 0))
+        winLeftmostPath(p, 5)
         assertEquals(8, Rules.upgradeCap(p))
         assertTrue(Rules.buyUpgrade(p, "armor"))
         assertEquals(6, p.upgrade("armor"))

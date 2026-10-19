@@ -51,6 +51,8 @@ class LanLobby(context: Context, private val listener: Listener) {
         val seed: Int,
         val rules: Rules,
         val players: List<LobbyPlayer>,
+        /** Só no anfitrião: IPv4 (big-endian) de cada jogador por id; o motor confere o remetente dos pacotes. */
+        val memberIps: Map<Int, Int> = emptyMap(),
     )
 
     private enum class Role { SCANNING, HOST, CLIENT }
@@ -203,6 +205,10 @@ class LanLobby(context: Context, private val listener: Listener) {
         inMatch = true
         val seed = Random.nextInt(1, 16_000_000)
         val players = lobbyPlayers()
+        val ips = members.values.mapNotNull { m ->
+            val b = (m.address as? java.net.Inet4Address)?.address ?: return@mapNotNull null
+            m.id to ((b[0].toInt() and 255 shl 24) or (b[1].toInt() and 255 shl 16) or (b[2].toInt() and 255 shl 8) or (b[3].toInt() and 255))
+        }.toMap()
         val payload = "START|$seed|${rules.killLimit}|${rules.timeMinutes}|${encodePlayers(players)}"
         Thread {
             repeat(6) {
@@ -210,7 +216,7 @@ class LanLobby(context: Context, private val listener: Listener) {
                 Thread.sleep(120)
             }
         }.start()
-        main.post { listener.onStart(StartInfo(true, "127.0.0.1", 0, seed, rules, players)) }
+        main.post { listener.onStart(StartInfo(true, "127.0.0.1", 0, seed, rules, players, ips)) }
     }
 
     /** Anfitrião: volta todos para a sala depois da partida. */
@@ -265,7 +271,7 @@ class LanLobby(context: Context, private val listener: Listener) {
             try {
                 val packet = DatagramPacket(buf, buf.size)
                 s.receive(packet)
-                handle(String(packet.data, 0, packet.length, Charsets.UTF_8), packet.address, packet.port)
+                handle(packet.data, packet.length, packet.address, packet.port)
             } catch (_: SocketTimeoutException) {
             } catch (e: Exception) {
                 if (running) Log.w(TAG, "Erro na sala: ${e.message}")
@@ -318,58 +324,57 @@ class LanLobby(context: Context, private val listener: Listener) {
         }
     }
 
-    private fun handle(message: String, from: InetAddress, port: Int) {
-        val p = message.split('|')
-        if (p.size < 2 || p[0] != PREFIX) return
+    private fun handle(bytes: ByteArray, length: Int, from: InetAddress, port: Int) {
+        // Tamanho, prefixo, campos e faixas são validados em LanWire.parse; o que não passar é ignorado.
+        val msg = LanWire.parse(bytes, length) ?: return
         val now = SystemClock.elapsedRealtime()
-        when (p[1]) {
-            "BEACON" -> if (role == Role.SCANNING && p.size >= 6 && !isLocalAddress(from)) {
+        when (msg) {
+            is LanWire.Msg.Beacon -> if (role == Role.SCANNING && !isLocalAddress(from)) {
                 val key = from.hostAddress ?: return
                 val old = rooms[key]
-                val room = Room(key, p[2], p[3].toIntOrNull() ?: 1, p[4].toIntOrNull() ?: MAX, p[5] == "1", now)
+                if (old == null && rooms.size >= MAX_ROOMS) return  // lista de salas não cresce sem limite
+                val room = Room(key, msg.name, msg.players, msg.max, msg.inMatch, now)
                 rooms[key] = room
                 if (old == null || old.players != room.players || old.inMatch != room.inMatch || old.name != room.name) notifyRooms()
                 tryAutoJoin()
             }
-            "DISCOVER" -> if (role == Role.HOST && !isLocalAddress(from)) send(beacon(), from, port)
-            "JOIN" -> if (role == Role.HOST && p.size >= 5) handleJoin(p[2], p[3].toIntOrNull() ?: 0, sanitize(p[4]), from, port, now)
-            "PING" -> if (role == Role.HOST) {
-                val m = members[p.getOrNull(2)?.toIntOrNull() ?: -1]
+            is LanWire.Msg.Discover -> if (role == Role.HOST && !isLocalAddress(from)) send(beacon(), from, port)
+            is LanWire.Msg.Join -> if (role == Role.HOST) handleJoin(msg.nonce, msg.skin, msg.name, from, port, now)
+            is LanWire.Msg.Ping -> if (role == Role.HOST) {
+                val m = members[msg.id]
                 if (m != null && m.address == from) m.lastSeen = now
             }
-            "LEAVE" -> if (role == Role.HOST) {
-                val id = p.getOrNull(2)?.toIntOrNull() ?: -1
-                if (members[id]?.address == from && members.remove(id) != null) {
+            is LanWire.Msg.Leave -> if (role == Role.HOST) {
+                if (members[msg.id]?.address == from && members.remove(msg.id) != null) {
                     broadcastRoom()
                     notifyLobby()
                 }
             }
-            "ACCEPT" -> if (role == Role.CLIENT && p.size >= 4 && p[2] == nonce) {
-                localId = p[3].toIntOrNull() ?: -1
+            is LanWire.Msg.Accept -> if (role == Role.CLIENT && msg.nonce == nonce && from == hostAddress) {
+                localId = msg.id
                 lastHostMessage = now
             }
-            "REJECT" -> if (role == Role.CLIENT && p.getOrNull(2) == nonce) {
+            is LanWire.Msg.Reject -> if (role == Role.CLIENT && msg.nonce == nonce && from == hostAddress) {
                 role = Role.SCANNING
-                main.post { listener.onClosed(p.getOrNull(3) ?: "Entrada recusada.") }
+                main.post { listener.onClosed(msg.reason) }
             }
-            "ROOM" -> if (role == Role.CLIENT && from == hostAddress && p.size >= 6) {
+            is LanWire.Msg.Room -> if (role == Role.CLIENT && from == hostAddress) {
                 lastHostMessage = now
-                val r = Rules(p[2].toIntOrNull() ?: 10, p[3].toIntOrNull() ?: 5)
-                val matchRunning = p[4] == "1"
-                if (!matchRunning) started = false
-                val players = decodePlayers(p[5])
+                val r = Rules(msg.rules.killLimit, msg.rules.timeMinutes)
+                if (!msg.inMatch) started = false
+                val players = msg.players.map { LobbyPlayer(it.id, it.skin, it.name) }
                 if (localId >= 0 && !started) main.post { listener.onLobby(players, r, localId, false) }
             }
-            "START" -> if (role == Role.CLIENT && from == hostAddress && p.size >= 6 && !started && localId >= 0) {
+            is LanWire.Msg.Start -> if (role == Role.CLIENT && from == hostAddress && !started && localId >= 0) {
                 started = true
                 lastHostMessage = now
                 val info = StartInfo(
-                    false, from.hostAddress ?: "", localId, p[2].toIntOrNull() ?: 1,
-                    Rules(p[3].toIntOrNull() ?: 10, p[4].toIntOrNull() ?: 5), decodePlayers(p[5]),
+                    false, from.hostAddress ?: "", localId, msg.seed,
+                    Rules(msg.rules.killLimit, msg.rules.timeMinutes), msg.players.map { LobbyPlayer(it.id, it.skin, it.name) },
                 )
                 main.post { listener.onStart(info) }
             }
-            "CLOSE" -> if (role == Role.CLIENT && from == hostAddress) {
+            LanWire.Msg.Close -> if (role == Role.CLIENT && from == hostAddress) {
                 role = Role.SCANNING
                 main.post { listener.onClosed("O anfitrião fechou a sala.") }
             }
@@ -384,6 +389,10 @@ class LanLobby(context: Context, private val listener: Listener) {
         }
         if (inMatch) {
             send("REJECT|$joinNonce|A partida já começou. Espere a próxima.", from, port)
+            return
+        }
+        if (!LanWire.canAdmit(members.values.map { it.address.hostAddress ?: "" }, from.hostAddress ?: "")) {
+            send("REJECT|$joinNonce|Muitas entradas deste aparelho.", from, port)
             return
         }
         val id = (1 until MAX).firstOrNull { it !in members.keys }
@@ -564,24 +573,20 @@ class LanLobby(context: Context, private val listener: Listener) {
     companion object {
         private const val TAG = "LanLobby"
         const val PORT = 47777
-        const val PREFIX = "ZZ1"
+        const val PREFIX = LanWire.PREFIX
         const val GROUP = "239.255.77.77"
         const val NSD_TYPE = "_zombiezone._udp."
-        const val MAX = 8
+        const val MAX = LanWire.MAX_PLAYERS
 
-        fun sanitize(name: String): String =
-            name.replace(Regex("[|;,\\n\\r]"), " ").trim().take(14).ifEmpty { "Jogador" }
+        const val MAX_ROOMS = 32  // salas guardadas na lista de busca
+
+        fun sanitize(name: String): String = LanWire.sanitizeName(name)
 
         fun encodePlayers(players: List<LobbyPlayer>): String =
-            players.joinToString(";") { "${it.id},${it.skin},${sanitize(it.name)}" }
+            LanWire.encodePlayers(players.map { LanWire.Player(it.id, it.skin, it.name) })
 
-        fun decodePlayers(raw: String): List<LobbyPlayer> = raw.split(';').mapNotNull { entry ->
-            val f = entry.split(',')
-            if (f.size < 3) return@mapNotNull null
-            val id = f[0].toIntOrNull() ?: return@mapNotNull null
-            if (id !in 0 until MAX) return@mapNotNull null
-            LobbyPlayer(id, f[1].toIntOrNull() ?: 0, f[2])  // skin = aparência (Look codificado)
-        }
+        fun decodePlayers(raw: String): List<LobbyPlayer> =
+            LanWire.decodePlayers(raw).map { LobbyPlayer(it.id, it.skin, it.name) }  // skin = aparência (Look codificado)
 
         /** IPv4 desta rede local (para mostrar ao jogador e conectar manualmente). */
         fun localIp(): String? = runCatching {

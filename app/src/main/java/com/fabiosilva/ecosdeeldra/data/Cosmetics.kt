@@ -65,7 +65,7 @@ object Cosmetics {
         UnlockKind.DIAMONDS -> p.diamonds.coerceAtMost(c.goal) to c.goal
         UnlockKind.KILLS -> p.stats.kills to c.goal
         UnlockKind.HEADSHOTS -> p.stats.headshots to c.goal
-        UnlockKind.STAGE -> (if (p.isStageCompleted(c.goal)) 1 else 0) to 1
+        UnlockKind.STAGE -> (if (p.stages.any { (id, r) -> r.completed && StageTree.depth(id) == c.goal }) 1 else 0) to 1
         UnlockKind.STARS -> p.totalStars() to c.goal
         UnlockKind.CRYSTALS -> p.stats.crystals to c.goal
         UnlockKind.PLAYTIME_MIN -> (p.stats.playSeconds / 60).toInt() to c.goal
@@ -88,7 +88,7 @@ object Cosmetics {
         UnlockKind.HEADSHOTS -> "Acerte ${c.goal} tiros na cabeça"
         UnlockKind.STAGE -> "Vença a fase ${c.goal}"
         UnlockKind.STARS -> "Junte ${c.goal} estrelas"
-        UnlockKind.CRYSTALS -> "Colete ${c.goal} cristais nas fases"
+        UnlockKind.CRYSTALS -> "Recolha ${c.goal} cristais nas fases"
         UnlockKind.PLAYTIME_MIN -> "Jogue por ${c.goal} minutos"
         UnlockKind.ADS -> "Assista a ${c.goal} anúncios"
         UnlockKind.LOGIN_DAYS -> "Entre no jogo em ${c.goal} dias diferentes"

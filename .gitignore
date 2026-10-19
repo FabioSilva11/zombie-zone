@@ -15,3 +15,6 @@ kenney_modular-dungeon-kit_1.0/
 legacy/
 codex-*.png
 codex-window.xml
+
+# Resultados de medição de desempenho (scripts/zzperf.mjs)
+perf-results/

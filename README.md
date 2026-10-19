@@ -1,26 +1,47 @@
 # Zombie Zone
 
-Jogo Android de tiro em terceira pessoa num **mundo aberto de blocos** (estilo Minecraft), escrito em **Kotlin + C++ (NDK/OpenGL ES 3.0)**. Abra a pasta do projeto no Android Studio e rode: não há WebView nem JavaScript.
+Jogo Android de tiro em terceira pessoa num **mundo aberto de blocos** (estilo Minecraft), escrito em **Kotlin + C++ (NDK/OpenGL ES 3.0)**. O jogo roda offline: não há conta, servidor, WebView nem JavaScript (só os anúncios precisam de internet). Abra a pasta do projeto no Android Studio e rode.
 
 ## Como jogar
 
-- **Objetivo de cada fase:** eliminar todos os zumbis da ilha e atravessar o portal de obsidiana que se abre no acampamento mais distante.
-- **Estrelas:** vencer a fase, terminar com vida ≥ 50% e terminar dentro do tempo-alvo.
-- **Cristais:** cada fase tem 3. Eles caem dos zumbis.
-- **Campanha:** 20 fases em 4 biomas — Floresta, Deserto, Neve (lagos congelados) e Terra Devastada (noite com magma).
-- **Zumbis:** três tipos (comum, corredor e brutamontes). Eles encontram caminho pelo relevo com um campo de fluxo (BFS), escutam tiros e cercam o jogador.
+**Objetivo de cada fase: destrua ninhos → recolha cristais → extraia pelo portal.**
 
-- **Mapas procedurais:** cada partida usa uma semente nova, então o mapa nunca se repete. São 6 estilos:
-  - ilha;
-  - arquipélago (com pontes);
-  - vale entre montanhas com rio;
-  - mesetas em degraus;
-  - cratera com lago;
-  - planície de rios.
+1. **Destrua os 3 ninhos de infecção.** Cada ninho tem um núcleo roxo pulsante: atire nele (tiros, lança-chamas ou faca; granadas, molotovs e lança-granadas não ferem ninhos). Com você a menos de 55 m, o ninho gera zumbis.
+2. **Recolha o cristal** que cai do núcleo de cada ninho destruído: basta chegar perto. O cristal fica no chão até você pegá-lo, e aparece na bússola, no minimapa e no mapa.
+3. **Extraia pelo portal.** Com os 3 cristais em mãos, o portal de obsidiana abre. Entre nele para vencer a fase. O portal fica num ponto da ilha independente dos ninhos (aparece como PORTAL no mapa).
 
-  O horário também varia (dia, hora dourada, nublado, noite). Os acampamentos podem ser de 5 tipos: fogueira, ruínas, cemitério, depósito e fazenda.
+Não é preciso matar todos os zumbis: os abates rendem diamantes, mas não abrem o portal.
+
+- **Tutorial jogável:** na primeira fase, dicas curtas ensinam mover, olhar, atirar, abrir o mapa, seguir o marcador, destruir o núcleo do ninho, recolher o cristal e usar o portal. Quem já venceu alguma fase nunca vê o tutorial; ele pode ser pulado no próprio cartão de dica.
+- **Estrelas:** vencer a fase, terminar com vida ≥ 50% e terminar dentro do tempo-alvo (cresce com a fase; 6:09 na fase 1).
+- **Cristais x diamantes:** cada fase tem 3 **cristais** (um por ninho); eles dão um bônus na primeira vez. Os **diamantes** (◆) são a moeda do jogo: vêm de abates, baús, estrelas, missões e vitórias.
+- **Campanha infinita:** 5 fases por zona. Os quatro biomas (Floresta, Deserto, Neve e Terra Devastada) se repetem em ciclos cada vez mais difíceis (II, III...). A noite só aparece a partir da fase 3.
+- **A ilha:** cada partida gera uma ilha nova de cerca de 5 km (6144 blocos), com dois biomas misturados, rios, trilhas e pontos de interesse: acampamento, ruínas, cemitério, depósito, fazenda, torre de vigia, posto avançado, casa, vilarejo, igreja, posto de gasolina, prédio em ruínas e celeiro. Entre nas construções e suba nas torres: há baús escondidos com diamantes e itens. A cura é escassa.
+- **Zumbis:** 10 tipos que aparecem conforme a fase (errante, corredor, brutamontes, arremessador, incendiário, retalhador, inchado, gritador, cuspidor e atirador de facas), mais variações elite (blindado, gigante, veloz, regenerador, tóxico e furioso). Eles contornam o relevo com um campo de fluxo (BFS), escutam tiros e cercam o jogador.
+- **Mapa:** tocar no minimapa abre o mapa da ilha inteira (o jogo pausa) com ninhos, cristais caídos, portal e suprimentos.
+- **Dificuldade:** depende só da fase e das melhorias que você comprou. Nunca depende de anúncios.
+- **Sobrevivência:** numa ilha livre sem ninhos nem portal. Os zumbis chegam em ondas cada vez maiores, vindos de até 3 frentes; a cada 5 ondas vem uma GRANDE HORDA. O ranking é local (neste aparelho). Ela se escolhe na aba SOBREVIVÊNCIA da tela PREPARAR EXPEDIÇÃO (veja abaixo), como o contrato **Resistência**.
+
+### Contratos de expedição
+
+Depois da primeira vitória, JOGAR abre **PREPARAR EXPEDIÇÃO**: você escolhe o modo (campanha ou sobrevivência), o **contrato**, confere o equipamento (barra de itens e MOCHILA) e toca em **PARTIR**. Antes da primeira vitória o jogo parte direto, sem tela de contratos.
+
+Um contrato muda as regras da expedição em troca de uma recompensa maior. A tela mostra o custo, a recompensa e o objetivo opcional antes de partir. Contratos nunca custam diamantes nem anúncios, e o bônus do contrato não é dobrado por vídeo (o DOBRAR só dobra a recompensa normal). O bônus só é pago ao **extrair pelo portal**; ao cair ou abandonar, valem só as recompensas normais de abates, baús e exploração.
+
+| Contrato | Libera | Regras | Recompensa |
+|---|---|---|---|
+| Expedição padrão | fase 1 | as regras de sempre | recompensas normais da fase |
+| Recuperação silenciosa | fase 2 | 45% menos zumbis e 50% menos guardas nos ninhos; **munição escassa**: 3,2 pentes de reserva (+0,1 por fase, no máximo 7) e +0,5 pente por baú; suprimentos por anúncio só completam o pente atual | ao extrair, ◆ 20 + 1 por fase (até 80), mais 25% do saque de abates, baús e exploração; objetivo opcional **Silêncio**: até ◆ 60, menos ◆ 3 por zumbi alertado (os gerados pelos ninhos não contam) |
+| Noite vermelha | fase 3 | névoa a 45% do alcance; zumbis percebem você de mais longe e perseguem por mais tempo (+35%), 10% mais rápidos e 15% mais fortes | na campanha, ao extrair, ◆ 25 + 2 por fase (até 125), mais 50% do saque; na sobrevivência, +50% da recompensa de ondas |
+| Ninho instável | fase 4 | 35% dos zumbis gerados pelos ninhos são Inchados (explodem ao chegar perto) e o núcleo dos ninhos fica laranja | ao extrair, ◆ 10 + 1 por fase (até 60), mais 30% do saque; destruir todos os ninhos concede o módulo raro **Núcleo instável** (guardado no histórico de expedições) |
+| Caixa perdida | fase 3 | uma carga fica entre 450 a 1400 m da largada e a mais de 250 m dos ninhos e do portal (a mesma ilha tem sempre a mesma carga); ela só aparece no mapa e na bússola depois que você destruir o primeiro ninho | ao extrair, ◆ 10 + 1 por fase (até 60); objetivo opcional **Carga**: ◆ 60 se for coletada antes de entrar no portal |
+| Resistência | fase 1 | sobrevivência por ondas, sem ninhos nem portal | ◆ 8 por onda vencida, ◆ 1 a cada 2 abates e ◆ 30 ao bater o recorde (60 s ou mais) |
+
+**Código da ilha:** cada expedição tem um código no formato `ZZ-XXXX-XXXX-XXXXX`. Quem digitar o mesmo código em **CÓDIGO…** joga a mesma ilha sob as mesmas regras (a partida em si não se repete quadro a quadro, e as suas melhorias contam). Um código só abre fases que você já liberou e contratos disponíveis. **COPIAR** guarda o código na área de transferência e **NOVA ILHA** sorteia outro; com um código colado, tentar de novo mantém a ilha. O jogo guarda o último contrato usado em cada modo e o histórico das últimas 40 expedições, tudo neste aparelho.
 
 ### PvP em Wi-Fi local
+
+O PvP é **casual**: partidas entre amigos no mesmo Wi-Fi, sem ranking global, sem conta e sem anti-cheat absoluto. O anfitrião decide a vida, os abates e o placar, então não use o PvP para competições sérias.
 
 Na tela inicial, toque em **⚔ PvP WI-FI**:
 
@@ -32,7 +53,7 @@ Regras e detalhes:
 
 - **Formato:** todos contra todos, de 2 a 8 jogadores.
 - **Mira:** sem mira assistida e sem tiro automático.
-- **Arena:** uma arena procedural nova a cada partida.
+- **Arena:** uma arena procedural nova a cada partida, em um de seis estilos (ilha, arquipélago, vale entre montanhas com rio, mesetas em degraus, cratera com lago e planície de rios).
 - **Renascimento:** 3 segundos depois de ser eliminado, longe dos inimigos.
 - **Recompensa:** 2 diamantes por abate, mais 25 pela vitória (5 por participar).
 - **Rede:** os aparelhos precisam estar no mesmo Wi-Fi, ou um deles roteando o hotspot.
@@ -50,62 +71,72 @@ node scripts/lan-bot.mjs <ip-do-celular>
 | Ação | Como |
 |---|---|
 | Mover | Joystick dinâmico: aparece onde o polegar toca na metade esquerda |
-| Correr | Empurrar o joystick até o fim (corrida automática) |
-| Câmera | Arrastar em qualquer ponto da metade direita |
+| Correr | Botão CORRER liga a corrida automática (toque de novo, ou puxe o joystick para trás, para parar); empurrar o joystick até o fim também corre |
+| Câmera | Arrastar em qualquer ponto livre da metade direita |
 | Atirar | Segurar ATIRAR; arrastar o botão também gira a câmera |
-| Mirar | MIRAR alterna o zoom (menos dispersão) |
-| Pular / Recarregar | Botões próprios (a recarga também é automática) |
+| Mirar | MIRAR alterna o zoom (o rifle de precisão tem luneta de 3 níveis) |
+| Pular / Recarregar / Agachar | Botões próprios (a recarga também é automática com o pente vazio) |
+| Faca | FACA golpeia de perto (também fere o núcleo do ninho) |
+| Granada | Segure para ver a trajetória e solte para lançar; arraste até o ✕ para cancelar (granada, molotov ou fumaça, conforme o item escolhido) |
+| Itens | Barra rápida de 6 espaços: toque para equipar a arma, escolher o arremessável ou usar o consumível; MOCHILA abre o inventário (o jogo pausa) |
+| Suprimentos | Botão SUPRIMENTOS (anúncio premiado): caixa de paraquedas com vida, munição e itens |
 | Mapa | Tocar no minimapa abre o mapa da ilha (o jogo pausa) |
 
-Nos Ajustes há sensibilidade, mira assistida, tiro automático, eixo Y invertido, modo canhoto, vibração, qualidade gráfica (60/80/100% da resolução), volumes, FPS e lembretes.
+Nos Ajustes há sensibilidade, mira assistida, tiro automático, eixo Y invertido, personalização completa do HUD (mover, aumentar ou esconder cada botão), modo canhoto, vibração, volumes, qualidade gráfica (60/80/100% da resolução), modo ultra-realista, FPS e lembretes. **REVER TUTORIAL** refaz as dicas da primeira fase sem mexer no seu progresso.
 
-## Retenção: objetivos, skins, anúncios e prêmios diários
+## Armas, mochila e melhorias
 
-- **18 skins** (os personagens Kenney). Formas de liberar:
-  - **Diamantes:** Mira, Toren e Orin.
-  - **Objetivos:**
-    - abates: Brann (40), Runa (250);
-    - tiros na cabeça: Dax (50);
-    - vencer fase: Lyra (5), Atlas (15);
-    - estrelas: Grom (30);
-    - cristais: Iris (30);
-    - minutos jogados: Soren (60).
+- **Mochila estilo Minecraft:** 6 espaços na barra rápida + 18 na mochila. As armas nunca somem; consumíveis empilham.
+- **8 armas:** fuzil de assalto, pistola, escopeta, submetralhadora, rifle de precisão, metralhadora, lança-chamas e lança-granadas. Elas liberam por fase vencida e se compram com diamantes no Arsenal.
+- **Consumíveis:** kit médico, bandagem, antídoto, adrenalina, munição incendiária, colete, granada, molotov e granada de fumaça.
+- **10 melhorias** compradas com diamantes (vitalidade, poder de fogo, recarga, blindagem, regeneração, agilidade, mira mortal, pente estendido, sorte e explosivos); o limite de nível sobe a cada zona liberada.
 
-    Todas essas, menos Lyra e Atlas, também podem ser compradas com diamantes.
-  - **Anúncios assistidos:** Zuri (3), Vex (8), Nova (15).
-  - **Dias de login:** Nyla (2), Elara (5), Kiro (7). Exclusivas, não podem ser compradas.
+## Personagem, progresso e anúncios
+
+- **Editor de personagem** em blocos (até 6 heróis). As peças comuns são livres; 17 peças especiais (além do kit básico) são liberadas por objetivos (abates, tiros na cabeça, fases, estrelas, cristais, minutos jogados), por dias de login, por anúncios assistidos ou por diamantes.
 - **Calendário diário** com 7 prêmios crescentes (30 → 150 diamantes), resgatado uma vez por dia.
 - **3 missões diárias** sorteadas por data, mais um bônus por completar as três.
 - **Baú grátis a cada 4 horas.** Dá para abrir antes do tempo assistindo a um anúncio.
-- **Anúncios premiados (AdMob):** +25 diamantes (até 5 por dia), reviver uma vez por fase, dobrar a recompensa da vitória e abrir o baú.
-- **Dificuldade adaptativa por receita de anúncios (opcional):** em Ajustes, é possível ativar um modo experimental que usa a estimativa ILRD do AdMob registrada localmente neste aparelho para subir até 5 níveis moderados nas novas fases. A opção vem desativada, pode ser desligada a qualquer momento e não altera o PvP. O valor do AdMob é uma estimativa por impressão, não receita consolidada.
 - **Lembretes locais** (notificação) quando o baú fica pronto e para o prêmio do dia seguinte.
-
-> Os IDs de AdMob são **de teste**. Antes de publicar, troque `AD_UNIT_ID` em `ads/RewardedAds.kt` e o `APPLICATION_ID` no `AndroidManifest.xml` pelos IDs reais.
+- **Save recuperável:** o progresso fica num arquivo próprio com cópias de segurança rotativas; se o arquivo principal estragar, o jogo recupera a cópia mais recente e avisa, em vez de recomeçar do zero em silêncio.
+- **Anúncios (AdMob):**
+  - Premiados, sempre opcionais: +25 diamantes (até 5 por dia), reviver uma vez por partida, dobrar a recompensa da vitória, abrir o baú antes da hora, pedir suprimentos durante a partida, caixas de suprimentos no Arsenal (até 6 por dia) e pular uma fase travada (depois de 2 derrotas).
+  - Intersticiais: entre partidas (com intervalo mínimo) e antes de cada 5º início manual de fase pela campanha. Nunca durante a partida.
+  - O consentimento (UMP) é pedido quando exigido; em Ajustes aparece "Privacidade dos anúncios" quando disponível.
+  - Os IDs reais do app ficam em `app/build.gradle.kts` (`admobAppId`, `ADMOB_REWARDED_ID`, `ADMOB_INTERSTITIAL_ID`). O aparelho de desenvolvimento está em `ADMOB_TEST_DEVICES` e recebe anúncios de teste; ao instalar em outro aparelho, adicione o hash dele a essa lista e não clique em anúncios reais.
 
 ## Estrutura
 
 ```text
 app/src/main/
   cpp/                      Motor C++ (CMake, OpenGL ES 3.0)
-    core/                   matemática, JSON, ruído, acesso a assets (AAssetManager)
-    world/                  blocos, texturas procedurais 16x16, mundo voxel/chunks, gerador de terreno
-    render/                 renderizador (céu, nuvens, água, personagens, partículas), carregador GLB
-    game/                   jogador, câmera, armas, zumbis (IA + navegação), PvP (net.cpp, UDP), HUD/eventos, protocolo JNI
+    core/                   matemática, aleatório/ruído, plataforma (assets e imagens via JNI), medição de desempenho
+    world/                  blocos, texturas procedurais 16x16, mundo em chunks com streaming,
+                            ilha procedural (island), estruturas e construções
+    render/                 renderizador (céu, nuvens, água, partículas, sombras), personagens de blocos
+                            (blocky/character), arma importada (weapon_asset)
+    game/                   jogador, câmera, armas e itens, missão da ilha (ninhos, cristais, portal),
+                            sobrevivência por ondas, zumbis (IA + campo de fluxo), PvP (net.cpp, UDP),
+                            HUD/eventos e protocolo JNI
     jni_bridge.cpp          funções nativas usadas por NativeBridge.kt
   java/com/fabiosilva/ecosdeeldra/
     MainActivity.kt         fluxo de telas, missão, anúncios, eventos do motor
     engine/                 NativeBridge (JNI), GameSurfaceView (GLSurfaceView, 60 FPS), protocolo
-    data/                   campanha, skins, progresso e regras (testáveis), SaveStore (JSON)
-    ui/                     telas em Views nativas, HUD/controles em Canvas, sobreposições
+    data/                   campanha, itens, progresso e regras (testáveis), contratos e código da ilha, visual do personagem, SaveStore
+      save/                 save recuperável: codec JSON, migrações, arquivos com backup e mensagens
+    tutorial/               objetivo oficial e tutorial jogável (máquina de estados pura, testável)
+    ui/                     telas em Views nativas, HUD/controles em Canvas, sobreposições, ícones da marca
     audio/                  SoundPool (efeitos) + MediaPlayer (música)
     net/                    LanLobby: salas PvP no Wi-Fi (broadcast UDP)
-    ads/  notify/           AdMob premiado e lembretes (AlarmManager + notificação)
-  assets/characters/        os 18 personagens GLB + texturas (únicos assets reaproveitados)
+    ads/  notify/           AdMob (consentimento, premiado, intersticial) e lembretes (AlarmManager)
+  assets/weapons/           modelo da arma (.zzm + textura)
+  assets/icons/             ícones SVG de armas
   res/raw/                  áudio OGG Vorbis gerado por scripts/build-audio.ps1
+docs/brand/                 identidade visual (cores, ícones SVG, regras de uso)
+docs/superpowers/           especificações e planos de trabalho
 ```
 
-O mundo, as texturas, os sons e as músicas são **gerados pelo projeto**: terreno e texturas em tempo de execução, e áudio sintetizado por `scripts/generate-audio.mjs`. Para regerar o áudio é preciso ter Node.js e ffmpeg:
+O mundo, as texturas, os personagens, os sons e as músicas são **gerados pelo projeto**: terreno, texturas e personagens em tempo de execução, e áudio sintetizado por `scripts/generate-audio.mjs`. Para regerar o áudio é preciso ter Node.js e ffmpeg:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-audio.ps1
@@ -115,7 +146,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-audio.ps1
 
 No Android Studio, use **Run** com o celular conectado. Só a ABI do aparelho é compilada.
 
-Pela linha de comando (configurada para PCs com pouca RAM):
+Pela linha de comando (configurada para PCs com pouca RAM; rode um Gradle por vez):
 
 ```powershell
 .\gradlew.bat :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=1
@@ -130,10 +161,12 @@ adb install -r -t app/build/intermediates/apk/debug/app-debug.apk
 ```
 
 - **Requisitos:** NDK 28.2.13676358 e CMake 3.22.1 (pelo SDK Manager), JDK 17.
-- **ID do app:** `com.fabiosilva.ecosdeeldra`. Versão `0.3.0` (versionCode 3).
+- **ID do app:** `com.fabiosilva.ecosdeeldra`. Versão `0.7.0` (versionCode 9).
 
 ## Versão anterior
 
-A versão WebView/Three.js, os mapas de masmorra, o editor de mapas e os testes web foram movidos para `legacy/`. Eles não entram no APK. Também existe um backup completo em `zombie-zone-backup-2026-10-02.zip`, na Área de Trabalho.
+A versão WebView/Three.js, os mapas de masmorra, o editor de mapas e os testes web foram movidos para `legacy/`. Eles não entram no APK.
 
-Créditos: personagens [Kenney Blocky Characters](https://kenney.nl) (CC0). Licença em `app/src/main/assets/notices/`.
+## Créditos
+
+Mundo, texturas, personagens, sons e músicas são gerados pelo projeto. O modelo da arma em `app/src/main/assets/weapons/` foi convertido por `tools/convert_glb_to_zzm.py`; a origem e a licença desse modelo ainda precisam ser documentadas aqui (pendência do autor). Qualquer material de terceiros da versão anterior fica apenas em `legacy/` (com as licenças em `legacy/notices/`) e não entra no APK.

@@ -40,6 +40,27 @@ object Palette {
     val muted = Color.parseColor("#9AA6C0")
     val dark = Color.parseColor("#0E1A08")
     val stone = Color.parseColor("#3A4258")
+
+    // --- Identidade visual (docs/brand/IDENTIDADE.md): tokens ADITIVOS, nunca renomear ---
+    /** Fundo mais fundo que [bg]: base de cartões e do selo. */
+    val ink = Color.parseColor("#060B16")
+    /** Perigo, Noite vermelha, vida crítica. */
+    val danger = Color.parseColor("#FF3D3D")
+    /** Linha de painel em destaque (versão forte de [line]). */
+    val lineStrong = Color.parseColor("#66A8FF3E")
+    /** Famílias de ninho: horda (laranja), explosivo (amarelo), tóxico (verde-água). */
+    val famHorde = Color.parseColor("#FF8A3D")
+    val famExplosive = Color.parseColor("#FFD23D")
+    val famToxic = Color.parseColor("#4FE3A0")
+    /** Cor de cada contrato. */
+    val contractSilent = Color.parseColor("#3CE6FF")
+    val contractNest = Color.parseColor("#FF8A3D")
+    val contractRedNight = Color.parseColor("#FF3D3D")
+    val contractCrate = Color.parseColor("#FFC83D")
+    val contractEndurance = Color.parseColor("#A8FF3E")
+    /** Recursos: sucata (aço) e material infectado (verde-água). */
+    val resScrap = Color.parseColor("#B8C4DA")
+    val resInfected = Color.parseColor("#4FE3A0")
 }
 
 object Fonts {

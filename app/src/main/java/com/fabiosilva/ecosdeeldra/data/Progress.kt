@@ -52,7 +52,6 @@ class Settings {
     var vibration = true
     var quality = 1 // 0 baixa, 1 média, 2 alta
     var reminders = true
-    var adRevenueDifficulty = false
     var showFps = false
     var leftHanded = false
     var playerName = ""
@@ -91,6 +90,8 @@ class Progress {
     var supplyAdsDay = ""
     var supplyAdsToday = 0
     val stats = Stats()
+    /** Histórico e contadores dos contratos de expedição (campo "expeditions" do save). */
+    val expeditions = ExpeditionLog()
     var lastLoginDay = ""
     var calendarClaims = 0
     var lastCalendarClaim = ""
@@ -99,26 +100,27 @@ class Progress {
     var dailyBonusClaimed = false
     var adsDay = ""
     var adsToday = 0
-    // Valor ILRD estimado acumulado localmente; não é valor de receita final/consolidada.
-    var adRevenueMicros = 0L
-    var adRevenueCurrency = ""
     var chestReadyAt = 0L
-    var tutorialSeen = false
+    var tutorialSeen = false      // legado; derivado de TutorialPolicy.isDone ao salvar
+    var tutorialVersion = 0       // maior versão do tutorial cumprida (TutorialPolicy.VERSION)
+    var tutorialMask = 0          // bit por Lesson já concluída (0x1FF = tudo)
+    var playTapsSinceAd = 0
     var missionsSinceInterstitial = 0
     var lastAdAt = 0L
     val settings = Settings()
+    /** Campos de versões futuras do save, devolvidos intactos ao gravar (chave -> "[valor]" em JSON). Só o SaveCodec usa. */
+    val saveExtras: MutableMap<String, String> = mutableMapOf()
 
     fun record(stage: Int): StageRecord = stages.getOrPut(stage) { StageRecord() }
     fun isStageCompleted(stage: Int): Boolean = stages[stage]?.completed == true
     fun totalStars(): Int = stages.values.sumOf { it.stars }
     fun completedStages(): Int = stages.values.count { it.completed }
 
-    /** As fases são infinitas: a próxima libera assim que a anterior é vencida (ou pulada). */
-    fun highestUnlockedStage(): Int {
-        var n = 1
-        while (isStageCompleted(n)) n++
-        return n
-    }
+    /** Profundidade máxima alcançada na árvore + 1 (define zonas, limites de melhorias e armas). */
+    fun highestUnlockedStage(): Int = 1 + (stages.entries.filter { it.value.completed }.maxOfOrNull { StageTree.depth(it.key) } ?: 0)
+
+    /** Nó a jogar por padrão (o próximo da árvore). Qualquer nó disponível pode ser escolhido no mapa. */
+    fun frontierStage(): Int = StageTree.frontier(this)
 }
 
 data class MissionResult(
@@ -157,6 +159,7 @@ data class DailyDef(val id: String, val title: String, val goal: Int, val reward
 object Rules {
     const val AD_DIAMONDS = 25
     const val AD_DAILY_CAP = 5
+    const val CAMPAIGN_PLAY_AD_EVERY = 5
     const val CHEST_INTERVAL_MS = 4L * 60 * 60 * 1000
     const val DAILY_BONUS = 80
     val UPGRADE_COSTS = intArrayOf(60, 110, 170, 250, 350)
@@ -166,7 +169,7 @@ object Rules {
         DailyDef("kill", "Elimine 30 zumbis", 30, 40),
         DailyDef("headshot", "Acerte 10 tiros na cabeça", 10, 45),
         DailyDef("win", "Vença 2 fases", 2, 50),
-        DailyDef("crystal", "Colete 3 cristais nas fases", 3, 40),
+        DailyDef("crystal", "Recolha 3 cristais nas fases", 3, 40),
         DailyDef("stars3", "Vença uma fase com 3 estrelas", 1, 60),
         DailyDef("ad", "Assista a 1 anúncio", 1, 30),
         DailyDef("play", "Jogue por 10 minutos", 600, 40),
@@ -227,7 +230,9 @@ object Rules {
 
     fun canClaimCalendar(p: Progress, day: String): Boolean = p.lastCalendarClaim != day
 
-    fun calendarReward(index: Int): Int = CALENDAR[index % CALENDAR.size]
+    /** A sequência não reinicia: depois do dia 7 cada dia paga +20 a mais que o anterior. */
+    fun calendarReward(index: Int): Int =
+        if (index < CALENDAR.size) CALENDAR[index] else CALENDAR.last() + (index - CALENDAR.size + 1) * 20
 
     fun claimCalendar(p: Progress, day: String): Int {
         if (!canClaimCalendar(p, day)) return 0
@@ -333,7 +338,7 @@ object Rules {
     fun canSkip(p: Progress, stage: Int, pendingFails: Int = 0): Boolean {
         val record = p.stages[stage]
         val fails = (record?.fails ?: 0) + pendingFails
-        return record?.completed != true && fails >= SKIP_AFTER_FAILS && stage == p.highestUnlockedStage()
+        return record?.completed != true && fails >= SKIP_AFTER_FAILS && StageTree.isAvailable(p, stage)
     }
 
     fun skipStage(p: Progress, stage: Int): Boolean {
@@ -347,6 +352,13 @@ object Rules {
     /** Intersticial só depois de algumas partidas e nunca colado em outro anúncio. */
     const val INTERSTITIAL_EVERY = 2
     const val INTERSTITIAL_GAP_MS = 150_000L
+
+    fun registerCampaignPlayTap(p: Progress): Boolean {
+        p.playTapsSinceAd += 1
+        if (p.playTapsSinceAd < CAMPAIGN_PLAY_AD_EVERY) return false
+        p.playTapsSinceAd = 0
+        return true
+    }
 
     fun shouldShowInterstitial(p: Progress, now: Long): Boolean =
         p.stats.wins + p.stats.losses >= 3 &&

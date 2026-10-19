@@ -8,6 +8,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.fabiosilva.ecosdeeldra.MainActivity
+import com.fabiosilva.ecosdeeldra.data.ContractReward
+import com.fabiosilva.ecosdeeldra.data.ContractId
+import com.fabiosilva.ecosdeeldra.data.ExpeditionKind
+import com.fabiosilva.ecosdeeldra.data.ExpeditionPlan
 import com.fabiosilva.ecosdeeldra.data.Rules
 import com.fabiosilva.ecosdeeldra.data.SurvivalRecord
 import com.fabiosilva.ecosdeeldra.data.SurvivalResult
@@ -52,7 +56,7 @@ private fun rankingTable(app: MainActivity, ranking: List<SurvivalRecord>, highl
     return list
 }
 
-/** Modo sobrevivência: explicação, recorde, bônus por anúncio e ranking. */
+/** Modo sobrevivência: explicação, recorde e ranking. */
 @SuppressLint("ViewConstructor")
 class SurvivalScreen(private val app: MainActivity) : FrameLayout(app) {
     init {
@@ -81,23 +85,9 @@ class SurvivalScreen(private val app: MainActivity) : FrameLayout(app) {
         record.addView(android.view.View(app), Ui.lp(app.dpi(6), 1))
         record.addView(stat("PARTIDAS", "${s.survivalRuns}"), Ui.lp(0, Ui.WRAP, 1f))
         left.addView(record)
-        lateinit var boost: TextView
-        fun refreshBoost() {
-            boost.text = if (app.boostReady) "BÔNUS ATIVO ✓" else "▶ +30% VIDA E +20% DANO (anúncio)"
-            Ui.setEnabledLook(boost, !app.boostReady)
-        }
-        boost = Ui.button(app, "", Palette.cyan, Palette.dark, 12f) {
-            if (!app.boostReady) app.watchAd {
-                app.boostReady = true
-                app.audio.playUi("reward", 1f)
-                refreshBoost()
-            }
-        }
-        refreshBoost()
-        left.addView(boost, Ui.lp(Ui.MATCH, app.dpi(44)).apply { topMargin = app.dpi(10) })
         val buttons = Ui.row(app)
         buttons.addView(Ui.button(app, "🎒 MOCHILA", Palette.stone, Color.WHITE, 13f) { app.showInventory(0) { app.showSurvival() } }, Ui.lp(0, app.dpi(54), 0.8f).apply { marginEnd = app.dpi(8) })
-        val play = Ui.button(app, "SOBREVIVER ▶", Palette.lime, Palette.dark, 18f) { app.startSurvival() }
+        val play = Ui.button(app, "SOBREVIVER ▶", Palette.lime, Palette.dark, 18f) { app.showExpeditionPrep(ExpeditionKind.SURVIVAL, back = { app.showSurvival() }) }
         buttons.addView(play, Ui.lp(0, app.dpi(54), 1.2f))
         left.addView(buttons, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(8) })
         Ui.pulse(play)
@@ -143,6 +133,8 @@ class SurvivalResultOverlay(
     summary: SurvivalSummary,
     ranking: List<SurvivalRecord>,
     mine: SurvivalRecord?,
+    plan: ExpeditionPlan? = null,
+    contract: ContractReward = ContractReward.NONE,
 ) : FrameLayout(app) {
     init {
         setBackgroundColor(Color.argb(200, 4, 7, 14))
@@ -155,17 +147,24 @@ class SurvivalResultOverlay(
         left.addView(Ui.text(app, "Onda ${result.wave} • ☠ ${result.kills} abates • ${result.headshots} na cabeça", 12f, Palette.text).apply { setPadding(0, app.dpi(2), 0, 0) })
         left.addView(Ui.text(app, "★ ${result.score} pontos", 15f, Palette.cyan, Fonts.title).apply { setPadding(0, app.dpi(6), 0, 0) })
         if (summary.rank > 0) left.addView(Ui.text(app, "${summary.rank}º lugar no ranking!", 14f, Palette.lime, Fonts.title).apply { setPadding(0, app.dpi(4), 0, 0) })
-        val rewardText = Ui.title(app, "◆ ${summary.reward}", 18f, Palette.cyan)
+        val hasContract = plan != null && plan.contract != ContractId.NONE
+        if (plan != null && hasContract) left.addView(contractChip(app, plan.contract), Ui.lp(Ui.WRAP, Ui.WRAP).apply { topMargin = app.dpi(6) })
+        val rewardText = Ui.title(app, "◆ ${summary.reward + contract.total}", 18f, Palette.cyan)
         val rewardRow = Ui.row(app).apply { setPadding(0, app.dpi(8), 0, app.dpi(4)) }
         rewardRow.addView(Ui.text(app, "Recompensa ", 13f, Palette.text))
         rewardRow.addView(rewardText)
         left.addView(rewardRow)
+        if (hasContract && contract.total > 0) {
+            left.addView(Ui.text(app, "Ondas e abates ◆ ${summary.reward}  +  CONTRATO ◆ ${contract.total}", 11f, Palette.muted))
+        }
+        if (plan != null) islandCodeRow(app, plan)?.let { left.addView(it, Ui.lp(Ui.WRAP, Ui.WRAP).apply { topMargin = app.dpi(4) }) }
         val buttons = Ui.column(app)
         if (summary.reward > 0) {
             lateinit var double: TextView
             double = Ui.button(app, "▶ DOBRAR ◆${summary.reward}", Palette.cyan, Palette.dark, 13f) {
                 app.doubleRewardWithAd(summary.reward) {
-                    rewardText.text = "◆ ${summary.reward * 2}"
+                    // Só a recompensa de ondas dobra; o bônus do contrato fica como está.
+                    rewardText.text = "◆ ${summary.reward * 2 + contract.total}"
                     Ui.setEnabledLook(double, false)
                     double.text = "DOBRADO ✓"
                 }

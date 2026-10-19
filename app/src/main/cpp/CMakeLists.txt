@@ -11,6 +11,7 @@ set(CMAKE_JOB_POOL_LINK link_pool)
 
 add_library(zombiezone SHARED
     jni_bridge.cpp
+    core/perf.cpp
     core/platform.cpp
     world/block_textures.cpp
     world/buildings.cpp
@@ -24,11 +25,14 @@ add_library(zombiezone SHARED
     render/renderer.cpp
     render/weapon_asset.cpp
     game/game.cpp
+    game/game_contract.cpp
     game/game_items.cpp
     game/game_mission.cpp
+    game/game_perf.cpp
     game/game_survival.cpp
     game/game_zombies.cpp
     game/nav.cpp
+    game/perf_bench.cpp
     game/net.cpp
 )
 

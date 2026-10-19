@@ -11,9 +11,8 @@ import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 
 /**
- * Anúncio intersticial entre partidas (bloco ADMOB_INTERSTITIAL_ID no app/build.gradle.kts).
- * Só aparece numa pausa natural (ao sair da tela de resultado), nunca durante a partida, e a
- * frequência é limitada por Rules.shouldShowInterstitial — conforme as políticas do AdMob.
+ * Anúncio intersticial entre partidas e antes de cada quinto início manual da campanha.
+ * Nunca aparece durante uma partida; usa o bloco ADMOB_INTERSTITIAL_ID no app/build.gradle.kts.
  * O aparelho de desenvolvimento recebe anúncios de teste (ADMOB_TEST_DEVICES).
  */
 class InterstitialAds(private val activity: Activity) {

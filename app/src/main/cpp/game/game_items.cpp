@@ -284,8 +284,10 @@ int Game::addItem(int id, int count) {
     const int maxStack = itemMaxStack(id, config_.explosives);
     // Arma repetida não ocupa espaço: vira munição cheia.
     if (isWeaponItem(id) && countItem(id) > 0) {
-        clipsInit_[id] = false;
-        if (weaponId() == id) ammo_ = magazineFor(id);
+        if (!ammoLimited()) {  // contrato de munição escassa: arma repetida não vira munição grátis
+            clipsInit_[id] = false;
+            if (weaponId() == id) ammo_ = magazineFor(id);
+        }
         return 0;
     }
     // Completa pilhas existentes, depois ocupa espaços vazios (barra rápida primeiro, como no Minecraft).

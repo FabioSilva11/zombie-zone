@@ -5,10 +5,12 @@
 #include <netinet/in.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
 #include "../core/math.h"
+#include "pvp_rules.h"
 
 namespace zz {
 
@@ -49,6 +51,10 @@ struct NetPlayer {
     bool hasAddr = false;
     uint16_t seen[32] = {};
     int seenCount = 0;
+    uint16_t lastSeq = 0;      // último número de sequência aceito (pacotes antigos são descartados)
+    bool hasSeq = false;
+    pvp::PacketBucket packets;  // limite de pacotes por segundo
+    pvp::ShooterState shooter;  // cadência, pente, recarga e tiros validados
 };
 
 struct NetConfig {
@@ -58,6 +64,7 @@ struct NetConfig {
     int killLimit = 10;
     float timeLimit = 300;
     uint8_t skins[kMaxNetPlayers] = {255, 255, 255, 255, 255, 255, 255, 255};
+    uint32_t ips[kMaxNetPlayers] = {};  // IPv4 (ordem de host) esperado de cada id; 0 = sem verificação
 };
 
 class NetSession {
@@ -72,6 +79,10 @@ public:
     void setLocalState(const Vec3& pos, float yaw, float pitch, uint8_t flags, float speed);
     void localFire(const Vec3& from, const Vec3& to);
     void localHit(int target, int damage, bool headshot);
+
+    // Anfitrião: teste de linha de tiro no mundo da arena (true = livre). Sem isso o filtro de linha de tiro fica desligado.
+    void setLineOfSight(std::function<bool(const Vec3&, const Vec3&)> fn) { los_ = std::move(fn); }
+    const pvp::Counters& guardStats() const { return guard_; }
 
     // Envia/recebe pacotes; eventos novos (de outros jogadores e do anfitrião) vão para `out`.
     void update(float dt, std::vector<NetEvent>& out);
@@ -98,6 +109,10 @@ private:
     void sendState();
     int chooseSpawn(int id) const;
     bool seenHostEvent(uint16_t id);
+    void reject(pvp::Reject why);
+    void logGuard(bool force);
+    pvp::Limits limits() const;
+    bool endpointBoundElsewhere(int id, const sockaddr_in& from) const;
 
     NetConfig config_;
     std::vector<Vec3> spawns_;
@@ -117,6 +132,12 @@ private:
     uint32_t snapshotCount_ = 0;
     uint16_t seenHost_[64] = {};
     int seenHostCount_ = 0;
+    // Validação no anfitrião (PvP casual: ver pvp_rules.h).
+    std::function<bool(const Vec3&, const Vec3&)> los_;
+    pvp::Counters guard_;
+    pvp::Counters guardLogged_;
+    double clock_ = 0;       // relógio real (s) do anfitrião, usado por cadência e pacotes por segundo
+    double nextGuardLog_ = 0;
 };
 
 }  // namespace zz

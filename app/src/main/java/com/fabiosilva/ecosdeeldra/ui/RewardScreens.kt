@@ -177,10 +177,9 @@ class RewardPreviewOverlay(private val app: MainActivity, canClaim: Boolean, onC
         dialog.addView(PreviewBackdrop(app), Ui.frame(Ui.MATCH, Ui.MATCH))
 
         val p = app.progress
-        val next = p.calendarClaims % 7
-        // Estados: se pode resgatar hoje, os dias antes de "next" já foram coletados e "next" é o de hoje.
-        // Se já resgatou hoje, os dias até o último resgate estão coletados e nenhum é "atual".
-        val collectedCount = if (canClaim) next else if (p.calendarClaims == 0) 0 else ((p.calendarClaims - 1) % 7) + 1
+        // Janela de 7 dias. A sequência segue (dia 8, 9…); só a janela anda a cada semana.
+        // Se já resgatou hoje, a janela é a do último resgate, para mostrar o dia recém-coletado.
+        val cycleStart = ((p.calendarClaims - if (canClaim) 0 else 1).coerceAtLeast(0)) / 7 * 7
 
         val column = Ui.column(app).apply { gravity = Gravity.CENTER_HORIZONTAL }
         column.addView(
@@ -189,22 +188,23 @@ class RewardPreviewOverlay(private val app: MainActivity, canClaim: Boolean, onC
             },
         )
         column.addView(
-            Ui.text(app, "Entre todo dia para coletar as recompensas abaixo.\nDica: elas crescem a cada dia — o Dia 7 paga mais.", 12f, Palette.text).apply {
+            Ui.text(app, "Entre todo dia para coletar. A sequência não reinicia: cada dia paga mais que o anterior.", 12f, Palette.text).apply {
                 gravity = Gravity.CENTER
                 setLineSpacing(0f, 1.15f)
                 setPadding(0, app.dpi(6), 0, app.dpi(10))
             },
         )
         val row = Ui.row(app, Gravity.TOP)
-        for (day in 0 until 7) {
+        for (offset in 0 until 7) {
+            val index = cycleStart + offset
             val state = when {
-                day < collectedCount -> DayState.COLLECTED
-                canClaim && day == next -> DayState.CURRENT
+                index < p.calendarClaims -> DayState.COLLECTED
+                canClaim && index == p.calendarClaims -> DayState.CURRENT
                 else -> DayState.LOCKED
             }
             val cell = Ui.column(app)
-            cell.addView(DayTab(app, "DIA ${day + 1}", state), Ui.lp(Ui.MATCH, app.dpi(24)))
-            val card = DayCard(app, Rules.CALENDAR[day], state)
+            cell.addView(DayTab(app, "DIA ${index + 1}", state), Ui.lp(Ui.MATCH, app.dpi(24)))
+            val card = DayCard(app, Rules.calendarReward(index), state)
             cell.addView(card, Ui.lp(Ui.MATCH, app.dpi(104)).apply { topMargin = app.dpi(4); marginStart = app.dpi(6); marginEnd = app.dpi(6) })
             if (state == DayState.CURRENT) {
                 card.isClickable = true

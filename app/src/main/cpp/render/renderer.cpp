@@ -621,6 +621,7 @@ GLuint makeTexture2D(int w, int h, GLenum internal, GLenum format, GLenum type, 
 
 void Renderer::onSurfaceCreated() {
     ++contextId_;
+    gpuBytes_ = 0;  // os VBOs do contexto antigo se perderam
     // Handles antigos ficaram inválidos com o contexto; recria tudo sem chamar glDelete.
     quadIbo_ = 0;
     quadIboCapacity_ = 0;
@@ -646,6 +647,7 @@ void Renderer::setTheme(const Theme& theme) {
 }
 
 void Renderer::createPrograms() {
+    ShaderProgram::invalidateAll();  // cache de locais de uniformes
     const std::string vs = shaderSource("", kVoxelVs);
     voxel_.id = compileProgram(vs.c_str(), (shaderSource("", kVoxelFs) + kLightingCommon + kVoxelFsMain).c_str(), "voxel");
     voxelLit_.id = compileProgram(vs.c_str(), (shaderSource("#define SHADOWS 1\n", kVoxelFs) + kLightingCommon + kVoxelFsMain).c_str(), "voxel-sombras");
@@ -849,14 +851,19 @@ void Renderer::releaseCharacter(CharacterAsset& asset) {
     asset.contextId = -1;
 }
 
-void Renderer::syncChunks(World& world) {
+void Renderer::syncChunks(World& world, const FrameScene& scene) {
+    ZZ_TRACE_SCOPE("ZZ upload");
+    const double t0 = perf::nowMs();
     world.drainGpuGarbage(garbage_);
     for (ChunkGpu& g : garbage_) {
         if (g.contextId != contextId_) continue;
         glDeleteVertexArrays(3, g.vao);
         glDeleteBuffers(3, g.vbo);
+        gpuBytes_ -= std::min<size_t>(gpuBytes_, g.bytes);
+        ++stats_.gpuDeletes;
     }
     garbage_.clear();
+    uploadQueue_.clear();
     for (Chunk* c : world.chunks()) {
         if (!c->meshed) continue;
         ChunkGpu& gpu = c->gpu;
@@ -867,32 +874,62 @@ void Renderer::syncChunks(World& world) {
             c->dirty = true;
             continue;
         }
-        if (gpu.contextId != contextId_) {
-            glGenVertexArrays(3, gpu.vao);
-            glGenBuffers(3, gpu.vbo);
-            gpu.contextId = contextId_;
-        }
-        const std::vector<VoxelVertex>* lists[3] = {&c->mesh.opaque, &c->mesh.cutout, &c->mesh.water};
-        for (int pass = 0; pass < 3; ++pass) {
-            const auto& verts = *lists[pass];
-            gpu.quads[pass] = static_cast<int>(verts.size() / 4);
-            ensureQuadIndices(static_cast<size_t>(gpu.quads[pass]));
-            glBindVertexArray(gpu.vao[pass]);
-            glBindBuffer(GL_ARRAY_BUFFER, gpu.vbo[pass]);
-            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(VoxelVertex)), verts.empty() ? nullptr : verts.data(), GL_STATIC_DRAW);
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 3, GL_SHORT, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(0));
-            glEnableVertexAttribArray(1);
-            glVertexAttribPointer(1, 2, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(6));
-            glEnableVertexAttribArray(2);
-            glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(8));
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quadIbo_);
-            glBindVertexArray(0);
-        }
-        gpu.version = c->version;
-        // A malha já está na GPU: libera a cópia da CPU (mundo grande = muitos chunks).
-        c->mesh = ChunkMesh();
+        uploadQueue_.push_back(c);
     }
+    // Mais perto primeiro: se o orçamento acabar, o buraco fica no anel mais distante (atrás da névoa).
+    const Vec3 f = scene.focus;
+    auto d2 = [&](const Chunk* ch) {
+        const float dx = ch->cx * 16.0f + 8.0f - f.x, dz = ch->cz * 16.0f + 8.0f - f.z;
+        return dx * dx + dz * dz;
+    };
+    if (uploadQueue_.size() > 1) std::sort(uploadQueue_.begin(), uploadQueue_.end(), [&](const Chunk* p, const Chunk* q) { return d2(p) < d2(q); });
+    const UploadBudget& ub = scene.upload;
+    size_t bytes = 0;
+    int n = 0;
+    for (Chunk* c : uploadQueue_) {
+        const size_t cb = (c->mesh.opaque.size() + c->mesh.cutout.size() + c->mesh.water.size()) * sizeof(VoxelVertex);
+        if (!ub.unlimited && n >= 1 && (n >= ub.maxChunks || bytes + cb > ub.maxBytes)) break;  // piso: sempre sobe o mais próximo
+        uploadChunk(*c, cb);
+        bytes += cb;
+        ++n;
+    }
+    stats_.uploads = n;
+    stats_.uploadBytes = bytes;
+    stats_.uploadsPending = static_cast<int>(uploadQueue_.size()) - n;
+    stats_.gpuBytes = gpuBytes_;
+    stats_.uploadMs = static_cast<float>(perf::nowMs() - t0);
+}
+
+void Renderer::uploadChunk(Chunk& chunk, size_t bytes) {
+    Chunk* c = &chunk;
+    ChunkGpu& gpu = c->gpu;
+    if (gpu.contextId != contextId_) {
+        glGenVertexArrays(3, gpu.vao);
+        glGenBuffers(3, gpu.vbo);
+        gpu.contextId = contextId_;
+    }
+    const std::vector<VoxelVertex>* lists[3] = {&c->mesh.opaque, &c->mesh.cutout, &c->mesh.water};
+    for (int pass = 0; pass < 3; ++pass) {
+        const auto& verts = *lists[pass];
+        gpu.quads[pass] = static_cast<int>(verts.size() / 4);
+        ensureQuadIndices(static_cast<size_t>(gpu.quads[pass]));
+        glBindVertexArray(gpu.vao[pass]);
+        glBindBuffer(GL_ARRAY_BUFFER, gpu.vbo[pass]);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(VoxelVertex)), verts.empty() ? nullptr : verts.data(), GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_SHORT, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(0));
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(6));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(8));
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quadIbo_);
+        glBindVertexArray(0);
+    }
+    gpu.version = c->version;
+    gpuBytes_ = gpuBytes_ - std::min<size_t>(gpuBytes_, gpu.bytes) + bytes;
+    gpu.bytes = static_cast<uint32_t>(bytes);
+    // A malha já está na GPU: libera a cópia da CPU (mundo grande = muitos chunks).
+    c->mesh = ChunkMesh();
 }
 
 void Renderer::setLightUniforms(const FrameScene& scene, const ShaderProgram& p) {
@@ -952,7 +989,8 @@ void Renderer::setVoxelUniforms(const FrameScene& scene, const ShaderProgram& p,
     glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures_);
 }
 
-void Renderer::drawChunks(const FrameScene& scene, int pass, const Vec4* planes, float maxDist, const Vec3& center) {
+void Renderer::drawChunks(const FrameScene& scene, int pass, const Vec4* planes, float maxDist, const Vec3& center, int* drawCounter) {
+    ZZ_TRACE_SCOPE("ZZ drawChunks");
     struct Item { const Chunk* chunk; float dist; };
     static std::vector<Item> items;
     items.clear();
@@ -978,6 +1016,7 @@ void Renderer::drawChunks(const FrameScene& scene, int pass, const Vec4* planes,
         glBindVertexArray(gpu.vao[pass]);
         glDrawElements(GL_TRIANGLES, gpu.quads[pass] * 6, GL_UNSIGNED_INT, nullptr);
     }
+    if (drawCounter) *drawCounter += static_cast<int>(items.size());
     glBindVertexArray(0);
 }
 
@@ -1070,6 +1109,7 @@ void Renderer::drawCharacters(const FrameScene& scene, const ShaderProgram& p, b
     for (size_t c = 0; c < scene.characterCount && c < scene.characters.size(); ++c) {
         const CharacterDraw& draw = scene.characters[c];
         if (!draw.asset) continue;
+        ++stats_.characterDraws;
         ensureCharacter(*draw.asset);
         if (!depthOnly) {
             glBindTexture(GL_TEXTURE_2D, draw.asset->texture);
@@ -1092,6 +1132,7 @@ void Renderer::drawCharacters(const FrameScene& scene, const ShaderProgram& p, b
             const auto& gpu = draw.asset->meshes[static_cast<size_t>(mesh)];
             glBindVertexArray(gpu.vao);
             glDrawElements(GL_TRIANGLES, gpu.count, GL_UNSIGNED_SHORT, nullptr);
+            ++stats_.partDraws;
         }
         if (restoreCull) glEnable(GL_CULL_FACE);
     }
@@ -1114,6 +1155,7 @@ void Renderer::drawBoxes(const FrameScene& scene, const ShaderProgram& p) {
         glUniform4f(uColor, box.color.x, box.color.y, box.color.z, box.color.w);
         glUniform1f(uEmissive, box.emissive);
         glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_SHORT, nullptr);
+        ++stats_.boxDraws;
     }
     glBindVertexArray(0);
 }
@@ -1147,6 +1189,7 @@ void Renderer::drawBillboards(const FrameScene& scene, const Mat4& viewProj) {
         glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(bytes), billboardData_.data());
         glUniform1i(uMode, mode);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(billboardData_.size() / kBillboardFloats));
+        ++stats_.billboardFlushes;
         billboardData_.clear();
     };
     auto groundQuad = [&](const Vec3& pos, float r, const Vec4& color) {
@@ -1265,9 +1308,9 @@ void Renderer::renderShadowMap(const FrameScene& scene) {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, blockTextures_);
     glUniform1f(voxelDepth_.uniform("u_alphaTest"), -1.0f);
-    drawChunks(scene, 0, shadowPlanes_, kShadowHalf * 1.5f, scene.focus);
+    drawChunks(scene, 0, shadowPlanes_, kShadowHalf * 1.5f, scene.focus, &stats_.shadowChunkDraws);
     glUniform1f(voxelDepth_.uniform("u_alphaTest"), 0.5f);
-    drawChunks(scene, 1, shadowPlanes_, kShadowHalf * 1.5f, scene.focus);
+    drawChunks(scene, 1, shadowPlanes_, kShadowHalf * 1.5f, scene.focus, &stats_.shadowChunkDraws);
 
     glUseProgram(modelDepth_.id);
     glUniformMatrix4fv(modelDepth_.uniform("u_viewProj"), 1, GL_FALSE, lightVP.m);
@@ -1390,9 +1433,12 @@ void Renderer::postProcess(const FrameScene& scene, const Mat4& viewProj) {
 }
 
 void Renderer::render(FrameScene& scene) {
+    stats_ = RenderStats();
+    stats_.gpuBytes = gpuBytes_;
     if (!voxel_.id) return;
+    ZZ_TRACE_SCOPE("ZZ render");
     if (themeDirty_) uploadBlockTextures();
-    if (scene.world) syncChunks(*scene.world);
+    if (scene.world) syncChunks(*scene.world, scene);
     Mat4 viewProj = scene.proj * scene.view;
     extractPlanes(viewProj, frustum_);
 
@@ -1416,10 +1462,10 @@ void Renderer::render(FrameScene& scene) {
         setVoxelUniforms(scene, vp, viewProj);
         glUniform1f(vp.uniform("u_alphaTest"), -1.0f);
         glUniform1f(vp.uniform("u_alpha"), 1.0f);
-        drawChunks(scene, 0, frustum_, scene.drawDistance, scene.cameraPos);
+        drawChunks(scene, 0, frustum_, scene.drawDistance, scene.cameraPos, &stats_.chunkDraws[0]);
         glDisable(GL_CULL_FACE);
         glUniform1f(vp.uniform("u_alphaTest"), 0.5f);
-        drawChunks(scene, 1, frustum_, scene.drawDistance, scene.cameraPos);
+        drawChunks(scene, 1, frustum_, scene.drawDistance, scene.cameraPos, &stats_.chunkDraws[1]);
         glEnable(GL_CULL_FACE);
     }
     const ShaderProgram& mp = modelProgram();
@@ -1434,7 +1480,7 @@ void Renderer::render(FrameScene& scene) {
         glDisable(GL_CULL_FACE);
         glUniform1f(vp.uniform("u_alphaTest"), -1.0f);
         glUniform1f(vp.uniform("u_alpha"), 0.74f);
-        drawChunks(scene, 2, frustum_, scene.drawDistance, scene.cameraPos);
+        drawChunks(scene, 2, frustum_, scene.drawDistance, scene.cameraPos, &stats_.chunkDraws[2]);
         glEnable(GL_CULL_FACE);
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);

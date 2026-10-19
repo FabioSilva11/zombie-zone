@@ -16,6 +16,7 @@ import android.widget.TextView
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Campaign
 import com.fabiosilva.ecosdeeldra.data.Cosmetics
+import com.fabiosilva.ecosdeeldra.data.ExpeditionKind
 import com.fabiosilva.ecosdeeldra.data.Look
 import com.fabiosilva.ecosdeeldra.data.LookPainter
 import com.fabiosilva.ecosdeeldra.data.Rules
@@ -242,7 +243,7 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         addView(bar, Ui.frame(Ui.WRAP, app.dpi(42), Gravity.BOTTOM or Gravity.START).apply { setMargins(app.dpi(14), 0, 0, app.dpi(14)) })
 
         // Modo/fase atual + botão JOGAR (canto inferior direito)
-        val current = Campaign.stage(p.highestUnlockedStage())
+        val current = Campaign.stage(p.frontierStage())
         val dock = Ui.column(app)
         val mode = Ui.row(app).apply {
             background = PanelDrawable(app, Color.parseColor("#E61A1140"), Color.parseColor("#99B07CFF"), 8f)
@@ -255,19 +256,19 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
             }
         }
         mode.addView(
-            Ui.title(app, "${current.number}", 20f, Palette.dark).apply {
+            Ui.title(app, "${current.depth}", 20f, Palette.dark).apply {
                 gravity = Gravity.CENTER
                 background = BlockDrawable(app, current.zone.color, 6f, 3f)
             },
             Ui.lp(app.dpi(44), app.dpi(44)),
         )
         val modeText = Ui.column(app).apply { setPadding(app.dpi(10), 0, 0, 0) }
-        modeText.addView(Ui.title(app, "FASE ${current.number} • ${current.title.uppercase()}", 15f, Palette.cyan))
+        modeText.addView(Ui.title(app, "FASE ${current.depth} • ${current.title.uppercase()}", 15f, Palette.cyan))
         modeText.addView(Ui.text(app, "ZONA ${current.zone.index + 1} • ${current.zone.name.uppercase()} • MAPA ALEATÓRIO", 9f, current.zone.color, Fonts.title))
         mode.addView(modeText, Ui.lp(0, Ui.WRAP, 1f))
         mode.addView(IconView(app, Icon.SWORDS, Palette.text), Ui.lp(app.dpi(24), app.dpi(24)))
         dock.addView(mode, Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(8) })
-        val play = Ui.button(app, "JOGAR", Palette.accent, Palette.dark, 28f) { app.startStage(current.number) }
+        val play = Ui.button(app, "JOGAR", Palette.accent, Palette.dark, 28f) { app.showExpeditionPrep(ExpeditionKind.CAMPAIGN, current.number) }
         dock.addView(play, Ui.lp(Ui.MATCH, app.dpi(64)))
         shrinkLobbyControls(dock, anchorRight = true, anchorBottom = true)
         addView(dock, Ui.frame(app.dpi(296), Ui.WRAP, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, app.dpi(14), app.dpi(14)) })

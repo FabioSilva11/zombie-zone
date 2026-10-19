@@ -12,8 +12,8 @@ android {
         applicationId = "com.fabiosilva.ecosdeeldra"
         minSdk = 24
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.6.1"
+        versionCode = 9
+        versionName = "0.7.0"
 
         // AdMob (IDs reais do app). O aparelho de desenvolvimento recebe anúncios de teste
         // via ADMOB_TEST_DEVICES para não gerar tráfego inválido (políticas do AdMob).
@@ -68,4 +68,6 @@ dependencies {
     implementation("com.google.android.gms:play-services-ads:24.7.0")
     implementation("com.google.android.ump:user-messaging-platform:3.2.0")
     testImplementation("junit:junit:4.13.2")
+    // Implementação real de org.json para testes JVM (o android.jar só traz stubs que lançam "not mocked").
+    testImplementation("org.json:json:20250517")
 }

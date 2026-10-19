@@ -75,6 +75,7 @@ public:
     const IslandPoi& poiAtCell(int id) { return poi(id % kIslandCells, id / kIslandCells); }
     void poisNear(const Vec3& p, float radius, std::vector<const IslandPoi*>& out);
     const PoiStamp& stamp(const IslandPoi& poi);
+    bool hasStamp(const IslandPoi& poi) const { return stamps_.count(poi.id) != 0; }
 
     int seaLevel() const { return sea_; }
     const Theme& primary() const { return primary_; }
