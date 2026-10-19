@@ -228,8 +228,6 @@ void main() {
     float fog = smoothstep(u_fogRange.x, u_fogRange.y, dist);
 #ifdef SHADOWS
     // Névoa baixa nos vales (mais densa perto da água).
-    float low = exp(-max(v_world.y - 13.0, 0.0) * 0.16) * smoothstep(6.0, 60.0, dist) * 0.5;
-    fog = max(fog, low);
 #endif
     o_color = vec4(mix(color, u_fogColor, fog), u_alpha * max(tex.a, 0.0));
 }

@@ -42,6 +42,8 @@ class HudLayout(val controls: MutableMap<HudControl, ControlPos>) {
     }
 
     companion object {
+        private const val SAVED_DEFAULT = "hotbar=0.4190,0.8967,1.000,1;joy=0.0846,0.8445,0.700,1;fire=0.8612,0.6820,1.000,1;fire2=0.1659,0.4934,1.000,0;aim=0.1674,0.4882,1.000,1;jump=0.9528,0.6230,1.100,1;reload=0.8900,0.4397,1.000,1;crouch=0.7544,0.8943,1.000,1;sprint=0.1859,0.7452,1.000,1;melee=0.7478,0.7057,1.000,1;grenade=0.7986,0.4559,1.000,1;medkit=0.7196,0.5753,1.000,1;weaponpanel=0.8965,0.1451,1.000,1;emote=0.1495,0.1341,0.600,1;map=0.0639,0.1597,1.000,1;supply=0.0686,0.3811,1.000,1;pause=0.7539,0.1276,0.600,1;bag=0.0391,0.5992,1.000,1"
+
         const val MIN_SCALE = 0.6f
         const val MAX_SCALE = 1.8f
 
@@ -96,7 +98,8 @@ class HudLayout(val controls: MutableMap<HudControl, ControlPos>) {
             put(HudControl.SUPPLY, 62f, 155f, 1f, mirror = false)
             put(HudControl.PAUSE, wDp - 40f, 36f, 1f, mirror = false)
             put(HudControl.BAG, wDp - 40f, 96f, 1f, mirror = false)
-            return HudLayout(map)
+            // Padrao destro: a disposicao escolhida no editor de HUD (fracoes da tela, valem para qualquer tamanho).
+            return if (leftHanded) HudLayout(map) else decode(SAVED_DEFAULT, HudLayout(map))
         }
 
         /** Lê o layout salvo; controles ausentes (versões antigas) vêm do padrão. */

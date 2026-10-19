@@ -758,10 +758,12 @@ void Game::updatePlayer(float dt, const InputState& in) {
     float mag = std::min(1.0f, std::sqrt(mx * mx + my * my));
     // Curva do analógico: precisão em toques leves, velocidade total no fim do curso.
     float response = mag > 1e-3f ? std::pow(mag, 1.25f) : 0.0f;
-    bool wantSprint = mag > 0.9f || (sprintLock_ && mag > 0.35f);
+    // So o botao de correr ativa a corrida; empurrar o analogico ate o fim so anda.
+    bool wantSprint = sprintLock_ && mag > 0.35f;
     sprinting_ = wantSprint && !crouching_ && aimBlend_ < 0.3f && !in.fire && !firingNow_ && slowed_ <= 0 && meleeTime_ < 0;
     if (sprinting_ && sprintLock_) response = 1.0f;
-    float speed = kPlayerSpeed * (sprinting_ ? 1.45f : 1.0f) * (crouching_ ? 0.5f : 1.0f) * lerpf(1.0f, 0.6f, aimBlend_) *
+    // Andar no fim do analogico e 1.45x (como antes); correr pelo botao e 2x andar.
+    float speed = kPlayerSpeed * (sprinting_ ? 2.0f : (mag > 0.9f ? 1.45f : 1.0f)) * (crouching_ ? 0.5f : 1.0f) * lerpf(1.0f, 0.6f, aimBlend_) *
                   (player_.inWater ? 0.6f : 1.0f) * (slowed_ > 0 ? 0.55f : 1.0f) * weaponDef(weaponId()).moveMul *
                   config_.speedMul * (adrenaline_ > 0 ? 1.3f : 1.0f);
     Vec3 fwd = forwardFromYaw(camYaw_), right = rightFromYaw(camYaw_);
@@ -1692,6 +1694,9 @@ void Game::buildScene() {
         s.sky.fogStart = std::min(theme_.sky.fogStart, s.sky.fogEnd * 0.45f);
     }
     s.drawDistance = s.sky.fogEnd + 10.0f;
+    // Sem nevoeiro: a mistura com a cor do ceu fica desligada; o alcance de desenho nao muda.
+    s.sky.fogStart = 1.0e6f;
+    s.sky.fogEnd = 1.0e6f + 1.0f;
     s.characterCount = 0;
     s.boxes.clear();
     s.particles.clear();
