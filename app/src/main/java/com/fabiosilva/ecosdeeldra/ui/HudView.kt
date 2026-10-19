@@ -56,7 +56,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         fun onCoachSkipRequested() = Unit
     }
 
-    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, FIRE_LEFT, AIM, JUMP, RELOAD, CROUCH, SPRINT, MELEE, GRENADE, MEDKIT, PAUSE, MAP, SUPPLY, HOTBAR, BAG, COACH_SKIP }
+    private enum class Role { NONE, JOYSTICK, LOOK, FIRE, FIRE_LEFT, AIM, JUMP, RELOAD, CROUCH, SPRINT, MELEE, GRENADE, MEDKIT, EMOTE, EMOTE_ITEM, WEAPON_SLOT, PAUSE, MAP, SUPPLY, HOTBAR, BAG, COACH_SKIP }
     private class Touch(var role: Role, var x: Float, var y: Float, val startX: Float, val startY: Float, var slot: Int = -1, var cancel: Boolean = false)
     private class Geo(var x: Float = 0f, var y: Float = 0f, var r: Float = 0f, var visible: Boolean = true)
 
@@ -315,6 +315,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         return when (c) {
             HudControl.GRENADE -> hud[Hud.GRENADES] >= 0f
             HudControl.MEDKIT -> true
+            HudControl.WEAPON, HudControl.EMOTE -> true
             HudControl.MELEE -> hud[Hud.MELEE] >= 0f
             HudControl.SUPPLY -> island && hud[Hud.SUPPLY] >= 0f
             HudControl.HOTBAR, HudControl.BAG -> editing || inventoryOn
@@ -348,6 +349,10 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val w = width.toFloat()
         val h = height.toFloat()
         if (coachSkipActive && coachSkip.contains(x, y)) return Role.COACH_SKIP
+        if (emoteOpen && emoteItemAt(x, y) >= 0) return Role.EMOTE_ITEM
+        if (available(HudControl.WEAPON) && weaponSlotAt(x, y) >= 0) return Role.WEAPON_SLOT
+        if (available(HudControl.WEAPON) && weaponTopRect().contains(x, y)) return Role.RELOAD
+        if (touchHit(HudControl.EMOTE, x, y)) return Role.EMOTE
         if (hotbarSlotAt(x, y) >= 0) return Role.HOTBAR
         if (touchHit(HudControl.BAG, x, y)) return Role.BAG
         for ((c, role) in buttons) if (touchHit(c, x, y)) return role
@@ -369,6 +374,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
                 val x = event.getX(i)
                 val y = event.getY(i)
                 val role = roleAt(x, y)
+                if (emoteOpen && role != Role.EMOTE && role != Role.EMOTE_ITEM) emoteOpen = false
                 val touch = Touch(role, x, y, x, y)
                 touches[id] = touch
                 when (role) {
@@ -389,6 +395,9 @@ class HudView(context: Context, private val listener: Listener) : View(context),
                     Role.SPRINT -> { NativeBridge.toggleSprint(); haptic(false) }
                     Role.MELEE -> { NativeBridge.pressMelee(); haptic(false) }
                     Role.MEDKIT -> { useMedkit(); haptic(false) }
+                    Role.EMOTE -> { emoteOpen = !emoteOpen; haptic(false) }
+                    Role.WEAPON_SLOT -> { NativeBridge.tapSlot(weaponSlotAt(x, y)); haptic(false) }
+                    Role.EMOTE_ITEM -> { sendEmote(emoteItemAt(x, y)); emoteOpen = false; haptic(false) }
                     Role.GRENADE -> {
                         // Segurar mostra a trajetória; arrastar até o X cancela; soltar arremessa.
                         if (hud[Hud.GRENADES] <= 0f) message("SEM GRANADAS NA MOCHILA", Palette.muted)
@@ -1706,6 +1715,8 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         if (available(HudControl.MELEE)) drawMelee(canvas)
         if (available(HudControl.GRENADE)) drawGrenade(canvas)
         if (available(HudControl.MEDKIT)) drawMedkit(canvas)
+        if (available(HudControl.WEAPON)) drawWeaponPanel(canvas)
+        if (available(HudControl.EMOTE)) drawEmote(canvas)
         if (available(HudControl.PAUSE)) drawPause(canvas)
         drawClock(canvas)
         if (available(HudControl.BAG)) drawBag(canvas)
@@ -2213,6 +2224,132 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         p.color = if (count > 0) Palette.gold else Palette.stone
         canvas.drawCircle(bx, by, d(8f) * s, p)
         label(canvas, "$count", bx, by + d(3.5f) * s, 10f * s, Palette.dark)
+    }
+
+    // ------------------------------------------------------------------ painel da arma e emoji
+
+    private var emoteOpen = false
+    private val emotes = listOf("😀", "😡", "😱", "👍", "💀")
+
+    /** Painel de armas (canto superior direito, segundo selecao_armas_hud.html): arma atual em cima, 3 espacos embaixo. */
+    private fun weaponRect(): RectF {
+        val gc = g(HudControl.WEAPON)
+        val s = k(HudControl.WEAPON)
+        return RectF(gc.x - d(80f) * s, gc.y, gc.x + d(80f) * s, gc.y + d(92f) * s)
+    }
+
+    /** Bloco da arma atual: tocar nele recarrega. */
+    private fun weaponTopRect(): RectF {
+        val r = weaponRect()
+        return RectF(r.left, r.top, r.right, r.top + d(50f) * k(HudControl.WEAPON))
+    }
+
+    /** Espaco de arma i (0..2) embaixo do bloco atual. */
+    private fun weaponSlotRect(i: Int): RectF {
+        val r = weaponRect()
+        val s = k(HudControl.WEAPON)
+        val gap = d(3f) * s
+        val w = (r.width() - 2f * gap) / 3f
+        val left = r.left + i * (w + gap)
+        val top = r.top + d(52f) * s
+        return RectF(left, top, left + w, top + d(40f) * s)
+    }
+
+    private fun weaponSlotAt(x: Float, y: Float): Int = (0..2).firstOrNull { weaponSlotRect(it).contains(x, y) } ?: -1
+
+    private fun drawWeaponPanel(canvas: Canvas) {
+        val s = k(HudControl.WEAPON)
+        val sel = hud[Hud.WEAPON_SLOT].toInt()
+        val wid = hud[Hud.INV + sel * 2].toInt()
+        val isGun = wid != 0 && Items.isWeapon(wid)
+        val ammo = hud[Hud.AMMO].toInt()
+        val mag = hud[Hud.MAG].toInt().coerceAtLeast(1)
+        val reloading = hud[Hud.RELOAD] >= 0f
+        val low = isGun && ammo <= mag / 4
+        // Bloco da arma atual.
+        val top = weaponTopRect()
+        p.style = Paint.Style.FILL
+        p.color = Color.argb(222, 24, 24, 21)
+        canvas.drawRoundRect(top, d(4f) * s, d(4f) * s, p)
+        if (isGun) {
+            // Filete amarelo na borda direita, como o HTML para armas de fogo.
+            p.color = Color.rgb(255, 200, 0)
+            canvas.drawRect(top.right - d(2f) * s, top.top, top.right, top.bottom, p)
+        }
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.typeface = Fonts.title
+        textPaint.textSize = d(24f) * s
+        textPaint.color = if (low) Palette.gold else Color.WHITE
+        val ammoStr = if (isGun) "$ammo" else "∞"
+        canvas.drawText(ammoStr, top.left + d(8f) * s, top.top + d(28f) * s, textPaint)
+        if (isGun) {
+            val w1 = textPaint.measureText(ammoStr)
+            textPaint.textSize = d(11f) * s
+            textPaint.color = Palette.muted
+            canvas.drawText("/$mag", top.left + d(10f) * s + w1, top.top + d(28f) * s, textPaint)
+            textPaint.textSize = d(8.5f) * s
+            textPaint.color = if (reloading) Palette.cyan else Palette.muted
+            canvas.drawText(if (reloading) "RECARREGANDO" else "Recarregar", top.left + d(8f) * s, top.top + d(42f) * s, textPaint)
+        }
+        textPaint.textAlign = Paint.Align.CENTER
+        if (wid != 0) ItemIcons.draw(canvas, wid, top.right - d(40f) * s, top.centerY(), d(50f) * s)
+        // Espacos de arma: o selecionado em amarelo.
+        for (i in 0..2) {
+            val rr = weaponSlotRect(i)
+            val id = hud[Hud.INV + i * 2].toInt()
+            p.color = if (i == sel) Color.argb(235, 255, 196, 0) else Color.argb(175, 18, 18, 17)
+            canvas.drawRoundRect(rr, d(3f) * s, d(3f) * s, p)
+            if (id != 0) ItemIcons.draw(canvas, id, rr.centerX(), rr.centerY(), rr.height() * 0.8f)
+            textPaint.textAlign = Paint.Align.LEFT
+            textPaint.typeface = Fonts.title
+            textPaint.textSize = d(8f) * s
+            textPaint.color = Color.argb(if (i == sel) 170 else 110, 255, 255, 255)
+            canvas.drawText("${i + 1}", rr.left + d(4f) * s, rr.top + d(10f) * s, textPaint)
+            textPaint.textAlign = Paint.Align.CENTER
+        }
+    }
+
+    /** Botão de emoji: rosto sorridente; ao tocar abre uma fileira de emojis à direita. */
+    private fun drawEmote(canvas: Canvas) {
+        val gc = g(HudControl.EMOTE)
+        val s = k(HudControl.EMOTE)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.cyan, emoteOpen)
+        p.color = Color.rgb(255, 214, 60)
+        canvas.drawCircle(gc.x, gc.y, gc.r * 0.6f, p)
+        p.color = Color.rgb(40, 30, 10)
+        canvas.drawCircle(gc.x - gc.r * 0.22f, gc.y - gc.r * 0.14f, d(2.4f) * s, p)
+        canvas.drawCircle(gc.x + gc.r * 0.22f, gc.y - gc.r * 0.14f, d(2.4f) * s, p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(2f) * s
+        rect.set(gc.x - gc.r * 0.32f, gc.y - gc.r * 0.14f, gc.x + gc.r * 0.32f, gc.y + gc.r * 0.3f)
+        canvas.drawArc(rect, 20f, 140f, false, p)
+        p.style = Paint.Style.FILL
+        if (emoteOpen) {
+            for (i in emotes.indices) {
+                val cx = emoteCenterX(i)
+                p.color = Color.argb(225, 10, 16, 30)
+                canvas.drawCircle(cx, gc.y, emoteRadius(), p)
+                textPaint.textAlign = Paint.Align.CENTER
+                textPaint.typeface = Fonts.body
+                textPaint.textSize = d(18f) * s
+                textPaint.color = Color.WHITE
+                canvas.drawText(emotes[i], cx, gc.y + d(6f) * s, textPaint)
+            }
+        }
+    }
+
+    private fun emoteCenterX(i: Int): Float = g(HudControl.EMOTE).x + (i + 1) * d(46f) * k(HudControl.EMOTE)
+    private fun emoteRadius(): Float = d(20f) * k(HudControl.EMOTE)
+
+    private fun emoteItemAt(x: Float, y: Float): Int {
+        if (!emoteOpen) return -1
+        val cy = g(HudControl.EMOTE).y
+        for (i in emotes.indices) if (hypot(x - emoteCenterX(i), y - cy) < emoteRadius() * 1.2f) return i
+        return -1
+    }
+
+    private fun sendEmote(i: Int) {
+        if (i in emotes.indices) message(emotes[i], Palette.lime)
     }
 
     private fun drawPause(canvas: Canvas) {

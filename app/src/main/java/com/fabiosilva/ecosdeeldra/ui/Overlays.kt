@@ -212,46 +212,36 @@ class PauseOverlay(app: MainActivity, subtitle: String, survival: Boolean = fals
 }
 
 @SuppressLint("ViewConstructor")
-class DefeatOverlay(app: MainActivity, stage: Stage, plan: ExpeditionPlan, summaryLine: String, canRevive: Boolean, canSkip: Boolean) : FrameLayout(app) {
+class DefeatOverlay(app: MainActivity, stage: Stage, plan: ExpeditionPlan, summaryLine: String, canRevive: Boolean, @Suppress("UNUSED_PARAMETER") canSkip: Boolean) : FrameLayout(app) {
     init {
         setBackgroundColor(Color.argb(170, 40, 4, 8))
         isClickable = true
-        val panel = Ui.panel(app, Palette.panel, Color.argb(120, 255, 90, 90))
-        panel.gravity = Gravity.CENTER_HORIZONTAL
-        // O conteúdo rola: em 640x360 dp o painel com contrato + código + botões passa da altura útil.
-        val scroll = CappedScrollView(app, resources.displayMetrics.heightPixels - app.dpi(90)).apply { isVerticalScrollBarEnabled = false }
-        val content = Ui.column(app)
-        content.gravity = Gravity.CENTER_HORIZONTAL
-        content.addView(Ui.title(app, "VOCÊ CAIU!", 28f, Palette.red))
         val hasContract = plan.contract != ContractId.NONE
-        if (hasContract) content.addView(contractChip(app, plan.contract), Ui.lp(Ui.WRAP, Ui.WRAP).apply { topMargin = app.dpi(6); gravity = Gravity.CENTER_HORIZONTAL })
-        content.addView(Ui.text(app, "A horda da fase ${stage.depth} te pegou. Abates, baús e distância contam para as missões.", 13f, Palette.muted).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, app.dpi(6), 0, app.dpi(4))
-        })
-        content.addView(Ui.text(app, summaryLine, 12f, Palette.text, Fonts.bold).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, app.dpi(if (hasContract) 2 else 10))
-        })
+        // Tudo centralizado e sem rolagem: a caixa encolhe (FitBox) quando a tela é pequena.
+        val content = Ui.column(app).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = PanelDrawable(app, Palette.panel, Color.argb(120, 255, 90, 90), 14f)
+            setPadding(app.dpi(18), app.dpi(16), app.dpi(18), app.dpi(16))
+        }
+        fun centered(text: CharSequence, size: Float, color: Int, font: android.graphics.Typeface = Fonts.body): TextView =
+            Ui.text(app, text, size, color, font).apply { gravity = Gravity.CENTER }
+        content.addView(centered("VOCÊ CAIU!", 24f, Palette.red, Fonts.title), Ui.lp(Ui.MATCH, Ui.WRAP))
         if (hasContract) {
-            content.addView(Ui.text(app, "O contrato só paga na extração.", 11f, Palette.gold).apply {
-                gravity = Gravity.CENTER
-                setPadding(0, 0, 0, app.dpi(6))
-            })
+            content.addView(contractChip(app, plan.contract), Ui.lp(Ui.WRAP, Ui.WRAP).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = app.dpi(6) })
         }
-        islandCodeRow(app, plan)?.let { content.addView(it, Ui.lp(Ui.WRAP, Ui.WRAP).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = app.dpi(10) }) }
+        content.addView(centered("A horda da fase ${stage.depth} te pegou. Abates, baús e distância contam para as missões.", 11f, Palette.muted), Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
+        content.addView(centered(summaryLine, 11f, Palette.text, Fonts.bold), Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
+        if (hasContract) content.addView(centered("O contrato só paga na extração.", 10f, Palette.gold), Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(4) })
+        plan.code?.let { code -> content.addView(centered("ILHA $code", 12f, Palette.text, Fonts.title), Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) }) }
         if (canRevive) {
-            content.addView(Ui.button(app, "▶ REVIVER (ANÚNCIO)", Palette.cyan, Palette.dark, 15f) { app.reviveWithAd() }, Ui.lp(Ui.MATCH, app.dpi(50)).apply { bottomMargin = app.dpi(8) })
+            content.addView(Ui.button(app, "▶ REVIVER (ANÚNCIO)", Palette.cyan, Palette.dark, 13f) { app.reviveWithAd() }, Ui.lp(Ui.MATCH, app.dpi(44)).apply { topMargin = app.dpi(12) })
         }
-        content.addView(Ui.button(app, "TENTAR DE NOVO", Palette.lime, Palette.dark, 15f) { app.abandonMission(retry = true) }, Ui.lp(Ui.MATCH, app.dpi(48)).apply { bottomMargin = app.dpi(8) })
-        if (canSkip) {
-            content.addView(Ui.button(app, "▶ PULAR ESTA FASE (ANÚNCIO)", Palette.gold, Palette.dark, 13f) { app.skipStageWithAd() }, Ui.lp(Ui.MATCH, app.dpi(44)).apply { bottomMargin = app.dpi(8) })
-        }
-        content.addView(Ui.button(app, "MAPA", Palette.stone, Color.WHITE, 14f) { app.abandonMission(retry = false) }, Ui.lp(Ui.MATCH, app.dpi(44)))
-        scroll.addView(content)
-        panel.addView(scroll, Ui.lp(Ui.MATCH, Ui.WRAP))
-        addView(panel, Ui.frame(app.dpi(380), Ui.WRAP, Gravity.CENTER))
-        Ui.popIn(panel)
+        content.addView(Ui.button(app, "TENTAR DE NOVO", Palette.lime, Palette.dark, 13f) { app.abandonMission(retry = true) }, Ui.lp(Ui.MATCH, app.dpi(42)).apply { topMargin = app.dpi(8) })
+        content.addView(Ui.button(app, "MAPA", Palette.stone, Color.WHITE, 12f) { app.abandonMission(retry = false) }, Ui.lp(Ui.MATCH, app.dpi(38)).apply { topMargin = app.dpi(8) })
+        addView(
+            FitBox(app, app.dpi(340)).apply { addView(content) },
+            Ui.frame(app.dpi(340), Ui.MATCH, Gravity.CENTER).apply { setMargins(0, app.dpi(12), 0, app.dpi(12)) },
+        )
     }
 }
 

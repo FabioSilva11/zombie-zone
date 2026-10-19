@@ -613,7 +613,7 @@ class TreeMapView(private val app: MainActivity, private val onTap: (Int) -> Uni
 }
 
 /** Caixa que encaixa o painel no espaço disponível: escala tudo junto (texto, ícones, cartões). Sem rolagem. */
-private class FitBox(context: Context, private val designW: Int) : FrameLayout(context) {
+internal class FitBox(context: Context, private val designW: Int) : FrameLayout(context) {
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         getChildAt(0)?.measure(
             MeasureSpec.makeMeasureSpec(designW, MeasureSpec.EXACTLY),
