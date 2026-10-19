@@ -58,11 +58,13 @@ enum HudIndex {
     H_INV = 560,
     H_INV_ENABLED = 608, H_WEAPON_SLOT, H_THROW_SLOT, H_WEAPON, H_ARMOR, H_ARMOR_MAX, H_ADRENALINE,
     H_THROW_AIM, H_THROW_DIST, H_SWAP, H_THROW_KIND, H_THROW_SX, H_THROW_SY, H_THROW_ONSCREEN,
+    H_CLIPS = 622,  // 622..629 munição no pente de cada arma (id 1..8); -1 = pente cheio (nunca equipada)
     // Modo sobrevivência
     H_SURV = 630, H_WAVE, H_WAVE_STATE, H_WAVE_TIMER, H_WAVE_PROGRESS, H_WAVE_LEFT, H_WAVE_BIG, H_SURV_TIME,
     H_SCORE, H_FRONT_COUNT, H_FRONTS = 640,       // ângulo de cada frente de ataque x 3
     H_WAVE_FLAGS = 643,                            // posição (0..1) das grandes hordas no progresso desta onda
-    // Desempenho (somente leitura pelo HUD; 644-649 livres)
+    H_MAG_MUL = 644,   // multiplicador do pente (melhoria/fase): pente = lround(base * H_MAG_MUL), como magazineFor()
+    // Desempenho (somente leitura pelo HUD; 645-649 livres)
     H_PERF_FPS = 650,        // quadros/s na janela deslizante (~5 s)
     H_PERF_AVG_MS = 651,     // intervalo médio entre quadros
     H_PERF_P95_MS = 652,     // p95 do intervalo

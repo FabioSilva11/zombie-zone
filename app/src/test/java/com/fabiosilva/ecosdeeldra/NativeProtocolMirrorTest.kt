@@ -46,6 +46,15 @@ class NativeProtocolMirrorTest {
     }
 
     @Test
+    fun backpackBlockMatchesHeader() {
+        val h = header()
+        assertEquals("H_CLIPS", headerValue(h, "H_CLIPS"), Hud.CLIPS)
+        assertEquals("H_MAG_MUL", headerValue(h, "H_MAG_MUL"), Hud.MAG_MUL)
+        // 8 armas (ids 1..8) cabem antes do bloco da sobrevivência.
+        assertTrue(Hud.CLIPS + 8 <= Hud.SURV)
+    }
+
+    @Test
     fun perfBlockFitsInsideHudArray() {
         assertTrue(Hud.PERF_FLAGS < Hud.SIZE)
         val perf = Hud::class.java.fields.filter { it.name.startsWith("PERF_") }

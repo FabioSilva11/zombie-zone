@@ -156,6 +156,8 @@ JNIEXPORT void JNICALL ZZ_FN(tapSlot)(JNIEnv*, jobject, jint slot) { game().tapS
 
 JNIEXPORT void JNICALL ZZ_FN(useSlot)(JNIEnv*, jobject, jint slot) { game().useSlot(slot); }
 
+JNIEXPORT void JNICALL ZZ_FN(dropItem)(JNIEnv*, jobject, jint id, jint count) { game().dropFromPlayer(id, count); }
+
 JNIEXPORT void JNICALL ZZ_FN(setThrowAim)(JNIEnv*, jobject, jboolean held, jboolean cancel) { game().setThrowAim(held, cancel); }
 
 JNIEXPORT void JNICALL ZZ_FN(setInventory)(JNIEnv* env, jobject, jintArray values) {

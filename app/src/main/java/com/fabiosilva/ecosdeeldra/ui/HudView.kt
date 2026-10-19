@@ -16,6 +16,7 @@ import android.view.MotionEvent
 import android.view.View
 import com.fabiosilva.ecosdeeldra.data.ContractId
 import com.fabiosilva.ecosdeeldra.data.Contracts
+import com.fabiosilva.ecosdeeldra.data.Inventory
 import com.fabiosilva.ecosdeeldra.data.Items
 import com.fabiosilva.ecosdeeldra.data.ZombieKinds
 import com.fabiosilva.ecosdeeldra.engine.Hud
@@ -2199,16 +2200,16 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         label(canvas, "$count", bx, by + d(3.5f) * s, 10f * s, Palette.dark)
     }
 
-    /** Kit médico: usa o primeiro kit da barra de itens (o mesmo efeito de tocar no slot). */
+    /** Kit médico: usa o primeiro kit da mochila inteira (como no Free Fire; o mesmo efeito de tocar no slot). */
     private fun useMedkit() {
-        val slot = (0 until 6).firstOrNull { hud[Hud.INV + it * 2].toInt() == Items.MEDKIT && hud[Hud.INV + it * 2 + 1] > 0f }
-        if (slot == null) message("SEM KIT MÉDICO NA BARRA", Palette.muted) else NativeBridge.useSlot(slot)
+        val slot = (0 until Inventory.SIZE).firstOrNull { hud[Hud.INV + it * 2].toInt() == Items.MEDKIT && hud[Hud.INV + it * 2 + 1] > 0f }
+        if (slot == null) message("SEM KIT MÉDICO NA MOCHILA", Palette.muted) else NativeBridge.useSlot(slot)
     }
 
     private fun drawMedkit(canvas: Canvas) {
         val gc = g(HudControl.MEDKIT)
         val s = k(HudControl.MEDKIT)
-        val count = (0 until 6).sumOf { if (hud[Hud.INV + it * 2].toInt() == Items.MEDKIT) hud[Hud.INV + it * 2 + 1].toInt() else 0 }
+        val count = (0 until Inventory.SIZE).sumOf { if (hud[Hud.INV + it * 2].toInt() == Items.MEDKIT) hud[Hud.INV + it * 2 + 1].toInt() else 0 }
         drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, false)
         ItemIcons.draw(canvas, Items.MEDKIT, gc.x, gc.y, d(26f) * s, if (count > 0) 255 else 110)
         val bx = gc.x + gc.r * 0.72f

@@ -86,7 +86,7 @@ class SurvivalScreen(private val app: MainActivity) : FrameLayout(app) {
         record.addView(stat("PARTIDAS", "${s.survivalRuns}"), Ui.lp(0, Ui.WRAP, 1f))
         left.addView(record)
         val buttons = Ui.row(app)
-        buttons.addView(Ui.button(app, "🎒 MOCHILA", Palette.stone, Color.WHITE, 13f) { app.showInventory(0) { app.showSurvival() } }, Ui.lp(0, app.dpi(54), 0.8f).apply { marginEnd = app.dpi(8) })
+        buttons.addView(Ui.button(app, "🎒 MOCHILA", Palette.stone, Color.WHITE, 13f) { app.showInventory { app.showSurvival() } }, Ui.lp(0, app.dpi(54), 0.8f).apply { marginEnd = app.dpi(8) })
         val play = Ui.button(app, "SOBREVIVER ▶", Palette.lime, Palette.dark, 18f) { app.showExpeditionPrep(ExpeditionKind.SURVIVAL, back = { app.showSurvival() }) }
         buttons.addView(play, Ui.lp(0, app.dpi(54), 1.2f))
         left.addView(buttons, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(8) })

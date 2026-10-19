@@ -334,7 +334,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         when {
             store.recoveryPending -> finish()
             loading != null || defeatShown -> Unit
-            inventoryOpen && inMission -> (overlayLayer.getChildAt(0) as? InventoryScreen)?.let { closeInventoryInMatch(it, -1) } ?: Unit
+            // close() fecha primeiro o diálogo de descarte, se estiver aberto; senão volta ao jogo.
+            inventoryOpen && inMission -> (overlayLayer.getChildAt(0) as? InventoryScreen)?.close() ?: Unit
             inPvp && !pvpEnded -> if (overlayLayer.childCount > 0) resumePvp() else showPvpPause()
             inPvp -> Unit
             overlayLayer.childCount > 0 && !inMission -> closeOverlay()
@@ -514,13 +515,13 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         showScreen(ExpeditionPrepScreen(this, kind, stage, initial, countPlayTap, back))
     }
 
-    /** Inventário (mochila / arsenal / loja) fora da partida: tela própria com o herói em 3D. */
-    fun showInventory(tab: Int, back: () -> Unit = { showHome() }) {
+    /** Equipamento e mochila fora da partida: tela própria com o herói em 3D. */
+    fun showInventory(back: () -> Unit = { showHome() }) {
         closeOverlay()
         hud.visibility = View.GONE
         val look = progress.lookCode
         engine { NativeBridge.enterLobby(look, 0) }
-        showScreen(InventoryScreen(this, progress.inventory, inMatch = false, initialTab = tab) { back() })
+        showScreen(InventoryScreen(this, progress.inventory, inMatch = false) { back() })
     }
     fun showUpgrades() = showScreen(UpgradesScreen(this))
     fun showSettings() = showScreen(SettingsScreen(this, fromPause = false))
@@ -1078,25 +1079,40 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     /** Abre a mochila (pausa o jogo); ao fechar as mudanças voltam ao motor. */
     fun openInventoryInMatch() {
-        if (!inMission || missionEnded || defeatShown || loading != null) return
+        if (!inMission || missionEnded || defeatShown || loading != null || inventoryOpen) return
         missionPaused = true
+        inventoryOpen = true
         coach?.pause()
-        engine { NativeBridge.setPaused(true) }
         hud.reset()
-        val h = FloatArray(Hud.SIZE)
-        NativeBridge.copyHud(h)
+        // A cópia do HUD é feita na thread GL já com o jogo pausado: nenhum quadro muda a mochila entre a cópia
+        // e o fechamento (senão um item recolhido nesse quadro sumiria, ou uma granada lançada voltaria).
+        engine {
+            NativeBridge.setPaused(true)
+            val h = FloatArray(Hud.SIZE)
+            NativeBridge.copyHud(h)
+            runOnUiThread { showInventoryInMatch(h) }
+        }
+    }
+
+    private fun showInventoryInMatch(h: FloatArray) {
+        // A partida terminou enquanto a cópia era feita (a pausa normal não abre: missionPaused já está ligado).
+        if (!inventoryOpen || !inMission || missionEnded || defeatShown) {
+            inventoryOpen = false
+            return
+        }
         val working = Inventory().apply {
             copyFrom(progress.inventory)
             readFromHud(h)
         }
         matchInventory = working
-        inventoryOpen = true
         lateinit var screen: InventoryScreen
-        screen = InventoryScreen(this, working, inMatch = true, initialTab = 0) { use -> closeInventoryInMatch(screen, use) }
+        screen = InventoryScreen(this, working, inMatch = true, hud = h) { use -> closeInventoryInMatch(screen, use) }
+        // Painel translúcido (estilo Free Fire): o jogo pausado aparece atrás, sem os botões do HUD por cima.
+        hud.visibility = View.GONE
         showOverlay(screen)
     }
 
-    fun closeInventoryInMatch(@Suppress("UNUSED_PARAMETER") screen: InventoryScreen, useSlot: Int) {
+    fun closeInventoryInMatch(screen: InventoryScreen, useSlot: Int) {
         val inv = matchInventory ?: return
         matchInventory = null
         inventoryOpen = false
@@ -1104,7 +1120,12 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         progress.inventory.copyFrom(inv)
         save()
         val data = inv.toIntArray()
-        engine { NativeBridge.setInventory(data) }
+        // Descartados na mochila caem no chão à frente do jogador (depois do inventário novo chegar ao motor).
+        val drops = screen.drops.toList()
+        engine {
+            NativeBridge.setInventory(data)
+            for ((id, count) in drops) NativeBridge.dropItem(id, count)
+        }
         if (useSlot >= 0) NativeBridge.useSlot(useSlot)
         resumeMission()
     }

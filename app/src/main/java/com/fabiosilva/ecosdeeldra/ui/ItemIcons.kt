@@ -18,7 +18,10 @@ object ItemIcons {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val rect = RectF()
-    private data class SvgIcon(val path: Path, val left: Float, val top: Float, val width: Float, val height: Float)
+    private data class SvgIcon(val path: Path, val left: Float, val top: Float, val width: Float, val height: Float) {
+        /** Contorno real do desenho (o viewBox tem folga; a mochila usa isto para a arma encher o card). */
+        val bounds = RectF().also { path.computeBounds(it, true) }
+    }
     private val sourceIcons = HashMap<Int, SvgIcon>()
     private var sourceIconsLoaded = false
 
@@ -61,13 +64,20 @@ object ItemIcons {
         return SvgIcon(PathParser.createPathFromPathData(data), box[0], box[1], box[2], box[3])
     }
 
-    /** Desenha o item [id] centrado em (cx, cy) num quadrado de lado [size]. */
-    fun draw(canvas: Canvas, id: Int, cx: Float, cy: Float, size: Float, alpha: Int = 255) {
+    /**
+     * Desenha o item [id] centrado em (cx, cy) num quadrado de lado [size]. Com [fitDrawing], os ícones SVG
+     * (fuzil, pistola, sniper) são ajustados pelo contorno do desenho em vez do viewBox (ficam maiores e centrados).
+     */
+    fun draw(canvas: Canvas, id: Int, cx: Float, cy: Float, size: Float, alpha: Int = 255, fitDrawing: Boolean = false) {
         sourceIcons[id]?.let { icon ->
-            val scale = minOf(size / icon.width, size / icon.height) * 0.86f
+            val b = icon.bounds
+            val fit = fitDrawing && b.width() > 0f && b.height() > 0f
+            val scale = if (fit) minOf(size / b.width(), size / b.height()) * 0.92f else minOf(size / icon.width, size / icon.height) * 0.86f
+            val ox = if (fit) b.centerX() else icon.left + icon.width * 0.5f
+            val oy = if (fit) b.centerY() else icon.top + icon.height * 0.5f
             val matrix = Matrix().apply {
                 setScale(scale, scale)
-                postTranslate(cx - (icon.left + icon.width * 0.5f) * scale, cy - (icon.top + icon.height * 0.5f) * scale)
+                postTranslate(cx - ox * scale, cy - oy * scale)
             }
             val scaledPath = Path()
             icon.path.transform(matrix, scaledPath)

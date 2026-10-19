@@ -166,6 +166,101 @@ class Inventory {
         return true
     }
 
+    // ------------------------------------------------------------------ equipamento estilo Free Fire
+    // As armas equipadas ficam na barra rápida (é a barra que o HUD mostra): até 2 principais e a pistola.
+    // O resto das armas fica guardado na mochila. Os consumíveis aparecem agrupados por tipo.
+
+    fun firstSlotOf(id: Int): Int = slots.indexOfFirst { !it.empty && it.id == id }
+    fun usedSlots(): Int = slots.count { !it.empty }
+
+    /** Espaços das armas principais equipadas (na ordem da barra rápida), no máximo 2. */
+    fun primarySlots(): List<Int> =
+        (0 until HOTBAR).filter { Items.isWeapon(slots[it].id) && slots[it].id != Items.PISTOL }.take(MAX_PRIMARIES)
+
+    /** Espaço da pistola equipada, ou -1. */
+    fun pistolSlot(): Int = (0 until HOTBAR).firstOrNull { slots[it].id == Items.PISTOL } ?: -1
+
+    /** Armas fora do equipamento (guardadas na mochila ou sobrando na barra). */
+    fun spareWeaponSlots(): List<Int> {
+        val equipped = primarySlots().toSet() + pistolSlot()
+        return slots.indices.filter { Items.isWeapon(slots[it].id) && it !in equipped }
+    }
+
+    /**
+     * Equipa a arma de [from]. Com [target] (espaço de uma arma equipada), as duas trocam de lugar e, se a arma
+     * trocada estava na mão, a nova passa a ficar na mão. Sem alvo, ocupa um espaço vazio da barra rápida ou troca
+     * com um consumível dela. Retorna false se não houver onde colocar.
+     */
+    fun equipWeapon(from: Int, target: Int = -1): Boolean {
+        if (!Items.isWeapon(slots.getOrNull(from)?.id ?: 0)) return false
+        if (target >= 0) {
+            if (target == from) return true
+            if (!Items.isWeapon(slots.getOrNull(target)?.id ?: 0)) return false
+            val handWasTarget = weaponSlot == target
+            moveOrSwap(from, target)
+            if (handWasTarget) weaponSlot = target
+            return true
+        }
+        if (from < HOTBAR) return true
+        val dest = (0 until HOTBAR).firstOrNull { slots[it].empty }
+            ?: (0 until HOTBAR).firstOrNull { !Items.isWeapon(slots[it].id) }
+            ?: return false
+        moveOrSwap(from, dest)
+        return true
+    }
+
+    /** Guarda uma arma equipada na mochila. A arma da mão não pode ser guardada. */
+    fun stowWeapon(slot: Int): Boolean {
+        if (slot !in 0 until HOTBAR || slot == weaponSlot || !Items.isWeapon(slots[slot].id)) return false
+        val dest = (HOTBAR until SIZE).firstOrNull { slots[it].empty } ?: return false
+        moveOrSwap(slot, dest)
+        return true
+    }
+
+    /** Põe na mão uma arma equipada (na barra rápida). */
+    fun holdWeapon(slot: Int): Boolean {
+        if (slot !in 0 until HOTBAR || !Items.isWeapon(slots[slot].id)) return false
+        weaponSlot = slot
+        return true
+    }
+
+    /**
+     * Arruma o equipamento ao abrir a mochila: a arma da mão vai para a barra rápida e sobram no máximo 2 armas
+     * principais nela (a da mão tem prioridade); as outras vão para a mochila se houver espaço.
+     * Retorna true se algo mudou.
+     */
+    fun fitLoadout(): Boolean {
+        val before = encode()
+        normalize()
+        if (weaponSlot >= HOTBAR) equipWeapon(weaponSlot)
+        val primaries = (0 until HOTBAR).filter { Items.isWeapon(slots[it].id) && slots[it].id != Items.PISTOL }
+        if (primaries.size > MAX_PRIMARIES) {
+            val keep = (listOf(weaponSlot).filter { it in primaries } + primaries).distinct().take(MAX_PRIMARIES)
+            for (slot in primaries) if (slot !in keep) stowWeapon(slot)
+        }
+        return encode() != before
+    }
+
+    /**
+     * Tira [amount] unidades do consumível [id] (das últimas pilhas para as primeiras) e retorna quantas saíram.
+     * Armas não saem por aqui.
+     */
+    fun removeAmount(id: Int, amount: Int): Int {
+        if (Items.isWeapon(id) || amount <= 0) return 0
+        var left = amount
+        for (i in SIZE - 1 downTo 0) {
+            if (left <= 0) break
+            val s = slots[i]
+            if (s.empty || s.id != id) continue
+            val t = minOf(left, s.count)
+            s.count -= t
+            left -= t
+            if (s.count <= 0) s.clear()
+        }
+        normalize()
+        return amount - left
+    }
+
     /** Garante uma arma na mão e índices válidos; um inventário sem armas recebe o fuzil. */
     fun normalize() {
         for (s in slots) if (s.empty || Items.get(s.id) == null) s.clear()
@@ -215,6 +310,7 @@ class Inventory {
     companion object {
         const val SIZE = 24
         const val HOTBAR = 6
+        const val MAX_PRIMARIES = 2
 
         /** Kit inicial: fuzil, pistola e alguns consumíveis na barra rápida. */
         fun starter(): Inventory = Inventory().apply {

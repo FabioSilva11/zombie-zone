@@ -299,7 +299,7 @@ class ExpeditionPrepScreen(
         }
         bar.addView(Ui.button(app, "MOCHILA", Palette.stone, Color.WHITE, 11f) {
             val current = plan
-            app.showInventory(0) { app.showExpeditionPrep(current.kind, current.stage, current, countPlayTap, back) }
+            app.showInventory { app.showExpeditionPrep(current.kind, current.stage, current, countPlayTap, back) }
         }, Ui.lp(0, app.dpi(34), 1f).apply { marginStart = app.dpi(4) })
         detailBox.addView(bar)
         val weapon = Items.get(p.inventory[p.inventory.weaponSlot.coerceIn(0, Inventory.SIZE - 1)].id)

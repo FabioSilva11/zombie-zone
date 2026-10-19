@@ -1298,6 +1298,11 @@ void Game::updatePickups(float dt) {
         p.blocked = std::max(0.0f, p.blocked - dt);
         Vec3 toPlayer = player_.position + Vec3(0, 0.8f, 0) - p.position;
         float dist = length(toPlayer);
+        // Descartado pela mochila: nem ímã nem coleta até o jogador sair de perto; depois volta ao normal.
+        if (p.discarded) {
+            if (dist > 4.0f) p.discarded = false;
+            else p.blocked = std::max(p.blocked, 0.5f);
+        }
         bool magnet = p.type != 2 && p.age > 0.6f && dist < 3.2f && !dead_ && p.blocked <= 0;
         if (magnet) {
             p.velocity = lerp(p.velocity, normalize(toPlayer) * 9.0f, damp(8.0f, dt));
@@ -2598,6 +2603,13 @@ void Game::publishHud() {
         h[H_ARMOR_MAX] = armorMax_;
         h[H_ADRENALINE] = adrenaline_;
         h[H_SWAP] = swapTimer_ / 0.35f;
+        h[H_MAG_MUL] = std::max(1.0f, static_cast<float>(config_.magazine) / 30.0f);
+        // Munição no pente de cada arma (mochila estilo Free Fire): a da mão usa ammo_, que é o valor vivo.
+        for (int w = IT_RIFLE; w <= IT_LAUNCHER; ++w) {
+            float clip = clipsInit_[w] ? static_cast<float>(clips_[w]) : -1.0f;
+            if (w == weaponId()) clip = static_cast<float>(ammo_);
+            h[H_CLIPS + w - IT_RIFLE] = clip;
+        }
         h[H_THROW_AIM] = throwAiming_ ? 1.0f : 0.0f;
         if (throwAiming_ && throwLandingValid_) {
             h[H_THROW_DIST] = distXZ(throwLanding_, player_.position);

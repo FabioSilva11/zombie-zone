@@ -220,6 +220,7 @@ struct Pickup {
     int item = 0;
     int count = 0;
     float blocked = 0;  // mochila cheia: espera antes de tentar de novo
+    bool discarded = false;  // jogado fora pela mochila: só volta a ser recolhido depois que o jogador se afastar
     Vec3 position;
     Vec3 velocity;
     float age = 0;
@@ -370,6 +371,8 @@ public:
     void setThrowAim(bool held, bool cancel);
     // Inventário vindo do Kotlin (thread GL): (id, qtd) x 24 + espaço da arma + do arremessável.
     void setInventory(const int* data, int count);
+    // Itens descartados na mochila (thread GL): caem à frente do jogador.
+    void dropFromPlayer(int id, int count);
 
     // Saídas (qualquer thread)
     void copyHud(float* out, int count);

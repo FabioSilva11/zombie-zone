@@ -149,6 +149,8 @@ object Hud {
     const val THROW_SX = 619
     const val THROW_SY = 620
     const val THROW_ONSCREEN = 621
+    const val CLIPS = 622             // 622..629 munição no pente de cada arma (id 1..8); -1 = cheio
+    const val MAG_MUL = 644           // multiplicador do pente: pente = round(base * MAG_MUL)
     const val SURV = 630
     const val WAVE = 631
     const val WAVE_STATE = 632   // 0 preparando, 1 em andamento, 2 vencida

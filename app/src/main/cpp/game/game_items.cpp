@@ -321,6 +321,18 @@ void Game::dropItem(const Vec3& at, int id, int count) {
     pickups_.push_back(p);
 }
 
+// Descartado pela mochila (Free Fire): cai no chão à frente do jogador e só volta a ser recolhido depois que ele
+// se afastar e voltar (senão o ímã dos coletáveis o puxaria de volta).
+void Game::dropFromPlayer(int id, int count) {
+    if (!inventoryEnabled() || !isValidItem(id) || isWeaponItem(id) || count <= 0) return;
+    const Vec3 fwd = forwardFromYaw(camYaw_);
+    dropItem(player_.position + fwd * 2.6f + Vec3(0, 1.0f, 0), id, count);
+    if (pickups_.empty()) return;
+    Pickup& p = pickups_.back();
+    p.discarded = true;
+    p.velocity = {fwd.x * 1.2f, 3.5f, fwd.z * 1.2f};
+}
+
 void Game::rollZombieDrop(const Zombie& z) {
     if (!inventoryEnabled()) return;
     // Itens de cura são raros: a maior parte dos drops é de ataque.

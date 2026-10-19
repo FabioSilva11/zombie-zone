@@ -51,6 +51,8 @@ object NativeBridge {
     external fun swapShoulder()
     external fun tapSlot(slot: Int)
     external fun useSlot(slot: Int)
+    /** Item descartado na mochila durante a partida: cai no chão à frente do jogador (thread GL). */
+    external fun dropItem(id: Int, count: Int)
     external fun setThrowAim(held: Boolean, cancel: Boolean)
 
     /** Inventário (thread GL): ver [INV_INT_COUNT]. */
