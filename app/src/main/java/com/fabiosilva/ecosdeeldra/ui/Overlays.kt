@@ -195,13 +195,10 @@ class PauseOverlay(app: MainActivity, subtitle: String, survival: Boolean = fals
         isClickable = true
         val panel = Ui.panel(app)
         panel.gravity = Gravity.CENTER_HORIZONTAL
-        panel.addView(Ui.title(app, "PAUSADO", 26f, Palette.lime))
+        panel.addView(Ui.title(app, "PAUSADO", 26f, Palette.lime).apply { gravity = Gravity.CENTER }, Ui.lp(Ui.MATCH, Ui.WRAP))
         panel.addView(Ui.text(app, subtitle, 13f, Palette.muted).apply { gravity = Gravity.CENTER; setPadding(0, app.dpi(4), 0, app.dpi(12)) })
         val buttons = listOf(
             Triple("CONTINUAR ▶", Palette.lime) { app.resumeMission() },
-            Triple("🎒 MOCHILA", Palette.gold) { app.openInventoryInMatch() },
-            Triple("MAPA DA ILHA", Palette.cyan) { app.openMapFromPause() },
-            Triple("REINICIAR", Palette.stone) { app.abandonMission(retry = true) },
             Triple("AJUSTES", Palette.stone) { app.showPauseSettings() },
             Triple(if (survival) "ENCERRAR (VAI PARA O RANKING)" else "SAIR DA FASE", Palette.red) { app.abandonMission(retry = false) },
         )
