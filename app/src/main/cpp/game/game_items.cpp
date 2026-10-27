@@ -15,103 +15,14 @@ namespace {
 constexpr float kThrowGravity = 22.0f;
 constexpr float kHealCooldown = 8.0f;  // segundos entre kits médicos e bandagens
 
+// Data/Weapons/AssaultRifle.asset e Shotgun.asset do template. O projétil da escopeta voa 3 s (30 m/s = 90 m).
 // clang-format off
 const WeaponDef kWeapons[] = {
-    //  tipo                dano  intervalo pente chumbos quadril mira   bloom   recarga alcance recuo  cabeça fov   atravessa mov   som            traçante              cano
-    {FireKind::Bullet,     18.0f, 0.100f, 30, 1, 0.016f, 0.004f, 0.0040f, 1.6f, 120.0f, 0.012f, 2.0f, 0.68f, 0, 1.00f, SND_SHOT,     1.0f, 0.90f, 0.60f, 1.25f},  // fuzil
-    {FireKind::Bullet,     30.0f, 0.200f, 12, 1, 0.012f, 0.003f, 0.0060f, 1.1f,  90.0f, 0.020f, 2.2f, 0.74f, 0, 1.08f, SND_PISTOL,   1.0f, 0.95f, 0.70f, 0.62f},  // pistola
-    {FireKind::Bullet,     13.0f, 0.800f,  6, 9, 0.075f, 0.055f, 0.0000f, 2.3f,  32.0f, 0.060f, 1.5f, 0.80f, 0, 0.95f, SND_SHOTGUN,  1.0f, 0.80f, 0.50f, 1.32f},  // escopeta
-    {FireKind::Bullet,     12.0f, 0.065f, 36, 1, 0.026f, 0.012f, 0.0030f, 1.3f,  80.0f, 0.008f, 1.8f, 0.72f, 0, 1.05f, SND_SMG,      1.0f, 0.90f, 0.50f, 0.78f},  // submetralhadora
-    {FireKind::Bullet,    120.0f, 1.150f,  5, 1, 0.040f, 0.000f, 0.0000f, 2.5f, 220.0f, 0.080f, 2.5f, 0.30f, 3, 0.92f, SND_SNIPER,   0.6f, 0.90f, 1.00f, 1.58f},  // precisão
-    {FireKind::Bullet,     17.0f, 0.085f, 90, 1, 0.030f, 0.012f, 0.0025f, 3.6f, 120.0f, 0.010f, 1.8f, 0.70f, 1, 0.82f, SND_LMG,      1.0f, 0.70f, 0.40f, 1.38f},  // metralhadora
-    {FireKind::Flame,       9.0f, 0.070f, 80, 1, 0.000f, 0.000f, 0.0000f, 2.6f,   8.5f, 0.000f, 1.0f, 0.85f, 0, 0.95f, SND_FLAME,    1.0f, 0.60f, 0.20f, 0.95f},  // lança-chamas
-    {FireKind::Launcher,  160.0f, 1.000f,  3, 1, 0.000f, 0.000f, 0.0000f, 2.8f,  70.0f, 0.060f, 1.0f, 0.70f, 0, 0.90f, SND_LAUNCHER, 1.0f, 0.70f, 0.30f, 1.00f},  // lança-granadas
+    //  tipo                  mira                       dano   interv. pente recarga alcance veloc. comportamento                     área  cabeça fov   som          traçante            cano
+    {FireKind::Hitscan,    ReticleType::Cross,         18.0f, 0.10f, 30, 2.0f, 100.0f,  0.0f, ProjectileBehavior::DirectDamage, 5.0f, 2.0f, 0.68f, SND_SHOT,    1.0f, 0.90f, 0.60f, 1.25f},  // fuzil de assalto
+    {FireKind::Projectile, ReticleType::OpenCircular,  36.0f, 1.00f, 10, 3.0f,  90.0f, 30.0f, ProjectileBehavior::DirectDamage, 5.0f, 1.5f, 0.80f, SND_SHOTGUN, 1.0f, 0.80f, 0.50f, 1.32f},  // escopeta
 };
 // clang-format on
-
-// Modelos das armas: caixas no espaço da mão (z = cano para a frente).
-struct Part {
-    Vec3 c, size;
-    Vec4 color;
-    float emissive;
-    bool accent;  // muda de cor com a munição incendiária
-};
-
-const Vec4 kMetal{0.22f, 0.24f, 0.27f, 1}, kDark{0.1f, 0.1f, 0.11f, 1}, kWood{0.45f, 0.3f, 0.17f, 1}, kGrip{0.16f, 0.17f, 0.19f, 1};
-const Vec4 kOlive{0.3f, 0.36f, 0.2f, 1}, kAccent{0.55f, 0.95f, 0.25f, 1};
-
-const std::vector<Part>& weaponParts(int id) {
-    static const std::vector<Part> rifle = {
-        {{0, 0.05f, 0.25f}, {0.16f, 0.22f, 0.9f}, kMetal, 0, false},
-        {{0, 0.1f, 0.9f}, {0.08f, 0.08f, 0.6f}, kDark, 0, false},
-        {{0, 0.0f, -0.36f}, {0.14f, 0.2f, 0.42f}, kWood, 0, false},
-        {{0, -0.2f, 0.32f}, {0.1f, 0.3f, 0.14f}, kGrip, 0, false},
-        {{0, 0.21f, 0.2f}, {0.06f, 0.07f, 0.22f}, {0.12f, 0.12f, 0.13f, 1}, 0, false},
-        {{0, 0.12f, 0.62f}, {0.13f, 0.06f, 0.1f}, kAccent, 0.5f, true},
-    };
-    static const std::vector<Part> pistol = {
-        {{0, 0.08f, 0.32f}, {0.12f, 0.16f, 0.52f}, kMetal, 0, false},
-        {{0, -0.12f, 0.16f}, {0.1f, 0.28f, 0.14f}, kGrip, 0, false},
-        {{0, 0.17f, 0.5f}, {0.04f, 0.04f, 0.06f}, kAccent, 0.5f, true},
-    };
-    static const std::vector<Part> shotgun = {
-        {{0.045f, 0.1f, 0.75f}, {0.08f, 0.08f, 1.1f}, kDark, 0, false},
-        {{-0.045f, 0.1f, 0.75f}, {0.08f, 0.08f, 1.1f}, kDark, 0, false},
-        {{0, -0.02f, 0.62f}, {0.16f, 0.12f, 0.36f}, kWood, 0, false},
-        {{0, 0.02f, 0.12f}, {0.16f, 0.2f, 0.36f}, kMetal, 0, false},
-        {{0, -0.04f, -0.36f}, {0.14f, 0.22f, 0.52f}, kWood, 0, false},
-        {{0, 0.16f, 1.25f}, {0.05f, 0.04f, 0.05f}, kAccent, 0.5f, true},
-    };
-    static const std::vector<Part> smg = {
-        {{0, 0.05f, 0.2f}, {0.14f, 0.2f, 0.6f}, kMetal, 0, false},
-        {{0, 0.08f, 0.62f}, {0.07f, 0.07f, 0.32f}, kDark, 0, false},
-        {{0, -0.26f, 0.28f}, {0.08f, 0.4f, 0.1f}, kDark, 0, false},
-        {{0, -0.16f, 0.02f}, {0.09f, 0.24f, 0.12f}, kGrip, 0, false},
-        {{0, 0.04f, -0.24f}, {0.05f, 0.1f, 0.36f}, kGrip, 0, false},
-        {{0, 0.17f, 0.3f}, {0.05f, 0.04f, 0.12f}, kAccent, 0.5f, true},
-    };
-    static const std::vector<Part> sniper = {
-        {{0, 0.05f, 0.3f}, {0.13f, 0.18f, 1.0f}, kMetal, 0, false},
-        {{0, 0.08f, 1.12f}, {0.06f, 0.06f, 0.92f}, kDark, 0, false},
-        {{0, 0.27f, 0.32f}, {0.1f, 0.1f, 0.58f}, kDark, 0, false},
-        {{0, 0.27f, 0.62f}, {0.07f, 0.07f, 0.02f}, {0.4f, 0.9f, 1.0f, 1}, 0.8f, false},
-        {{0, -0.02f, -0.46f}, {0.13f, 0.22f, 0.54f}, kWood, 0, false},
-        {{0, -0.16f, 0.16f}, {0.09f, 0.24f, 0.12f}, kGrip, 0, false},
-        {{0.09f, 0.1f, 0.12f}, {0.06f, 0.04f, 0.04f}, kAccent, 0.5f, true},
-    };
-    static const std::vector<Part> lmg = {
-        {{0, 0.05f, 0.3f}, {0.2f, 0.26f, 1.0f}, kOlive, 0, false},
-        {{0, 0.1f, 1.02f}, {0.1f, 0.1f, 0.72f}, kDark, 0, false},
-        {{0.04f, -0.2f, 0.26f}, {0.26f, 0.24f, 0.26f}, {0.24f, 0.28f, 0.16f, 1}, 0, false},
-        {{0, 0.25f, 0.4f}, {0.04f, 0.1f, 0.3f}, kDark, 0, false},
-        {{0.08f, -0.18f, 1.05f}, {0.03f, 0.3f, 0.03f}, kDark, 0, false},
-        {{-0.08f, -0.18f, 1.05f}, {0.03f, 0.3f, 0.03f}, kDark, 0, false},
-        {{0, -0.02f, -0.36f}, {0.16f, 0.22f, 0.44f}, kGrip, 0, false},
-        {{0, 0.2f, 0.75f}, {0.12f, 0.05f, 0.1f}, kAccent, 0.5f, true},
-    };
-    static const std::vector<Part> flamer = {
-        {{0, -0.06f, -0.08f}, {0.24f, 0.24f, 0.52f}, {0.75f, 0.15f, 0.12f, 1}, 0, false},
-        {{0, 0.06f, 0.5f}, {0.1f, 0.1f, 0.78f}, kDark, 0, false},
-        {{0, -0.18f, 0.32f}, {0.09f, 0.24f, 0.12f}, kGrip, 0, false},
-        {{0, 0.06f, 0.92f}, {0.07f, 0.07f, 0.07f}, {1.0f, 0.6f, 0.2f, 1}, 1.0f, false},
-    };
-    static const std::vector<Part> launcher = {
-        {{0, 0.12f, 0.35f}, {0.24f, 0.24f, 1.25f}, kOlive, 0, false},
-        {{0, -0.14f, 0.3f}, {0.09f, 0.26f, 0.12f}, kGrip, 0, false},
-        {{0, 0.3f, 0.2f}, {0.05f, 0.1f, 0.08f}, kDark, 0, false},
-        {{0, 0.12f, 0.98f}, {0.26f, 0.26f, 0.04f}, kAccent, 0.5f, true},
-    };
-    switch (id) {
-        case IT_PISTOL: return pistol;
-        case IT_SHOTGUN: return shotgun;
-        case IT_SMG: return smg;
-        case IT_SNIPER: return sniper;
-        case IT_LMG: return lmg;
-        case IT_FLAMER: return flamer;
-        case IT_LAUNCHER: return launcher;
-        default: return rifle;
-    }
-}
 
 }  // namespace
 
@@ -131,8 +42,7 @@ int itemMaxStack(int id, int explosivesLevel) {
 }
 
 const WeaponDef& weaponDef(int id) {
-    if (id < IT_RIFLE || id > IT_LAUNCHER) id = IT_RIFLE;
-    return kWeapons[id - IT_RIFLE];
+    return id == IT_SHOTGUN ? kWeapons[1] : kWeapons[0];
 }
 
 // ----------------------------------------------------------------------------- entrada (qualquer thread)
@@ -187,7 +97,6 @@ void Game::loadWeaponAmmo() {
     ammo_ = std::min(clips_[w], magazineFor(w));
     reloadTimer_ = 0;
     fireCooldown_ = 0;
-    bloom_ = 0;
 }
 
 void Game::resetInventory() {
@@ -594,127 +503,41 @@ void Game::updateThrowAim(float dt, const InputState& in) {
     }
 }
 
-// ----------------------------------------------------------------------------- armas especiais
-
-void Game::fireFlame() {
-    const WeaponDef& w = weaponDef(IT_FLAMER);
-    --ammo_;
-    ++shots_;
-    float power = config_.power * config_.boostDamage * (damageBoost_ > 0 ? 1.5f : 1.0f);
-    Vec3 origin = muzzlePos_;
-    Vec3 dir = camForward_;
-    // Partículas do jato de fogo.
-    for (int i = 0; i < 4 && particles_.size() < 880; ++i) {
-        FxParticle p;
-        p.position = origin + dir * rng_.range(0.0f, 0.4f);
-        Vec3 jitter(rng_.range(-0.12f, 0.12f), rng_.range(-0.08f, 0.12f), rng_.range(-0.12f, 0.12f));
-        p.velocity = normalize(dir + jitter) * rng_.range(9.0f, 13.0f);
-        p.color = rng_.chance(0.3f) ? Vec4(1.0f, 0.9f, 0.5f, 1.0f) : Vec4(1.0f, rng_.range(0.35f, 0.6f), 0.12f, 1.0f);
-        p.size = rng_.range(0.25f, 0.5f);
-        p.life = p.maxLife = rng_.range(0.45f, 0.7f);
-        p.gravity = -2.0f;
-        p.additive = true;
-        particles_.push_back(p);
-    }
-    muzzleTimer_ = 0.06f;
-    flameSoundTimer_ -= w.interval;
-    if (flameSoundTimer_ <= 0) {
-        flameSoundTimer_ = 0.22f;
-        emitSound(SND_FLAME, origin, 0.75f);
-    }
-    bool any = false;
-    for (Zombie& z : zombies_) {
-        if (z.state == ZState::Dead) continue;
-        Vec3 c = z.body.position + Vec3(0, zombieHeight(z) * 0.5f, 0);
-        Vec3 to = c - origin;
-        float d = length(to);
-        if (d > w.range + 0.4f * z.scale || d < 0.05f) continue;
-        if (dot(to / d, dir) < 0.86f && d > 1.2f) continue;
-        if (!clearLineOfSight(origin, c)) continue;
-        z.burn = std::max(z.burn, 2.5f);
-        z.burnDps = std::max(z.burnDps, 16.0f * power);
-        damageZombie(z, w.damage * power, false, dir, c);
-        any = true;
-    }
-    for (size_t i = 0; i < nests_.size(); ++i) {
-        if (nests_[i].destroyed || length(nests_[i].core - origin) > w.range) continue;
-        damageNest(static_cast<int>(i), w.damage * power * 0.8f, nests_[i].core);
-        any = true;
-    }
-    if (any) {
-        ++hits_;
-        hitMark_ = 0.12f;
-        headshotMark_ = false;
-    }
-    if (rng_.chance(0.3f)) alertNear(player_.position, 22.0f);
-}
-
-void Game::fireLauncher() {
-    const WeaponDef& w = weaponDef(IT_LAUNCHER);
-    --ammo_;
-    ++shots_;
-    Projectile p;
-    p.kind = ProjectileKind::Grenade;
-    p.friendly = true;
-    p.pos = muzzlePos_;
-    // Disparo quase reto rumo à mira, com leve queda.
-    Vec3 target = camPos_ + camForward_ * w.range;
-    RayHit wh;
-    if (world_.raycast(camPos_, camForward_, w.range, wh)) target = camPos_ + camForward_ * wh.distance;
-    Vec3 dir = normalize(target - p.pos);
-    p.vel = dir * 42.0f;
-    p.gravity = 4.0f;
-    p.target = target;
-    p.life = 3.0f;
-    p.radius = 4.5f;
-    float boom = 1.0f + config_.explosives * 0.08f;
-    p.damage = w.damage * config_.power * config_.boostDamage * (damageBoost_ > 0 ? 1.5f : 1.0f) * boom;
-    projectiles_.push_back(p);
-    muzzleTimer_ = 0.08f;
-    weaponKick_ = std::max(weaponKick_, 0.9f);
-    recoil_ += w.recoil;
-    camPitch_ += w.recoil * 0.4f;
-    spawnBurst(p.pos, {0.8f, 0.8f, 0.8f, 0.6f}, 8, 2.0f, 0.3f, false, -1.0f);
-    emitSound(SND_LAUNCHER, p.pos, 0.9f);
-    alertNear(player_.position, 35.0f);
-}
-
 // ----------------------------------------------------------------------------- modelo da arma
 
 void Game::addWeaponModel(const CharacterDraw& draw, int armR, int weapon, Vec3* muzzle) {
     // Ao trocar de arma ela desce e volta.
     float dip = swapTimer_ > 0 ? std::sin(clampf(swapTimer_ / 0.35f, 0.0f, 1.0f) * kPi) * 0.6f : 0.0f;
     Mat4 frame = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -0.9f, 0.0f}) * Mat4::rotationX(kPi * 0.5f + dip);
+    // Herói voxel: a arma já está posicionada pela pose (as duas mãos foram presas a ela por IK).
+    if (gunHold_.valid) frame = draw.world * gunHold_.frame;
+    gunHold_.valid = false;
     addWeaponParts(frame, weapon, muzzle);
 }
 
 void Game::addWeaponParts(const Mat4& frame, int weapon, Vec3* muzzle) {
-    if (weapon == IT_RIFLE && ak47Loaded_) {
-        addImportedAk47(frame, muzzle);
-        return;
+    const VoxelItem item = weapon == IT_SHOTGUN ? VoxelItem::Shotgun : VoxelItem::Rifle;
+    addVoxelItem(item, frame);
+    if (damageBoost_ > 0) {
+        // Munição incendiária: a mira dianteira brilha em laranja.
+        BoxDraw glow;
+        glow.world = frame * Mat4::translation(voxelFrontSight(item)) * Mat4::scale({0.035f, 0.035f, 0.035f});
+        glow.color = {1.0f, 0.5f, 0.15f, 1};
+        glow.emissive = 1.0f;
+        scene_.boxes.push_back(glow);
     }
-    for (const Part& p : weaponParts(weapon)) {
-        BoxDraw box;
-        box.world = frame * Mat4::translation(p.c) * Mat4::scale(p.size);
-        box.color = p.color;
-        box.emissive = p.emissive;
-        if (p.accent && damageBoost_ > 0) box.color = {1.0f, 0.5f, 0.15f, 1};
-        scene_.boxes.push_back(box);
-    }
-    if (muzzle) *muzzle = frame.transformPoint({0, 0.1f, weaponDef(weapon).length});
+    if (muzzle) *muzzle = frame.transformPoint(voxelMuzzle(item));
 }
 
-void Game::addImportedAk47(const Mat4& frame, Vec3* muzzle) {
-    // O GLB original tem o cano no eixo -Z; o espaço de armas do jogo usa +Z.
-    const Mat4 modelFrame = frame * Mat4::rotationY(kPi);
-    if (muzzle) *muzzle = modelFrame.transformPoint({-0.01814f, 0.10661f, 0.64570f});
+void Game::addVoxelItem(VoxelItem item, const Mat4& world) {
+    CharacterAsset& asset = voxelItems_[static_cast<size_t>(item)];
     if (scene_.characterCount >= scene_.characters.size()) scene_.characters.emplace_back();
     CharacterDraw& draw = scene_.characters[scene_.characterCount++];
-    draw.asset = &ak47Asset_;
-    draw.world = modelFrame;
+    draw.asset = &asset;
+    draw.world = world;
     Pose bind;
-    ak47Asset_.model.bindPose(bind);
-    ak47Asset_.model.globals(bind, draw.nodes);
+    asset.model.bindPose(bind);
+    asset.model.globals(bind, draw.nodes);
     draw.tint = {1, 1, 1};
     draw.flash = 0;
     draw.alpha = 1;

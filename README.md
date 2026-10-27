@@ -6,7 +6,7 @@ Jogo Android de tiro em terceira pessoa num **mundo aberto de blocos** (estilo M
 
 **Objetivo de cada fase: destrua ninhos → recolha cristais → extraia pelo portal.**
 
-1. **Destrua os 3 ninhos de infecção.** Cada ninho tem um núcleo roxo pulsante: atire nele (tiros, lança-chamas ou faca; granadas, molotovs e lança-granadas não ferem ninhos). Com você a menos de 55 m, o ninho gera zumbis.
+1. **Destrua os 3 ninhos de infecção.** Cada ninho tem um núcleo roxo pulsante: atire nele (tiros ou faca; granadas e molotovs não ferem ninhos). Com você a menos de 55 m, o ninho gera zumbis.
 2. **Recolha o cristal** que cai do núcleo de cada ninho destruído: basta chegar perto. O cristal fica no chão até você pegá-lo, e aparece na bússola, no minimapa e no mapa.
 3. **Extraia pelo portal.** Com os 3 cristais em mãos, o portal de obsidiana abre. Entre nele para vencer a fase. O portal fica num ponto da ilha independente dos ninhos (aparece como PORTAL no mapa).
 
@@ -16,7 +16,7 @@ Não é preciso matar todos os zumbis: os abates rendem diamantes, mas não abre
 - **Estrelas:** vencer a fase, terminar com vida ≥ 50% e terminar dentro do tempo-alvo (cresce com a fase; 6:09 na fase 1).
 - **Cristais x diamantes:** cada fase tem 3 **cristais** (um por ninho); eles dão um bônus na primeira vez. Os **diamantes** (◆) são a moeda do jogo: vêm de abates, baús, estrelas, missões e vitórias.
 - **Campanha infinita:** 5 fases por zona. Os quatro biomas (Floresta, Deserto, Neve e Terra Devastada) se repetem em ciclos cada vez mais difíceis (II, III...). A noite só aparece a partir da fase 3.
-- **A ilha:** cada partida gera uma ilha nova de cerca de 5 km (6144 blocos), com dois biomas misturados, rios, trilhas e pontos de interesse: acampamento, ruínas, cemitério, depósito, fazenda, torre de vigia, posto avançado, casa, vilarejo, igreja, posto de gasolina, prédio em ruínas e celeiro. Entre nas construções e suba nas torres: há baús escondidos com diamantes e itens. A cura é escassa.
+- **O terreno:** cada partida usa o gerador contínuo do projeto Horizonte por semente, numa área de 6144 × 6144 blocos e altura de 128. Inclui ruído de valor suavizado, floresta/deserto/neve, rios, cavernas, minérios, aldeias, árvores e ilhas flutuantes. As missões acrescentam trilhas e pontos de interesse: acampamento, ruínas, cemitério, depósito, fazenda, torre de vigia, posto avançado, casa, vilarejo, igreja, posto de gasolina, prédio em ruínas e celeiro. Entre nas construções e suba nas torres: há baús escondidos com diamantes e itens. A cura é escassa.
 - **Zumbis:** 10 tipos que aparecem conforme a fase (errante, corredor, brutamontes, arremessador, incendiário, retalhador, inchado, gritador, cuspidor e atirador de facas), mais variações elite (blindado, gigante, veloz, regenerador, tóxico e furioso). Eles contornam o relevo com um campo de fluxo (BFS), escutam tiros e cercam o jogador.
 - **Mapa:** tocar no minimapa abre o mapa da ilha inteira (o jogo pausa) com ninhos, cristais caídos, portal e suprimentos.
 - **Dificuldade:** depende só da fase e das melhorias que você comprou. Nunca depende de anúncios.
@@ -53,7 +53,7 @@ Regras e detalhes:
 
 - **Formato:** todos contra todos, de 2 a 8 jogadores.
 - **Mira:** sem mira assistida e sem tiro automático.
-- **Arena:** uma arena procedural nova a cada partida, em um de seis estilos (ilha, arquipélago, vale entre montanhas com rio, mesetas em degraus, cratera com lago e planície de rios).
+- **Arena:** usa o mesmo núcleo de terreno do Horizonte, incluindo ilhas flutuantes, com bordas finitas e áreas seguras de renascimento. Todos os participantes precisam desta versão do gerador (protocolo ZZ2); versões anteriores não entram na sala.
 - **Renascimento:** 3 segundos depois de ser eliminado, longe dos inimigos.
 - **Recompensa:** 2 diamantes por abate, mais 25 pela vitória (5 por participar).
 - **Rede:** os aparelhos precisam estar no mesmo Wi-Fi, ou um deles roteando o hotspot.
@@ -74,7 +74,7 @@ node scripts/lan-bot.mjs <ip-do-celular>
 | Correr | Botão CORRER liga a corrida automática (toque de novo, ou puxe o joystick para trás, para parar); empurrar o joystick até o fim também corre |
 | Câmera | Arrastar em qualquer ponto livre da metade direita |
 | Atirar | Segurar ATIRAR; arrastar o botão também gira a câmera |
-| Mirar | MIRAR alterna o zoom (o rifle de precisão tem luneta de 3 níveis) |
+| Mirar | MIRAR alterna o zoom |
 | Pular / Recarregar / Agachar | Botões próprios (a recarga também é automática com o pente vazio) |
 | Faca | FACA golpeia de perto (também fere o núcleo do ninho) |
 | Granada | Segure para ver a trajetória e solte para lançar; arraste até o ✕ para cancelar (granada, molotov ou fumaça, conforme o item escolhido) |
@@ -87,7 +87,7 @@ Nos Ajustes há sensibilidade, mira assistida, tiro automático, eixo Y invertid
 ## Armas, mochila e melhorias
 
 - **Mochila estilo Minecraft:** 6 espaços na barra rápida + 18 na mochila. As armas nunca somem; consumíveis empilham.
-- **8 armas:** fuzil de assalto, pistola, escopeta, submetralhadora, rifle de precisão, metralhadora, lança-chamas e lança-granadas. Elas liberam por fase vencida e se compram com diamantes no Arsenal.
+- **Armas do template Multiplayer FPS (Unity):** fuzil de assalto (hitscan, 10 tiros/s, pente de 30, recarga de 2 s, mira em cruz) e escopeta (bala que voa a 30 m/s, 1 tiro/s, pente de 10, recarga de 3 s, mira de círculo aberto). A mira fica cinza recarregando ou entre disparos e um anel mostra o progresso da recarga. O dano foi escalado para a vida dos zumbis (x1,8). Modelos e sons do template não foram copiados (licença Unity Companion): o fuzil usa o modelo AK, a escopeta é em blocos e os sons são sintetizados.
 - **Consumíveis:** kit médico, bandagem, antídoto, adrenalina, munição incendiária, colete, granada, molotov e granada de fumaça.
 - **10 melhorias** compradas com diamantes (vitalidade, poder de fogo, recarga, blindagem, regeneração, agilidade, mira mortal, pente estendido, sorte e explosivos); o limite de nível sobe a cada zona liberada.
 
@@ -170,3 +170,52 @@ A versão WebView/Three.js, os mapas de masmorra, o editor de mapas e os testes 
 ## Créditos
 
 Mundo, texturas, personagens, sons e músicas são gerados pelo projeto. O modelo da arma em `app/src/main/assets/weapons/` foi convertido por `tools/convert_glb_to_zzm.py`; a origem e a licença desse modelo ainda precisam ser documentadas aqui (pendência do autor). Qualquer material de terceiros da versão anterior fica apenas em `legacy/` (com as licenças em `legacy/notices/`) e não entra no APK.
+
+## Terreno Horizonte
+
+O núcleo está em `app/src/main/cpp/world/horizonte`, portado do gerador contínuo
+do projeto Horizonte. As fórmulas de ruído, rios, biomas, cavernas e ilhas são
+preservadas; os IDs dos blocos são convertidos na integração com este motor.
+A área inicial especial de posições fixas do Horizonte não é usada.
+
+As ilhas flutuantes mantêm sua altura original (topos entre y=61 e y=82).
+Ninhos, início e portal ficam no chão inferior, em áreas reservadas. Não há
+voo nem construção para alcançar as ilhas. Os minérios são decorativos neste
+jogo; minério de diamante usa o equivalente de ferro e lava usa magma sólido.
+
+A água usa o algoritmo e as texturas do Horizonte: fonte, sete níveis de
+escoamento e queda vertical, com atualização a cada 0,25 s. A simulação tem
+fila limitada e acompanha a área do jogador; no PvP, o anfitrião a controla.
+Tiros removem o bloco atingido e granadas abrem crateras. O fundo do mundo,
+o portal e os suportes essenciais dos ninhos são protegidos. As alterações
+permanecem durante a partida, inclusive ao sair e voltar a uma região, e são
+reiniciadas numa nova partida. No PvP, as alterações são confirmadas e
+reenviadas pelo anfitrião; todos precisam da versão de protocolo ZZ3.
+
+O ciclo solar original dura 20 minutos: 10 de dia, 1 min 40 s de pôr do sol,
+6 min 40 s de noite e 1 min 40 s de amanhecer. A pausa da missão congela
+o relógio. A iluminação, o céu e a lanterna acompanham esse ciclo.
+
+Verificação nativa no Android conectado (NDK instalado):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/test-terrain.ps1
+powershell -ExecutionPolicy Bypass -File scripts/test-world.ps1
+powershell -ExecutionPolicy Bypass -File scripts/test-network.ps1
+node --test tests/lan-terrain-codec.test.mjs
+```
+
+Os testes comparam 40 chunks com fixtures produzidas diretamente pelo código
+original e verificam objetivos, início seco, sobrevivência, arena, regeneração,
+estruturas acima de y=63 e coordenadas de renderização distantes.
+O segundo comando verifica fluxo e altura da água, crateras, streaming,
+proteções e fases do relógio. O terceiro cobre retransmissão e autoridade
+com sockets UDP reais. Os scripts aceitam `-Abi armeabi-v7a` para ARM32.
+O compilador desativa a contração de ponto flutuante para manter o terreno
+idêntico entre ARM32 e ARM64, inclusive nos limites das ilhas.
+
+### Compilar em computador com 4 GB de RAM
+
+O projeto reserva 512 MB para o Gradle, usa GC serial, um worker, tarefas
+sequenciais e um compilador C++ por vez. Execute a compilação e os testes
+em sequência; evite abrir outra compilação ao mesmo tempo. Use JDK 17.

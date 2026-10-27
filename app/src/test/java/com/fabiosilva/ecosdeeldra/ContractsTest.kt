@@ -298,7 +298,7 @@ class ContractsTest {
         assertNotNull(Contracts.loadoutAdvice(ContractId.ENDURANCE, bare))
         val kit = Inventory().apply {
             add(Items.GRENADE, 2); add(Items.SMOKE, 1); add(Items.MEDKIT, 1)
-            add(Items.RIFLE, 1); add(Items.PISTOL, 1)
+            add(Items.RIFLE, 1); add(Items.SHOTGUN, 1)
         }
         assertNull(Contracts.loadoutAdvice(ContractId.SILENT_RECOVERY, kit))
         assertNull(Contracts.loadoutAdvice(ContractId.RED_NIGHT, kit))

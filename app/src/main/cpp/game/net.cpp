@@ -19,7 +19,7 @@ namespace zz {
 
 namespace {
 
-constexpr uint8_t kVersion = 1;
+constexpr uint8_t kVersion = terrainwire::kVersion;  // terreno destrutível e confirmações por partida
 constexpr uint8_t kTypeState = 1;
 constexpr uint8_t kTypeSnapshot = 2;
 constexpr float kSendInterval = 0.05f;   // 20 Hz
@@ -121,6 +121,11 @@ bool NetSession::endpointBoundElsewhere(int id, const sockaddr_in& from) const {
 bool NetSession::start(const NetConfig& config, const std::vector<Vec3>& spawnPoints) {
     stop();
     config_ = config;
+    terrainJournal_.reset(config.seed);
+    terrainReceiver_.reset(config.seed);
+    sendTimer_ = 0;
+    seq_ = 0;
+    nextEventId_ = 1;
     spawns_ = spawnPoints;
     for (int i = 0; i < kMaxNetPlayers; ++i) {
         players_[i] = NetPlayer{};
@@ -183,6 +188,17 @@ void NetSession::stop() {
     if (socket_ >= 0) logGuard(true);
     if (socket_ >= 0) ::close(socket_);
     socket_ = -1;
+    terrainJournal_.reset(0);
+    terrainReceiver_.reset(0);
+    worldShot_ = nullptr;
+}
+
+void NetSession::recordTerrainEdit(int x, int y, int z, uint8_t block) {
+    if (running() && config_.host) terrainJournal_.record({x,y,z,block});
+}
+
+std::vector<TerrainEdit> NetSession::takeTerrainEdits() {
+    return config_.host ? std::vector<TerrainEdit>{} : terrainReceiver_.take();
 }
 
 void NetSession::setLocalState(const Vec3& pos, float yaw, float pitch, uint8_t flags, float speed) {
@@ -284,7 +300,23 @@ void NetSession::hostTick(float dt, std::vector<NetEvent>& out) {
     me.active = true;
     me.lastHeard = 0;
     for (const NetEvent& e : localQueue_) {
-        if (e.kind == NE_FIRE) pushHostEvent(e, out);
+        if (e.kind == NE_FIRE) {
+            // O host passa pelas mesmas regras antes de poder modificar o terreno.
+            const pvp::Limits lim = limits();
+            pvp::Reject why = (!me.alive || ended_) ? pvp::DEAD : pvp::validateFire(e.from,e.to,me.pos,lim);
+            if (why == pvp::OK) {
+                pvp::shooterAdvance(me.shooter,lim,clock_);
+                why = pvp::shooterTryFire(me.shooter,lim,clock_);
+            }
+            if (why == pvp::OK && los_) {
+                Vec3 a,b;
+                pvp::losSegment(e.from,e.to,a,b);
+                if (!los_(a,b)) why = pvp::LINE_OF_SIGHT;
+            }
+            if (why != pvp::OK) { reject(why); continue; }
+            pushHostEvent(e,out);
+            if (worldShot_) worldShot_(e.from,e.to);
+        }
         else if (e.kind == NE_HIT) applyHit(config_.localId, e.a, e.b, e.c != 0, out);
     }
     localQueue_.clear();
@@ -342,6 +374,7 @@ void NetSession::hostTick(float dt, std::vector<NetEvent>& out) {
         sendTimer_ = kSendInterval;
         ++tick_;
         sendSnapshot();
+        sendTerrain();
     }
 }
 
@@ -390,11 +423,12 @@ void NetSession::handleState(const uint8_t* data, size_t len, const sockaddr_in&
         reject(pvp::PACKET_RATE);
         return;
     }
-    if (!known) {
+    if (!known || !p.active) {
         // Primeiro pacote ou reconexão (o dono anterior sumiu): associa o endpoint e recomeça a sequência.
         p.addr = from;
         p.hasAddr = true;
         p.hasSeq = false;
+        p.terrainAck = p.terrainSent = 0;  // reconexão pode ter regenerado o mundo local
     }
     if (p.hasSeq && !pvp::seqIsNewer(p.lastSeq, seq)) {
         reject(pvp::STALE);
@@ -460,6 +494,7 @@ void NetSession::handleState(const uint8_t* data, size_t len, const sockaddr_in&
             pvp::creditAdd(p.shooter, e.from, e.to, clock_);
             ++guard_.firesAccepted;
             pushHostEvent(e, out);
+            if (worldShot_) worldShot_(e.from,e.to);
         } else {
             const int target = e.a;
             if (!p.alive || ended_) {
@@ -570,6 +605,7 @@ void NetSession::clientTick(float dt, std::vector<NetEvent>& out) {
     if (sendTimer_ <= 0) {
         sendTimer_ = kSendInterval;
         sendState();
+        sendTerrainAck();
     }
 }
 
@@ -609,6 +645,39 @@ bool NetSession::seenHostEvent(uint16_t id) {
     seenHost_[seenHostCount_ % 64] = id;
     ++seenHostCount_;
     return false;
+}
+
+// Separado dos efeitos: nunca expira; cada participante recebe a partir do próprio ACK.
+void NetSession::sendTerrain() {
+    for (int i=0;i<kMaxNetPlayers;++i) {
+        NetPlayer& p=players_[i];
+        if (i==config_.localId || !p.present || !p.active || !p.hasAddr) continue;
+        auto packet=terrainJournal_.batch(p.terrainAck);
+        if (packet.empty()) continue;
+        const ssize_t sent=sendto(socket_,packet.data(),packet.size(),0,
+            reinterpret_cast<const sockaddr*>(&p.addr),sizeof(p.addr));
+        if (sent==static_cast<ssize_t>(packet.size())) {
+            const uint32_t last=terrainwire::get32(packet.data()+8)+terrainwire::get16(packet.data()+12)-1;
+            p.terrainSent=std::max(p.terrainSent,last);
+        }
+    }
+}
+
+void NetSession::sendTerrainAck() {
+    auto packet=terrainwire::ackPacket(config_.seed,config_.localId,terrainReceiver_.revision());
+    if (!packet.empty()) sendto(socket_,packet.data(),packet.size(),0,
+        reinterpret_cast<const sockaddr*>(&hostAddr_),sizeof(hostAddr_));
+}
+
+void NetSession::handleTerrainAck(const uint8_t* data,size_t len,const sockaddr_in& from) {
+    int id=-1; uint32_t revision=0;
+    if (!terrainwire::readAck(data,len,config_.seed,id,revision)) { reject(pvp::FORMAT); return; }
+    NetPlayer& p=players_[id];
+    if (!p.present || !p.active || !p.hasAddr || !sameEndpoint(p.addr,from) ||
+        (config_.ips[id]!=0 && ntohl(from.sin_addr.s_addr)!=config_.ips[id])) {
+        reject(pvp::SENDER); return;
+    }
+    if (!terrainwire::advanceAck(p.terrainAck,revision,p.terrainSent)) reject(pvp::FORMAT);
 }
 
 void NetSession::handleSnapshot(const uint8_t* data, size_t len, std::vector<NetEvent>& out) {
@@ -692,14 +761,16 @@ void NetSession::receive(std::vector<NetEvent>& out) {
         socklen_t fromLen = sizeof(from);
         ssize_t n = recvfrom(socket_, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (n <= 0) break;
-        if (n < 4 || buf[0] != 'Z' || buf[1] != 'Z' || buf[2] != kVersion) continue;
-        // Cliente: só vale o que vem do IP do anfitrião (snapshots de terceiros são descartados).
-        if (!config_.host && from.sin_addr.s_addr != hostAddr_.sin_addr.s_addr) {
+        if (n < 4 || n > static_cast<ssize_t>(terrainwire::kMaxPacket) || buf[0] != 'Z' || buf[1] != 'Z' || buf[2] != kVersion) continue;
+        // IP e porta precisam corresponder ao anfitrião, inclusive para as edições.
+        if (!config_.host && !sameEndpoint(from,hostAddr_)) {
             reject(pvp::SENDER);
             continue;
         }
         if (config_.host && buf[3] == kTypeState) handleState(buf + 4, static_cast<size_t>(n - 4), from, out);
         else if (!config_.host && buf[3] == kTypeSnapshot) handleSnapshot(buf + 4, static_cast<size_t>(n - 4), out);
+        else if (config_.host && buf[3] == terrainwire::kAck) handleTerrainAck(buf,static_cast<size_t>(n),from);
+        else if (!config_.host && buf[3] == terrainwire::kEdits && terrainReceiver_.accept(buf,static_cast<size_t>(n))) sendTerrainAck();
     }
 }
 

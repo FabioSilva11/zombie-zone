@@ -40,12 +40,21 @@ object HudTouch {
     /**
      * Área de toque do controle [c] centrado em ([x], [y]) com raio visual [r] (px) e densidade [density].
      * O joystick devolve o círculo do anel de repouso (a área real dele é dinâmica, onde o polegar tocar).
+     * Botões vizinhos podem ter folgas que se cruzam (como na referência): o HudView escolhe o centro mais próximo.
      */
     fun area(c: HudControl, x: Float, y: Float, r: Float, density: Float): HudTouchArea = when (c) {
-        HudControl.JOYSTICK -> HudTouchArea.Circle(x, y, r)
+        HudControl.JOYSTICK -> HudTouchArea.Circle(x, y, r * HudLayout.JOYSTICK_IDLE)
         HudControl.MAP -> HudTouchArea.Box(x - r, y - r, x + r, y + r)
-        HudControl.SUPPLY -> HudTouchArea.Box(x - r * 3.3f, y - r - BUTTON_PAD_DP * density, x + r * 3.3f, y + r + BUTTON_PAD_DP * density)
         HudControl.HOTBAR -> HudTouchArea.Box(x - r * 6f, y - r * 1.2f, x + r * 6f, y + r * 1.2f)
         else -> HudTouchArea.Circle(x, y, r * BUTTON_GROW + BUTTON_PAD_DP * density)
+    }
+
+    /** Forma desenhada do controle (sem folga de toque): usada para garantir que nada se sobrepõe na tela. */
+    fun visual(c: HudControl, x: Float, y: Float, r: Float): HudTouchArea {
+        val (hx, hy) = HudLayout.halfExtent(c, r)
+        return when (c) {
+            HudControl.MAP, HudControl.HOTBAR, HudControl.WEAPON -> HudTouchArea.Box(x - hx, y - hy, x + hx, y + hy)
+            else -> HudTouchArea.Circle(x, y, hx)
+        }
     }
 }

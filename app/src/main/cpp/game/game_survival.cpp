@@ -68,7 +68,7 @@ void Game::spawnWaveZombie() {
         if (!world_.columnMeshed(x, z)) continue;
         int g = world_.groundHeight(x, z), s = world_.standHeight(x, z);
         if (g <= layout_.seaLevel + 1 || s - g > 1) continue;
-        if (world_.get(x, s, z) == B_WATER || world_.solid(x, s + 1, z)) continue;
+        if (isWaterBlock(world_.get(x, s, z)) || world_.solid(x, s + 1, z)) continue;
         pos = {x + 0.5f, static_cast<float>(s), z + 0.5f};
         found = true;
     }

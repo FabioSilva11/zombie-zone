@@ -4,14 +4,11 @@
 #include <cmath>
 
 #include "../core/random.h"
+#include "position_key.h"
 
 namespace zz {
 
 namespace {
-
-uint32_t packPos(int x, int y, int z) {
-    return (static_cast<uint32_t>(x) << 19) | (static_cast<uint32_t>(z) << 6) | static_cast<uint32_t>(y);
-}
 
 bool validPos(int x, int y, int z) {
     return x >= 0 && z >= 0 && y >= 0 && x < kIslandSize && z < kIslandSize && y < kIslandHeight;
@@ -23,12 +20,12 @@ public:
     explicit StampSink(PoiStamp& s) : s_(s) {}
     uint8_t get(int x, int y, int z) const override {
         if (!validPos(x, y, z)) return B_AIR;
-        auto it = s_.edits.find(packPos(x, y, z));
+        auto it = s_.edits.find(packPosition(x, y, z));
         return it == s_.edits.end() ? B_AIR : it->second;
     }
     void set(int x, int y, int z, uint8_t block) override {
         if (!validPos(x, y, z)) return;
-        s_.edits[packPos(x, y, z)] = block;
+        s_.edits[packPosition(x, y, z)] = block;
         if (s_.maxX < s_.minX) {
             s_.minX = s_.maxX = x;
             s_.minZ = s_.maxZ = z;
@@ -68,8 +65,6 @@ private:
     int h_, x0_, z0_;
 };
 
-int floorDiv(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
-
 uint32_t mixColor(uint32_t a, uint32_t b, float t) {
     t = clampf(t, 0, 1);
     auto ch = [&](int s) {
@@ -87,7 +82,7 @@ uint32_t shadeColor(uint32_t c, float f) {
 }  // namespace
 
 IslandGenerator::IslandGenerator(const Theme& theme, int stage, uint32_t seed, bool objectives)
-    : primary_(theme), stage_(std::max(1, stage)), seed_(seed ? seed : 1u), objectives_(objectives) {
+    : primary_(theme), terrain_(seed), stage_(std::max(1, stage)), seed_(seed), objectives_(objectives) {
     // Bioma secundário: outra zona, escolhida pela semente.
     int other = (theme.id + 1 + static_cast<int>(seed_ % 3u)) % 4;
     secondary_ = themeForStage(other * 5 + 1);
@@ -97,55 +92,24 @@ IslandGenerator::IslandGenerator(const Theme& theme, int stage, uint32_t seed, b
 }
 
 float IslandGenerator::landMask(float x, float z) const {
-    float dx = x - kIslandCenter, dz = z - kIslandCenter;
-    float d = std::sqrt(dx * dx + dz * dz);
-    float wobble = (fbm(x / 700.0f, z / 700.0f, seed_ + 71, 3) - 0.5f) * 900.0f +
-                   (fbm(x / 150.0f, z / 150.0f, seed_ + 72, 2) - 0.5f) * 160.0f;
-    return 1.0f - smoothstepf(kIslandRadius - 280.0f, kIslandRadius + 120.0f, d + wobble);
+    return x >= 0 && z >= 0 && x < kIslandSize && z < kIslandSize ? 1.0f : 0.0f;
 }
 
 float IslandGenerator::secondaryWeight(float x, float z) const {
-    return smoothstepf(0.575f, 0.64f, fbm(x / 900.0f, z / 900.0f, seed_ + 77, 3));
+    return terrain_.biome(int(std::floor(x)),int(std::floor(z))) * .5f;
 }
 
 float IslandGenerator::riverMask(float x, float z) const {
-    float n = fbm(x / 760.0f, z / 760.0f, seed_ + 200, 2);
-    float d = std::fabs(n - 0.5f);
-    return 1.0f - smoothstepf(0.004f, 0.0085f, d);
+    double d = horizonte::riverDistance(seed_,int(std::floor(x)),int(std::floor(z)));
+    return 1.0f - smoothstepf(2.0f,7.0f,float(d));
 }
 
 float IslandGenerator::naturalHeight(float x, float z) const {
-    float land = landMask(x, z);
-    float sw = secondaryWeight(x, z);
-    float hill = lerpf(primary_.hilliness, secondary_.hilliness, sw);
-    float n = fbm(x / 150.0f, z / 150.0f, seed_, 5);
-    float detail = fbm(x / 24.0f, z / 24.0f, seed_ + 31, 2);
-    float hills = (n - 0.5f) * 2.0f * 10.0f * hill;
-    if (hills < 0) hills *= 0.55f;  // vales mais rasos: menos lagoas soltas
-    hills += (detail - 0.5f) * 3.0f;
-    float ridge = fbm(x / 420.0f, z / 420.0f, seed_ + 5, 4);
-    float m = smoothstepf(0.55f, 0.8f, ridge);
-    float h = static_cast<float>(sea_) + 6.5f + hills + m * m * 32.0f * hill;
-    // Deserto: dunas mais baixas e suaves (sem terraços — paredes de areia mais altas que o jogador).
-    float desert = (primary_.id == 1 ? 1.0f - sw : 0.0f) + (secondary_.id == 1 ? sw : 0.0f);
-    if (desert > 0.01f) h = lerpf(h, static_cast<float>(sea_) + 6.5f + (h - sea_ - 6.5f) * 0.7f, desert);
-    if (h > 40.0f) h = 40.0f + (h - 40.0f) * 0.55f;
-    h = lerpf(static_cast<float>(sea_) - 12.0f, h, land);
-    // Rios: margens rebaixadas e leito abaixo do mar.
-    if (land > 0.55f) {
-        float rn = fbm(x / 760.0f, z / 760.0f, seed_ + 200, 2);
-        float d = std::fabs(rn - 0.5f);
-        float bank = 1.0f - smoothstepf(0.0085f, 0.024f, d);
-        float bed = 1.0f - smoothstepf(0.004f, 0.0085f, d);
-        if (bank > 0) h = std::min(h, lerpf(h, static_cast<float>(sea_) + 0.6f, bank));
-        if (bed > 0) h = lerpf(h, static_cast<float>(sea_) - 2.6f, bed);
-    }
-    return h;
+    return float(terrain_.groundHeight(int(std::floor(x)),int(std::floor(z))) + 1);
 }
 
-const Theme& IslandGenerator::biomeTheme(float sw, int x, int z) const {
-    float j = (hashFloat(x, z, seed_ + 5) - 0.5f) * 0.14f;
-    return sw + j > 0.5f ? secondary_ : primary_;
+const Theme& IslandGenerator::biomeTheme(float, int x, int z) const {
+    return naturalBiomes_[terrain_.biome(x,z)];
 }
 
 IslandPoi IslandGenerator::basePoi(int cx, int cz) const {
@@ -159,6 +123,7 @@ IslandPoi IslandGenerator::basePoi(int cx, int cz) const {
     float pz = cz * kIslandCell + 24.0f + hashFloat(cx, cz, seed_ + 2) * 80.0f;
     p.center = {std::floor(px) + 0.5f, 0.0f, std::floor(pz) + 0.5f};
     if (landMask(px, pz) < 0.9f || riverMask(px, pz) > 0.0f) return p;
+    if (!horizonte::clearFootprint(terrain_, seed_, int(px), int(pz), 38.0f)) return p;
     float nh = naturalHeight(px, pz);
     if (nh < sea_ + 1.6f || nh > sea_ + 24.0f) return p;
     p.center.y = clampf(std::round(nh), sea_ + 2.0f, sea_ + 20.0f);
@@ -381,157 +346,67 @@ ColumnInfo IslandGenerator::column(int x, int z) {
         c.path = true;
         c.bridge = c.water;
     }
-    c.forest = smoothstepf(0.38f, 0.66f, fbm(fx / 220.0f, fz / 220.0f, seed_ + 9, 3));
+    c.forest = c.biome->id == 1 ? 0.0f : 0.35f;
     return c;
 }
 
 namespace {
 
-uint8_t surfaceBlock(const ColumnInfo& c, int x, int z, int sea, uint32_t seed) {
-    const Theme& t = *c.biome;
-    int top = c.top;
+uint8_t surfaceBlock(const ColumnInfo& c, int, int, int sea, uint32_t) {
     if (c.path && !c.water) return B_PATH;
-    if (top - 1 <= sea + 1) {
-        if (top - 1 < sea - 2) return (t.id == 0 || t.id == 1) ? B_SAND : B_GRAVEL;
-        return t.beach;
-    }
-    if (t.id != 1 && top > 41) return B_SNOW;
-    if (t.id != 1 && top > 37) return hashFloat(x, z, seed + 3) < 0.3f ? B_GRAVEL : B_STONE;
-    if (t.id == 1 && top > 34) return B_TERRACOTTA;
-    if (t.id == 3 && hashFloat(x, z, seed + 4) < 0.012f) return B_MAGMA;
-    return t.surface;
+    return c.top - 1 <= sea + 1 || c.biome->id == 1 ? B_SAND :
+           c.biome->id == 2 ? B_SNOW : B_GRASS;
 }
 
 }  // namespace
 
 void IslandGenerator::generate(Chunk& chunk, int height) {
     const int x0 = chunk.cx * kChunkSize, z0 = chunk.cz * kChunkSize;
-    ChunkSink sink(chunk, height);
-    ColumnInfo cols[kChunkSize * kChunkSize];
-    auto idx = [](int lx, int y, int lz) { return (static_cast<size_t>(y) << 8) | (static_cast<size_t>(lz) << 4) | static_cast<size_t>(lx); };
-
-    // 1) Colunas de terreno.
-    for (int lz = 0; lz < kChunkSize; ++lz) {
-        for (int lx = 0; lx < kChunkSize; ++lx) {
-            const int x = x0 + lx, z = z0 + lz;
-            ColumnInfo& c = cols[lz * kChunkSize + lx];
-            c = column(x, z);
-            const Theme& t = *c.biome;
-            const int top = c.top;
-            const uint8_t surf = surfaceBlock(c, x, z, sea_, seed_);
-            const uint8_t fill = (surf == B_SAND || surf == B_GRAVEL) ? surf : t.filler;
-            for (int y = 0; y < top && y < height; ++y) {
-                uint8_t b;
-                if (y == 0) b = B_BEDROCK;
-                else if (y < top - 4) {
-                    b = t.deep;
-                    if (b == B_STONE) {
-                        float o = hashFloat(x * 31 + y, z * 17 - y, seed_ + 11);
-                        if (o < 0.02f) b = o < 0.012f ? B_COAL_ORE : B_IRON_ORE;
-                    }
-                } else if (y < top - 1) b = c.bridge ? t.deep : fill;
-                else b = surf;
-                chunk.blocks[idx(lx, y, lz)] = b;
+    horizonte::generate(terrain_,chunk,height);
+    ChunkSink sink(chunk,height);
+    auto idx = [](int x, int y, int z) { return (size_t(y)*16+z)*16+x; };
+    // O núcleo mantém cavernas/ilhas/aldeias intactas. As sobreposições locais
+    // só alteram o chão e a faixa de passagem das trilhas e dos POIs.
+    for (int lz=0; lz<16; ++lz)
+        for (int lx=0; lx<16; ++lx) {
+            int x=x0+lx, z=z0+lz;
+            ColumnInfo c=column(x,z);
+            int natural=terrain_.groundHeight(x,z)+1;
+            if (!c.nearPoi && !c.nearPath && c.top == natural) continue;
+            // Caminhos não entram nas casas nem derrubam ilhas do Horizonte.
+            bool village = !terrain_.villagesNear(x,z,0).empty();
+            if (village && !c.nearPoi) continue;
+            int low=std::max(1,std::min(natural,c.top)-4);
+            int high=std::min(height,std::max(natural,c.top)+8);
+            auto floating=horizonte::floatingColumn(seed_,x,z);
+            if (floating.exists()) high=std::min(high,floating.bottom);
+            for (int y=low; y<high; ++y) {
+                uint8_t block = y < c.top-1 ? (y < c.top-4 ? B_STONE : c.biome->filler) :
+                                y == c.top-1 ? surfaceBlock(c,x,z,sea_,seed_) :
+                                y <= sea_ ? B_WATER : B_AIR;
+                chunk.blocks[idx(lx,y,lz)]=block;
             }
-            int ground = top;
-            if (c.water) {
-                for (int y = top; y <= sea_; ++y) chunk.blocks[idx(lx, y, lz)] = B_WATER;
-                if (c.bridge) {
-                    chunk.blocks[idx(lx, sea_, lz)] = B_PLANKS;
-                    ground = sea_ + 1;
-                } else if (t.id == 2) {
-                    chunk.blocks[idx(lx, sea_, lz)] = B_ICE;
-                    ground = sea_ + 1;
-                }
-            }
-            chunk.ground[lz * kChunkSize + lx] = static_cast<int16_t>(ground);
+            int ground=c.top;
+            if (c.bridge) { sink.set(x,sea_,z,B_PLANKS); ground=sea_+1; }
+            chunk.ground[lz*16+lx]=int16_t(ground);
         }
-    }
 
-    // 2) Árvores: uma por célula 5x5 no máximo, determinística (copas cruzam a borda do chunk).
-    const int tc = 5;
-    for (int tz = floorDiv(z0 - 6, tc); tz <= floorDiv(z0 + kChunkSize + 5, tc); ++tz) {
-        for (int tx = floorDiv(x0 - 6, tc); tx <= floorDiv(x0 + kChunkSize + 5, tc); ++tx) {
-            uint32_t h = hash2(tx, tz, seed_ + 404);
-            int x = tx * tc + static_cast<int>((h >> 4) % tc), z = tz * tc + static_cast<int>((h >> 12) % tc);
-            if (x < x0 - 5 || x > x0 + kChunkSize + 4 || z < z0 - 5 || z > z0 + kChunkSize + 4) continue;
-            if (x < 2 || z < 2 || x >= kIslandSize - 2 || z >= kIslandSize - 2) continue;
-            float roll = static_cast<float>((h >> 20) & 4095u) / 4096.0f;
-            if (roll > 0.9f) continue;
-            bool local = x >= x0 && z >= z0 && x < x0 + kChunkSize && z < z0 + kChunkSize;
-            ColumnInfo c = local ? cols[(z - z0) * kChunkSize + (x - x0)] : column(x, z);
-            const Theme& t = *c.biome;
-            float p = clampf(t.treeDensity * 25.0f * (0.12f + 1.7f * c.forest * c.forest), 0.0f, 0.85f);
-            if (roll >= p) continue;
-            if (c.water || c.top <= sea_ + 2 || c.top >= height - 16 || c.nearPath || c.nearPoi || c.river > 0.01f) continue;
-            if (t.id != 1 && c.top > 37) continue;
-            Rng rng(hash2(x, z, seed_ + 505));
-            TreeKind kind = pickTreeKind(t, x, z, seed_, c.top <= sea_ + 4);
-            placeTree(sink, kind, x, c.top, z, rng);
+    // Moldes de células vizinhas também podem atravessar a borda do chunk.
+    int pcx=x0/kIslandCell, pcz=z0/kIslandCell;
+    for (int cz=pcz-1; cz<=pcz+1; ++cz)
+        for (int cx=pcx-1; cx<=pcx+1; ++cx) {
+            const IslandPoi& p=poi(cx,cz);
+            if (!p.exists) continue;
+            float reach=p.radius+12;
+            if (p.center.x+reach<x0 || p.center.x-reach>=x0+16 ||
+                p.center.z+reach<z0 || p.center.z-reach>=z0+16) continue;
+            const PoiStamp& s=stamp(p);
+            for (const auto& e:s.edits)
+                sink.set(positionX(e.first),positionY(e.first),positionZ(e.first),e.second);
+            auto inChunk=[&](const Vec3& v) { return v.x>=x0 && v.z>=z0 && v.x<x0+16 && v.z<z0+16; };
+            for (const Vec3& l:s.decor.lights) if (inChunk(l)) chunk.lights.push_back(l);
+            for (const Vec3& f:s.decor.campfires) if (inChunk(f)) chunk.campfires.push_back(f);
         }
-    }
-
-    // 3) Plantas (capim alto em campos que balançam com o vento, flores, arbustos).
-    for (int lz = 0; lz < kChunkSize; ++lz) {
-        for (int lx = 0; lx < kChunkSize; ++lx) {
-            const ColumnInfo& c = cols[lz * kChunkSize + lx];
-            if (c.water || c.path || c.nearPoi || c.top <= sea_ + 2 || c.top >= height - 2) continue;
-            const int x = x0 + lx, z = z0 + lz;
-            const Theme& t = *c.biome;
-            if (chunk.blocks[idx(lx, c.top - 1, lz)] != t.surface || chunk.blocks[idx(lx, c.top, lz)] != B_AIR) continue;
-            float r = hashFloat(x, z, seed_ + 606);
-            uint8_t plant = B_AIR;
-            if (t.id == 0) {
-                float meadow = smoothstepf(0.42f, 0.6f, fbm(x / 30.0f, z / 30.0f, seed_ + 19, 2));
-                float grass = 0.12f + 0.42f * meadow;
-                if (r < grass) plant = B_TALL_GRASS;
-                else if (r < grass + 0.02f + 0.03f * (1.0f - c.forest)) plant = hashFloat(x, z, seed_ + 607) < 0.5f ? B_FLOWER_RED : B_FLOWER_YELLOW;
-            } else if (t.id == 2) {
-                if (r < 0.05f) plant = B_TALL_GRASS;
-            } else if (t.id == 1) {
-                if (r < 0.022f) plant = B_DEAD_BUSH;
-            } else {
-                if (r < 0.03f) plant = hashFloat(x, z, seed_ + 608) < 0.4f ? B_MUSHROOM_RED : B_DEAD_BUSH;
-            }
-            if (plant != B_AIR) chunk.blocks[idx(lx, c.top, lz)] = plant;
-        }
-    }
-
-    // 4) Pedregulhos espalhados.
-    if (hashFloat(chunk.cx, chunk.cz, seed_ + 707) < 0.22f) {
-        int lx = 1 + static_cast<int>(hashFloat(chunk.cx, chunk.cz, seed_ + 708) * 13);
-        int lz = 1 + static_cast<int>(hashFloat(chunk.cx, chunk.cz, seed_ + 709) * 13);
-        const ColumnInfo& c = cols[lz * kChunkSize + lx];
-        if (!c.water && !c.nearPath && !c.nearPoi && c.top > sea_ + 1 && c.top < height - 4) {
-            const Theme& t = *c.biome;
-            uint8_t rock = t.id == 1 ? B_SANDSTONE : (t.id == 3 ? B_NETHERRACK : B_COBBLE);
-            Rng rng(hash2(chunk.cx, chunk.cz, seed_ + 710));
-            for (int dz = 0; dz < 2; ++dz)
-                for (int dx = 0; dx < 2; ++dx)
-                    if (rng.chance(0.85f)) {
-                        int y = cols[(lz + dz) * kChunkSize + lx + dx].top;
-                        sink.set(x0 + lx + dx, y, z0 + lz + dz, rock);
-                        if (rng.chance(0.35f)) sink.set(x0 + lx + dx, y + 1, z0 + lz + dz, B_STONE);
-                    }
-        }
-    }
-
-    // 5) Ponto de interesse da célula (cada chunk pertence a uma única célula).
-    const IslandPoi& p = poi(x0 / kIslandCell, z0 / kIslandCell);
-    if (p.exists) {
-        const PoiStamp& s = stamp(p);
-        if (!(s.maxX < x0 || s.minX >= x0 + kChunkSize || s.maxZ < z0 || s.minZ >= z0 + kChunkSize)) {
-            for (const auto& e : s.edits) {
-                int x = static_cast<int>(e.first >> 19), z = static_cast<int>((e.first >> 6) & 0x1FFFu), y = static_cast<int>(e.first & 63u);
-                sink.set(x, y, z, e.second);
-            }
-        }
-        auto inChunk = [&](const Vec3& v) { return v.x >= x0 && v.z >= z0 && v.x < x0 + kChunkSize && v.z < z0 + kChunkSize; };
-        for (const Vec3& l : s.decor.lights)
-            if (inChunk(l)) chunk.lights.push_back(l);
-        for (const Vec3& f : s.decor.campfires)
-            if (inChunk(f)) chunk.campfires.push_back(f);
-    }
 }
 
 const PoiStamp& IslandGenerator::stamp(const IslandPoi& p) {
@@ -573,8 +448,7 @@ uint32_t IslandGenerator::mapColor(int x, int z) {
     uint32_t col;
     if (c.bridge) col = 0xB48A52;
     else if (c.water) {
-        if (c.biome->id == 2 && c.top >= sea_ - 1) col = 0x9CC4F2;
-        else col = mixColor(0x4A8AE8, 0x1A3A88, (sea_ - c.top) / 12.0f);
+        col = mixColor(0x4A8AE8, 0x1A3A88, (sea_ - c.top) / 12.0f);
     } else if (c.path) col = 0xC9A46A;
     else {
         col = blockInfo(surfaceBlock(c, x, z, sea_, seed_)).mapColor;
@@ -583,6 +457,16 @@ uint32_t IslandGenerator::mapColor(int x, int z) {
         float slope = naturalHeight(x + 0.5f, z + 0.5f) - naturalHeight(x - 2.5f, z - 2.5f);
         col = shadeColor(col, clampf(0.84f + (c.top - sea_) * 0.011f + clampf(slope * 0.06f, -0.18f, 0.18f), 0.5f, 1.3f));
     }
+    // A aldeia importada é desenhada acima do chão, antes da projeção das
+    // ilhas elevadas (elas podem encobrir os telhados).
+    for (const auto& village : terrain_.villagesNear(x, z, 0)) {
+        for (const auto& home : village.homes()) {
+            if (x >= home[0] - 1 && x <= home[0] + 7 && z >= home[1] - 1 && z <= home[1] + 7)
+                col = blockInfo(village.biome == 2 ? B_SNOW : B_ROOF_RED).mapColor;
+        }
+    }
+    auto floating = horizonte::floatingColumn(seed_, x, z);
+    if (floating.exists()) col = shadeColor(blockInfo(c.biome->id == 2 ? B_SNOW : B_GRASS).mapColor, 1.12f);
     if (p.exists && distXZ(p.center, Vec3(x + 0.5f, 0, z + 0.5f)) < p.radius) {
         col = p.role == ROLE_NEST ? 0x8E2A6A : (p.role == ROLE_PORTAL ? 0x6A3FB0 : (isBuildingKind(p.kind) ? 0xB0644A : 0x9A7A4E));
     }

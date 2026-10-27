@@ -50,6 +50,8 @@ void World::clear() {
     genEmaMs_ = 2.0f;
     meshEmaMs_ = 1.2f;
     contentHash_ = 0;
+    edits_.clear();
+    revision_ = 0;
 }
 
 void World::reset(int width, int height, int depth) {
@@ -111,14 +113,55 @@ void World::set(int x, int y, int z, uint8_t block, bool markDirty) {
     if (!inBounds(x, y, z)) return;
     Chunk* c = chunkAt(x >> 4, z >> 4);
     if (!c || !c->generated) return;
-    c->blocks[blockIndex(x & 15, y, z & 15)] = block;
+    const size_t index = blockIndex(x & 15, y, z & 15);
+    uint8_t previous = c->blocks[index];
+    if (previous == block) return;
+    c->blocks[index] = block;
     if (block != B_AIR && y + 1 > c->maxY) c->maxY = y + 1;
     if (!markDirty) return;
+    edits_[uint32_t(c->cz * chunksX_ + c->cx)][uint16_t(index)] = block;
+    ++revision_;
+    lowerGround(*c, x & 15, z & 15);
+    if (previous == B_LANTERN || previous == B_CAMPFIRE) refreshLights(*c);
     markDirtyAt(x, z);
     if ((x & 15) == 0) markDirtyAt(x - 1, z);
     if ((x & 15) == 15) markDirtyAt(x + 1, z);
     if ((z & 15) == 0) markDirtyAt(x, z - 1);
     if ((z & 15) == 15) markDirtyAt(x, z + 1);
+    if ((x & 15) == 0 && (z & 15) == 0) markDirtyAt(x - 1, z - 1);
+    if ((x & 15) == 15 && (z & 15) == 0) markDirtyAt(x + 1, z - 1);
+    if ((x & 15) == 0 && (z & 15) == 15) markDirtyAt(x - 1, z + 1);
+    if ((x & 15) == 15 && (z & 15) == 15) markDirtyAt(x + 1, z + 1);
+}
+
+void World::lowerGround(Chunk& c, int x, int z) {
+    int y = std::min(height_, int(c.ground[z * 16 + x]));
+    while (y > 1 && !isSolid(c.blocks[blockIndex(x, y - 1, z)])) --y;
+    c.ground[z * 16 + x] = int16_t(y);
+}
+
+void World::refreshLights(Chunk& c) {
+    auto supported = [&](const Vec3& p) {
+        int x = int(std::floor(p.x)) - c.cx * 16, z = int(std::floor(p.z)) - c.cz * 16;
+        if (x < 0 || z < 0 || x >= 16 || z >= 16) return true;
+        for (int y = std::max(0, int(p.y) - 2); y <= std::min(height_ - 1, int(p.y) + 1); ++y)
+            if (blockInfo(c.blocks[blockIndex(x,y,z)]).emissive) return true;
+        return false;
+    };
+    auto remove = [&](std::vector<Vec3>& list) {
+        list.erase(std::remove_if(list.begin(), list.end(), [&](const Vec3& p) { return !supported(p); }), list.end());
+    };
+    remove(c.lights);
+    remove(c.campfires);
+}
+
+void World::restoreEdits(Chunk& c) {
+    auto it = edits_.find(uint32_t(c.cz * chunksX_ + c.cx));
+    if (it == edits_.end()) return;
+    for (const auto& e : it->second)
+        if (e.first < c.blocks.size()) c.blocks[e.first] = e.second;
+    for (int z=0; z<16; ++z) for (int x=0; x<16; ++x) lowerGround(c,x,z);
+    refreshLights(c);
 }
 
 void World::markDirtyAt(int x, int z) {
@@ -258,6 +301,7 @@ StreamStats World::stream(float fx, float fz, int radius, const StreamBudget& b)
             {
                 ZZ_TRACE_SCOPE("ZZ genChunk");
                 source_->generate(*c, height_);
+                restoreEdits(*c);
             }
             updateMaxY(*c);
             c->generated = true;
@@ -328,7 +372,6 @@ void World::buildChunk(Chunk& chunk) {
     mesh.cutout.clear();
     mesh.water.clear();
     const int H = height_;
-    const int x0 = chunk.cx * kChunkSize, z0 = chunk.cz * kChunkSize;
 
     // Copia o chunk e uma borda de 1 bloco dos vizinhos para consultas rápidas.
     pad_.assign(static_cast<size_t>(kPad) * kPad * H, B_AIR);
@@ -362,7 +405,6 @@ void World::buildChunk(Chunk& chunk) {
                 uint8_t b = at(px, y, pz);
                 if (b == B_AIR) continue;
                 const BlockInfo& info = blockInfo(b);
-                const int x = x0 + lx, z = z0 + lz;
 
                 if (info.shape == Shape::Cross) {
                     // Duas faces diagonais, frente e verso (plantas).
@@ -375,9 +417,9 @@ void World::buildChunk(Chunk& chunk) {
                             for (int k = 0; k < 4; ++k) {
                                 int i = side ? 3 - k : k;
                                 VoxelVertex v{};
-                                v.x = static_cast<int16_t>((x + d[i][0]) * kPosScale);
+                                v.x = static_cast<int16_t>((lx + d[i][0]) * kPosScale);
                                 v.y = static_cast<int16_t>((y + d[i][1]) * kPosScale);
-                                v.z = static_cast<int16_t>((z + d[i][2]) * kPosScale);
+                                v.z = static_cast<int16_t>((lz + d[i][2]) * kPosScale);
                                 v.u = (i == 1 || i == 2) ? 1 : 0;
                                 v.v = (i == 0 || i == 1) ? 1 : 0;
                                 v.layer = info.side;
@@ -391,6 +433,7 @@ void World::buildChunk(Chunk& chunk) {
                 }
 
                 const bool water = info.shape == Shape::Liquid;
+                const float waterTop = water ? waterHeight(b,isWaterBlock(at(px,y+1,pz))) : 1.0f;
                 if (info.shape != Shape::Cube && !water) continue;
                 const bool leaf = isLeaf(b);
                 const bool glass = b == B_GLASS;
@@ -398,9 +441,14 @@ void World::buildChunk(Chunk& chunk) {
                 for (int f = 0; f < 6; ++f) {
                     const FaceDef& face = kFaces[f];
                     uint8_t nb = at(px + face.nx, y + face.ny, pz + face.nz);
+                    float waterBottom = 0;
                     if (water) {
-                        if (nb == B_WATER || isOpaque(nb)) continue;
-                        if (face.ny < 0) continue;
+                        if (isOpaque(nb)) continue;
+                        if (isWaterBlock(nb)) {
+                            if (face.ny != 0) continue;
+                            waterBottom=waterHeight(nb,isWaterBlock(at(px+face.nx,y+1,pz+face.nz)));
+                            if (waterBottom>=waterTop) continue;
+                        }
                     } else {
                         if (isOpaque(nb)) continue;
                         if (glass && nb == B_GLASS) continue;
@@ -424,7 +472,6 @@ void World::buildChunk(Chunk& chunk) {
                     // Gira o quad quando a AO é anisotrópica para evitar costura diagonal.
                     int start = (ao[0] + ao[2] < ao[1] + ao[3]) ? 1 : 0;
                     std::vector<VoxelVertex>& target = water ? mesh.water : (glass ? mesh.cutout : mesh.opaque);
-                    const bool waterAbove = at(px, y + 1, pz) == B_WATER;
                     uint8_t flags = static_cast<uint8_t>((water ? VF_WATER : 0) | (info.emissive ? VF_EMISSIVE : 0) | (leaf ? VF_LEAF : 0));
                     if (b == B_GRASS && face.ny > 0) flags |= VF_GRASS;
                     for (int n = 0; n < 4; ++n) {
@@ -432,10 +479,10 @@ void World::buildChunk(Chunk& chunk) {
                         const int* c = face.corners[k];
                         VoxelVertex v{};
                         float vy = static_cast<float>(y + c[1]);
-                        if (water && c[1] == 1 && !waterAbove) vy -= 0.125f;
-                        v.x = static_cast<int16_t>((x + c[0]) * kPosScale);
+                        if (water) vy = float(y) + (c[1] ? waterTop : waterBottom);
+                        v.x = static_cast<int16_t>((lx + c[0]) * kPosScale);
                         v.y = static_cast<int16_t>(std::lround(vy * kPosScale));
-                        v.z = static_cast<int16_t>((z + c[2]) * kPosScale);
+                        v.z = static_cast<int16_t>((lz + c[2]) * kPosScale);
                         v.u = kUv[k][0];
                         v.v = kUv[k][1];
                         v.layer = layer;

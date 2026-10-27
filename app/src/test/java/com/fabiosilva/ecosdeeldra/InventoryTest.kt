@@ -19,7 +19,7 @@ class InventoryTest {
     fun starterKitPutsWeaponsAndItemsOnTheHotbar() {
         val inv = Inventory.starter()
         assertEquals(Items.RIFLE, inv[0].id)
-        assertEquals(Items.PISTOL, inv[1].id)
+        assertEquals(Items.SHOTGUN, inv[1].id)
         assertEquals(3, inv.count(Items.GRENADE))
         assertEquals(0, inv.weaponSlot)
         assertTrue((0 until Inventory.HOTBAR).all { !inv[it].empty || it == 5 })
@@ -54,9 +54,9 @@ class InventoryTest {
     @Test
     fun moveSwapsSlotsAndKeepsTheWeaponInHand() {
         val inv = Inventory.starter()
-        inv.weaponSlot = 1 // pistola
+        inv.weaponSlot = 1 // escopeta
         inv.moveOrSwap(1, 10)
-        assertEquals(Items.PISTOL, inv[10].id)
+        assertEquals(Items.SHOTGUN, inv[10].id)
         assertEquals(10, inv.weaponSlot)
         // Juntar pilhas iguais.
         inv.add(Items.BANDAGE, 1)
@@ -71,7 +71,7 @@ class InventoryTest {
     @Test
     fun encodeDecodeAndEngineArrayRoundTrip() {
         val inv = Inventory.starter()
-        inv.add(Items.SNIPER, 1)
+        inv.add(Items.ADRENALINE, 1)
         inv.throwSlot = 2
         val copy = Inventory.decode(inv.encode())
         assertEquals(inv.encode(), copy.encode())
@@ -82,18 +82,48 @@ class InventoryTest {
         // Inventário sem armas recebe o fuzil.
         val empty = Inventory.decode("0:0|0|-1")
         assertEquals(1, empty.count(Items.RIFLE))
+        // Armas antigas excluídas (ids 2 e 4..8) somem ao carregar um save velho.
+        val legacy = Inventory.decode("5:1,3:1,8:1|0|-1")
+        assertEquals(0, legacy.count(5) + legacy.count(8))
+        assertEquals(Items.SHOTGUN, legacy[legacy.weaponSlot].id)
+    }
+
+    @Test
+    fun savedPistolBecomesTheShotgunInTheSameSlot() {
+        // Save antigo: pistola (id 2) no espaço 1, sem escopeta.
+        val inv = Inventory.decode("1:1,2:1,21:2|0|-1")
+        assertEquals(Items.SHOTGUN, inv[1].id)
+        assertEquals(1, inv[1].count)
+        assertEquals(Items.RIFLE, inv[0].id)
+        assertEquals(2, inv.count(Items.BANDAGE))
+        assertTrue(inv.slots.none { it.id == 2 })
+    }
+
+    @Test
+    fun savedInventoryWithoutShotgunGetsOneOnTheHotbar() {
+        val inv = Inventory.decode("1:1,21:2|0|-1")
+        assertEquals(1, inv.count(Items.SHOTGUN))
+        assertTrue(inv.firstSlotOf(Items.SHOTGUN) in 0 until Inventory.HOTBAR)
+    }
+
+    @Test
+    fun legacyPistolDoesNotDuplicateASavedShotgun() {
+        val inv = Inventory.decode("1:1,2:1,3:1|0|-1")
+        assertEquals(1, inv.count(Items.SHOTGUN))
+        assertTrue(inv.slots.none { it.id == 2 })
     }
 
     @Test
     fun weaponsUnlockByStageAndCostDiamonds() {
         val p = Progress()
         p.diamonds = 5000
-        assertFalse(Rules.buyWeapon(p, Items.SNIPER)) // libera na fase 6
-        winLeftmostPath(p, 5)
+        p.inventory.slots[p.inventory.firstSlotOf(Items.SHOTGUN)].clear()
+        assertFalse(Rules.buyWeapon(p, Items.SHOTGUN)) // libera na fase 2
+        winLeftmostPath(p, 1)
         val before = p.diamonds
-        assertTrue(Rules.buyWeapon(p, Items.SNIPER))
-        assertEquals(before - Items.get(Items.SNIPER)!!.price, p.diamonds)
-        assertFalse(Rules.buyWeapon(p, Items.SNIPER))
+        assertTrue(Rules.buyWeapon(p, Items.SHOTGUN))
+        assertEquals(before - Items.get(Items.SHOTGUN)!!.price, p.diamonds)
+        assertFalse(Rules.buyWeapon(p, Items.SHOTGUN))
         assertTrue(Rules.buyItem(p, Items.MEDKIT, 2))
         assertEquals(3, p.inventory.count(Items.MEDKIT))
     }

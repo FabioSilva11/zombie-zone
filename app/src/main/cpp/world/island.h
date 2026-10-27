@@ -1,6 +1,5 @@
-// Ilha procedural de cada fase (~5 km de diâmetro), gerada chunk a chunk sob demanda:
-// relevo com dois biomas, rios, lagos, trilhas entre pontos de interesse (acampamentos, ruínas,
-// torres de vigia...), ninhos de infecção (objetivos) e o portal de extração.
+// Terreno contínuo Horizonte gerado por chunks: três biomas, rios, cavernas,
+// aldeias e ilhas flutuantes, com os objetivos e construções das missões.
 #pragma once
 
 #include <cstdint>
@@ -12,15 +11,15 @@
 #include "structures.h"
 #include "theme.h"
 #include "world.h"
+#include "horizonte_adapter.h"
 
 namespace zz {
 
-constexpr int kIslandSize = 6144;       // blocos por lado do mundo (o mar cerca a ilha)
-constexpr int kIslandHeight = 64;
+constexpr int kIslandSize = 6144;       // limite horizontal do mundo contínuo
+constexpr int kIslandHeight = horizonte::kHeight;
 constexpr int kIslandCell = 128;        // grade de pontos de interesse (múltiplo de 16)
 constexpr int kIslandCells = kIslandSize / kIslandCell;
 constexpr float kIslandCenter = kIslandSize * 0.5f;
-constexpr float kIslandRadius = 2560.0f;  // raio médio do litoral (~5,1 km de diâmetro)
 constexpr int kNestCount = 3;
 
 enum PoiRole : uint8_t { ROLE_NONE = 0, ROLE_START, ROLE_NEST, ROLE_PORTAL };
@@ -37,7 +36,7 @@ struct IslandPoi {
 };
 
 struct PoiStamp {
-    std::unordered_map<uint32_t, uint8_t> edits;  // (x<<19 | z<<6 | y) -> bloco
+    std::unordered_map<uint64_t, uint8_t> edits;  // position_key.h: 13+13+7 bits
     int minX = 0, maxX = -1, minZ = 0, maxZ = -1;
     DecorOut decor;
     Vec3 nestCore;
@@ -95,10 +94,12 @@ private:
     const Theme& biomeTheme(float secondaryWeight, int x, int z) const;
 
     Theme primary_, secondary_;
+    Theme naturalBiomes_[3] = {themeForStage(1), themeForStage(6), themeForStage(11)};
+    horizonte::Terrain terrain_;
     int stage_ = 1;
     uint32_t seed_ = 1;
     bool objectives_ = true;
-    int sea_ = 14;
+    int sea_ = horizonte::kSea;
     Vec3 start_;
     float startYaw_ = 0;
     std::vector<int> nests_;

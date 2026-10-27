@@ -101,7 +101,7 @@ ZombieKind Game::rollKind() {
         case 2: w[static_cast<int>(ZombieKind::KnifeThrower)] *= 1.7f; w[static_cast<int>(ZombieKind::Knife)] *= 1.3f; break;
         default: w[static_cast<int>(ZombieKind::Exploder)] *= 1.6f; w[static_cast<int>(ZombieKind::Spitter)] *= 1.5f; break;
     }
-    if (theme_.sky.night > 0.5f) w[static_cast<int>(ZombieKind::Runner)] *= 1.3f;
+    if (horizonte::daylight(worldTime_) < 0.5f) w[static_cast<int>(ZombieKind::Runner)] *= 1.3f;
     for (int k = 0; k < count; ++k) total += w[k];
     float r = rng_.range(0, total);
     for (int k = 0; k < count; ++k) {
@@ -290,7 +290,7 @@ void Game::updateZombie(Zombie& z, size_t index, float dt) {
     if (z.perceptionTimer <= 0) {
         z.perceptionTimer = 0.25f + static_cast<float>(index % 5) * 0.02f;
         // Noite vermelha: o escuro só atrapalha o jogador (os zumbis enxergam como de dia) e a atenção cresce com `aggression`.
-        float sight = (theme_.sky.night > 0.5f && !config_.redSky) ? 14.0f : 21.0f;
+        float sight = (horizonte::daylight(worldTime_) < 0.5f && !config_.redSky) ? 14.0f : 21.0f;
         if (isRanged(z.kind)) sight += 6.0f;
         if (crouching_) sight *= 0.6f;  // agachado: furtivo
         sight *= config_.aggression;
@@ -622,6 +622,7 @@ void Game::throwProjectile(Zombie& z, ProjectileKind kind) {
         case ProjectileKind::Molotov: p.damage = z.damage * 0.6f; break;
         case ProjectileKind::Acid: p.damage = z.damage * 0.6f; break;
         case ProjectileKind::Knife: p.damage = z.damage * 0.9f; break;
+        case ProjectileKind::Bullet: break;  // só o jogador dispara balas
         case ProjectileKind::Grenade: p.damage = z.damage; break;  // zumbis não usam granadas
         case ProjectileKind::Smoke: p.damage = 0.0f; break;
     }
@@ -636,6 +637,28 @@ void Game::updateProjectiles(float dt) {
         Vec3 from = p.pos;
         p.vel.y -= p.gravity * dt;
         Vec3 to = from + p.vel * dt;
+        if (p.kind == ProjectileKind::Bullet) {
+            // Bala da escopeta: varre o trecho deste quadro como um raio (o SphereCast do template).
+            Vec3 seg = to - from;
+            float len = length(seg);
+            Vec3 dir = len > 1e-5f ? seg / len : Vec3(0, 0, 1);
+            ShotTrace hit = traceShot(from, dir, len, 0.0f, false);
+            if (hit.kind != ShotTrace::None) {
+                Vec3 at = from + dir * hit.t;
+                // AreaOfEffect explode sem ferir quem atirou; DirectDamage acerta só o alvo.
+                if (p.radius > 0) explode(at, p.radius, 0.0f, p.damage, false, p.friendly);
+                else applyShot(hit, from, dir, p.weapon, p.damage);
+                spawnBurst(at, {1.0f, 0.75f, 0.35f, 1.0f}, 6, 2.4f, 0.08f, true, 6.0f);
+                p.life = -1;
+            } else if (world_.isWaterAt(to)) {
+                spawnBurst(to, {0.6f, 0.75f, 1.0f, 0.8f}, 6, 2.0f, 0.12f, false, 9.0f);
+                p.life = -1;
+            } else {
+                p.pos = to;
+                if (p.life <= 0 || p.pos.y < 0) p.life = -1;
+            }
+            continue;
+        }
         bool hitPlayer = false;
         if (!dead_ && !p.friendly && p.kind != ProjectileKind::Grenade) {
             for (int s = 1; s <= 3; ++s) {
@@ -742,7 +765,7 @@ void Game::impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer)
             break;
         }
         case ProjectileKind::Grenade:
-            explode(at + Vec3(0, 0.3f, 0), p.radius, 28.0f, p.damage, false);
+            explode(at + Vec3(0, 0.3f, 0), p.radius, 28.0f, p.damage, false, p.friendly);
             break;
         case ProjectileKind::Smoke: {
             SmokeCloud cloud;
@@ -772,6 +795,8 @@ void Game::impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer)
             emitSound(SND_SPIT, at, 0.8f);
             break;
         }
+        case ProjectileKind::Bullet:
+            break;  // tratada em updateProjectiles
     }
 }
 
@@ -823,8 +848,8 @@ void Game::updateHazards(float dt) {
     hazards_.erase(std::remove_if(hazards_.begin(), hazards_.end(), [](const Hazard& h) { return h.life <= 0; }), hazards_.end());
 }
 
-void Game::explode(const Vec3& at, float radius, float playerDamage, float zombieDamage, bool fire) {
-    explosions_.push_back({at, radius, playerDamage, zombieDamage, fire});
+void Game::explode(const Vec3& at, float radius, float playerDamage, float zombieDamage, bool fire, bool destroyTerrain) {
+    explosions_.push_back({at, radius, playerDamage, zombieDamage, fire, destroyTerrain});
 }
 
 void Game::processExplosions() {
@@ -832,6 +857,11 @@ void Game::processExplosions() {
     while (!explosions_.empty() && guard++ < 24) {
         Explosion e = explosions_.back();
         explosions_.pop_back();
+        if (e.destroyTerrain && mode_ == Mode::Mission) {
+            destroyTerrainSphere(world_,e.pos,e.radius,
+                [this](int x,int y,int z){ return protectedTerrain(x,y,z); },
+                [this](int x,int y,int z){ terrainEdited(x,y,z); });
+        }
         spawnBurst(e.pos, {1.0f, 0.62f, 0.22f, 1.0f}, 44, 9.0f, 0.38f, true, 2.0f);
         spawnBurst(e.pos, {0.55f, 1.0f, 0.3f, 1.0f}, 16, 6.0f, 0.25f, true, 4.0f);
         spawnBurst(e.pos, {0.22f, 0.22f, 0.2f, 0.75f}, 22, 3.5f, 0.7f, false, -1.2f);

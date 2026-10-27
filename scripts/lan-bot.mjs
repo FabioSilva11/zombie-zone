@@ -8,6 +8,31 @@
 // Implementa o mesmo protocolo de app/src/main/java/.../net/LanLobby.kt (sala) e
 // app/src/main/cpp/game/net.cpp (partida).
 import dgram from 'node:dgram';
+import { pathToFileURL } from 'node:url';
+
+// Mesmo lote contíguo de terrain_sync.h: 14 bytes de cabeçalho + 7 por edição.
+export function decodeTerrainPacket(buf, seed, revision) {
+  if (buf.length < 14 || buf.length > 1400 || buf[0] !== 90 || buf[1] !== 90 ||
+      buf[2] !== 3 || buf[3] !== 3 || buf.readUInt32LE(4) !== seed) return null;
+  const first = buf.readUInt32LE(8), count = buf.readUInt16LE(12), last = first + count - 1;
+  if (!first || !count || count > 198 || buf.length !== 14 + count * 7 ||
+      first > revision + 1 || last > 0xffffffff) return null;
+  const edits = [];
+  for (let i = 0; i < count; i++) {
+    const o = 14 + i * 7;
+    const x = buf.readUInt16LE(o), y = buf.readUInt16LE(o + 2), z = buf.readUInt16LE(o + 4), block = buf[o + 6];
+    if (x >= 128 || y >= 128 || z >= 128 || block >= 66) return null; // B_COUNT, incluindo os oito estados de fluxo
+    if (first + i > revision) edits.push({ x, y, z, block });
+  }
+  return { revision: Math.max(revision, last), edits };
+}
+export function encodeTerrainAck(seed, id, revision) {
+  const b = Buffer.alloc(13);
+  b.set([90, 90, 3, 4]); b.writeUInt32LE(seed, 4); b[8] = id; b.writeUInt32LE(revision, 9);
+  return b;
+}
+
+function main() {
 
 const hostIp = process.argv[2];
 const name = process.argv[3] ?? 'Robo';
@@ -17,6 +42,7 @@ if (!hostIp) {
   console.log('uso: node scripts/lan-bot.mjs <ip-do-anfitrião> [nome] [segundos]');
   process.exit(1);
 }
+
 const LOBBY_PORT = 47777;
 const GAME_PORT = 47778;
 const nonce = String(100000 + Math.floor(Math.random() * 900000));
@@ -26,10 +52,11 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 // ------------------------------------------------------------------ sala
 const lobby = dgram.createSocket('udp4');
-const sendLobby = (msg) => lobby.send(Buffer.from(`ZZ1|${msg}`), LOBBY_PORT, hostIp);
-lobby.on('message', (buf) => {
+const sendLobby = (msg) => lobby.send(Buffer.from(`ZZ3|${msg}`), LOBBY_PORT, hostIp);
+lobby.on('message', (buf, from) => {
+  if (from.address !== hostIp || from.port !== LOBBY_PORT) return;
   const p = buf.toString('utf8').split('|');
-  if (p[0] !== 'ZZ1') return;
+  if (p[0] !== 'ZZ3') return;
   if (p[1] === 'ACCEPT' && p[2] === nonce && localId < 0) {
     localId = Number(p[3]);
     log(`entrou na sala como jogador ${localId}`);
@@ -41,7 +68,7 @@ lobby.on('message', (buf) => {
   } else if (p[1] === 'START' && !started) {
     started = true;
     log(`PARTIDA! semente ${p[2]}, limite ${p[3]}, jogadores ${p[5]}`);
-    startGame(Number(p[3]));
+    startGame(Number(p[2]));
   } else if (p[1] === 'CLOSE') {
     log('anfitrião fechou a sala');
     process.exit(0);
@@ -56,7 +83,7 @@ lobby.bind(() => {
 });
 
 // ------------------------------------------------------------------ partida
-function startGame() {
+function startGame(seed) {
   const game = dgram.createSocket('udp4');
   let seq = 0;
   let eventId = 1;
@@ -67,9 +94,22 @@ function startGame() {
   let snapshots = 0;
   let lastKills = 0;
   const t0 = Date.now();
+  let terrainRevision = 0;
+  const terrain = new Map();
+  const sendTerrainAck = () => game.send(encodeTerrainAck(seed, localId, terrainRevision), GAME_PORT, hostIp);
 
-  game.on('message', (buf) => {
-    if (buf[0] !== 0x5a || buf[1] !== 0x5a || buf[3] !== 2) return;
+  game.on('message', (buf, from) => {
+    if (from.address !== hostIp || from.port !== GAME_PORT || buf.length > 1400) return;
+    if (buf.length >= 4 && buf[3] === 3) {
+      const batch = decodeTerrainPacket(buf, seed, terrainRevision);
+      if (!batch) return;
+      for (const e of batch.edits) terrain.set(`${e.x},${e.y},${e.z}`, e.block);
+      terrainRevision = batch.revision;
+      sendTerrainAck();
+      return;
+    }
+    if (buf.length < 16 || buf[0] !== 0x5a || buf[1] !== 0x5a || buf[2] !== 3 || buf[3] !== 2) return;
+    if (buf[15] > 8 || buf.length < 16 + buf[15] * 38 + 1) return;
     let o = 4;
     const u8 = () => buf.readUInt8(o++);
     const f32 = () => { const v = buf.readFloatLE(o); o += 4; return v; };
@@ -110,7 +150,7 @@ function startGame() {
     const w8 = (v) => { b.writeUInt8(v, o); o += 1; };
     const w16 = (v) => { b.writeUInt16LE(v, o); o += 2; };
     const wf = (v) => { b.writeFloatLE(v, o); o += 4; };
-    w8(0x5a); w8(0x5a); w8(1); w8(1);
+    w8(0x5a); w8(0x5a); w8(3); w8(1);
     w8(localId); w16(seq++ & 0xffff);
     wf(pos.x); wf(pos.y); wf(pos.z);
     const yaw = target ? Math.atan2(target.x - pos.x, -(target.z - pos.z)) : 0;
@@ -122,6 +162,7 @@ function startGame() {
       else { w8(e.target); w8(e.damage); w8(e.head); }
     }
     game.send(b.subarray(0, o), GAME_PORT, hostIp);
+    sendTerrainAck();
   }, 50);
 
   // A cada 2,5 s: um tiro visível e um acerto no anfitrião.
@@ -141,7 +182,7 @@ function startGame() {
     const w8 = (v) => { b.writeUInt8(v, o); o += 1; };
     const w16 = (v) => { b.writeUInt16LE(v, o); o += 2; };
     const wf = (v) => { b.writeFloatLE(v, o); o += 4; };
-    w8(0x5a); w8(0x5a); w8(1); w8(1);
+    w8(0x5a); w8(0x5a); w8(3); w8(1);
     w8(id); w16(seqNo);
     wf(p.x); wf(p.y); wf(p.z); wf(0); wf(0); w8(1); wf(4.5);
     w8(events.length);
@@ -174,3 +215,6 @@ function startGame() {
   game.bind();
   void t0;
 }
+
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

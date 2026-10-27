@@ -18,6 +18,7 @@ enum TexLayer : uint8_t {
     // Construções
     T_BRICK, T_PLASTER, T_ROOF_RED, T_ROOF_SLATE, T_GLASS, T_CONCRETE, T_ASPHALT, T_STONE_BRICK, T_WOOL_RED,
     T_BOOKSHELF, T_PUMP,
+    T_WATER_FLOW,
     T_COUNT
 };
 
@@ -33,6 +34,8 @@ enum Block : uint8_t {
     // Construções (casas, igreja, posto, prédios)
     B_BRICK, B_PLASTER, B_ROOF_RED, B_ROOF_SLATE, B_GLASS, B_CONCRETE, B_ASPHALT, B_STONE_BRICK, B_WOOL_RED,
     B_BOOKSHELF, B_PUMP,
+    B_WATER_FLOW_1, B_WATER_FLOW_2, B_WATER_FLOW_3, B_WATER_FLOW_4,
+    B_WATER_FLOW_5, B_WATER_FLOW_6, B_WATER_FLOW_7, B_WATER_FALLING,
     B_COUNT
 };
 
@@ -59,7 +62,7 @@ inline const BlockInfo& blockInfo(uint8_t id) {
         {Shape::Cube, true, true, false, T_SNOW, T_SNOW_SIDE, T_DIRT, 0xf0f6fa},                    // SNOW_GRASS
         {Shape::Cube, true, true, false, T_SNOW, T_SNOW, T_SNOW, 0xf4f8fb},                         // SNOW
         {Shape::Cube, true, true, false, T_ICE, T_ICE, T_ICE, 0x9cc4f2},                            // ICE
-        {Shape::Liquid, false, false, false, T_WATER, T_WATER, T_WATER, 0x3a6fd8},                  // WATER
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},                  // WATER
         {Shape::Cube, true, true, false, T_LOG_TOP, T_LOG_OAK, T_LOG_TOP, 0x6b4e2e},                // LOG_OAK
         {Shape::Cube, true, true, false, T_LEAVES_OAK, T_LEAVES_OAK, T_LEAVES_OAK, 0x3f8a2a},       // LEAVES_OAK
         {Shape::Cube, true, true, false, T_LOG_TOP, T_LOG_SPRUCE, T_LOG_TOP, 0x4a3420},             // LOG_SPRUCE
@@ -107,8 +110,27 @@ inline const BlockInfo& blockInfo(uint8_t id) {
         {Shape::Cube, true, true, false, T_WOOL_RED, T_WOOL_RED, T_WOOL_RED, 0xa02a2a},             // WOOL_RED
         {Shape::Cube, true, true, false, T_PLANKS, T_BOOKSHELF, T_PLANKS, 0x8a6038},                // BOOKSHELF
         {Shape::Cube, true, true, false, T_CONCRETE, T_PUMP, T_CONCRETE, 0xd23c2c},                // PUMP (bomba de combustível)
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
+        {Shape::Liquid, false, false, false, T_WATER, T_WATER_FLOW, T_WATER, 0x429be6},
     };
     return kBlocks[id < B_COUNT ? id : 0];
+}
+
+inline int waterLevel(uint8_t b) {
+    return b == B_WATER ? 0 : b >= B_WATER_FLOW_1 && b <= B_WATER_FALLING ? 1 + b - B_WATER_FLOW_1 : -1;
+}
+inline bool isWaterBlock(uint8_t b) { return waterLevel(b) >= 0; }
+inline float waterHeight(uint8_t b, bool above = false) {
+    int level = waterLevel(b);
+    if (level < 0) return 0;
+    if (above || level == 8) return 1;
+    return 1.0f - (level > 0 ? level : 1) / 8.0f;
 }
 
 inline bool isSolid(uint8_t id) { return blockInfo(id).solid; }

@@ -65,6 +65,8 @@ kotlin {
 
 dependencies {
     implementation("androidx.activity:activity-ktx:1.13.0")
+    // O lint de release exige Fragment >= 1.3.0 para registerForActivityResult; a dependência transitiva trazia 1.1.0.
+    implementation("androidx.fragment:fragment:1.8.6")
     implementation("com.google.android.gms:play-services-ads:24.7.0")
     implementation("com.google.android.ump:user-messaging-platform:3.2.0")
     testImplementation("junit:junit:4.13.2")

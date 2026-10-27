@@ -43,12 +43,13 @@ layout(location = 1) in vec2 a_uv;
 layout(location = 2) in vec4 a_meta;
 uniform mat4 u_viewProj;
 uniform float u_time;
+uniform vec2 u_chunkOrigin;
 out vec3 v_uvl;
 out float v_light;
 out vec3 v_world;
 flat out float v_flags;
 void main() {
-    vec3 p0 = a_pos * 0.125;
+    vec3 p0 = a_pos * 0.125 + vec3(u_chunkOrigin.x,0.0,u_chunkOrigin.y);
     vec3 p = p0;
     float flags = a_meta.z + 0.5;
     float water = mod(floor(flags), 2.0);
@@ -283,10 +284,40 @@ uniform float u_metallic;
 uniform vec3 u_fogColor;
 uniform vec2 u_fogRange;
 uniform vec3 u_camPos;
+uniform float u_studio;
 in vec3 v_normal;
 in vec2 v_uv;
 in vec3 v_world;
 out vec4 o_color;
+
+// Tom ACES do three.js (ACESFilmicToneMapping), com a exposição 1,55 da página de teste.
+vec3 acesFilmic(vec3 color) {
+    const mat3 inputMat = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
+    const mat3 outputMat = mat3(vec3(1.60475, -0.10208, -0.00327), vec3(-0.53108, 1.10813, -0.07276), vec3(-0.07367, -0.00605, 1.07602));
+    color = inputMat * (color * (1.55 / 0.6));
+    vec3 a = color * (color + 0.0245786) - 0.000090537;
+    vec3 b = color * (0.983729 * color + 0.4329510) + 0.238081;
+    return clamp(outputMat * (a / b), 0.0, 1.0);
+}
+
+// Luz de estúdio da página (tools/personagem-voxel): céu/chão, principal, preenchimento e contorno, presas à
+// câmera para o personagem sempre aparecer igual; a luz do mundo (dia/noite) só regula o brilho geral.
+vec3 studioLight(vec3 albedo, vec3 n) {
+    vec3 lin = pow(albedo, vec3(2.2));
+    vec3 fwd = normalize(v_world - u_camPos);
+    vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
+    vec3 up = cross(right, fwd);
+    vec3 keyDir = normalize(-fwd * 0.55 + up * 0.75 - right * 0.4);
+    vec3 fillDir = normalize(fwd * 0.75 + up * 0.25 + right * 0.45);
+    vec3 rimDir = normalize(right * 0.8 + up * 0.25 + fwd * 0.35);
+    float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 irradiance = mix(vec3(0.267, 0.2, 0.129), vec3(0.906, 0.937, 1.0), hemi) * 0.70
+        + vec3(1.0, 0.878, 0.71) * max(dot(n, keyDir), 0.0) * 1.02
+        + vec3(0.667, 0.776, 0.898) * max(dot(n, fillDir), 0.0) * 0.51
+        + vec3(1.0) * max(dot(n, rimDir), 0.0) * 0.32;
+    float world = clamp(dot(u_ambient + u_sunColor * 0.6, vec3(0.333)) * 1.6, 0.35, 1.0);
+    return pow(acesFilmic(lin * irradiance * world), vec3(1.0 / 2.2));
+}
 )";
 
 const char* kModelFsMain = R"(
@@ -317,6 +348,7 @@ void main() {
 #endif
     color = min(color, vec3(1.25));
     color = mix(min(color, vec3(0.9)), color, step(0.05, u_emissive + u_flash));
+    if (u_studio > 0.5) color = studioLight(base.rgb, n);
     color = mix(color, base.rgb, u_emissive);
     color = mix(color, u_flashColor, u_flash);
     float fog = smoothstep(u_fogRange.x, u_fogRange.y, distance(v_world, u_camPos));
@@ -1009,8 +1041,12 @@ void Renderer::drawChunks(const FrameScene& scene, int pass, const Vec4* planes,
     }
     if (pass == 2) std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.dist > b.dist; });
     else std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.dist < b.dist; });
+    GLint program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+    const GLint origin = glGetUniformLocation(program, "u_chunkOrigin");
     for (const Item& it : items) {
         const ChunkGpu& gpu = it.chunk->gpu;
+        glUniform2f(origin, it.chunk->cx * 16.0f, it.chunk->cz * 16.0f);
         glBindVertexArray(gpu.vao[pass]);
         glDrawElements(GL_TRIANGLES, gpu.quads[pass] * 6, GL_UNSIGNED_INT, nullptr);
     }
@@ -1118,6 +1154,8 @@ void Renderer::drawCharacters(const FrameScene& scene, const ShaderProgram& p, b
             glUniform3f(uFlashColor, draw.flashColor.x, draw.flashColor.y, draw.flashColor.z);
             glUniform1f(p.uniform("u_roughness"), draw.asset->roughness);
             glUniform1f(p.uniform("u_metallic"), draw.asset->metallic);
+            // Personagens e armas voxel (pixel art) usam a luz de estúdio da página de teste.
+            glUniform1f(p.uniform("u_studio"), draw.asset->pixelArt ? 1.0f : 0.0f);
         }
         const bool restoreCull = draw.asset->doubleSided && glIsEnabled(GL_CULL_FACE);
         if (draw.asset->doubleSided) glDisable(GL_CULL_FACE);
@@ -1134,6 +1172,7 @@ void Renderer::drawCharacters(const FrameScene& scene, const ShaderProgram& p, b
         }
         if (restoreCull) glEnable(GL_CULL_FACE);
     }
+    if (!depthOnly) glUniform1f(p.uniform("u_studio"), 0.0f);
     glBindVertexArray(0);
 }
 
@@ -1147,6 +1186,7 @@ void Renderer::drawBoxes(const FrameScene& scene, const ShaderProgram& p) {
     glUniform1f(p.uniform("u_flash"), 0.0f);
     glUniform1f(p.uniform("u_roughness"), 0.72f);
     glUniform1f(p.uniform("u_metallic"), 0.04f);
+    glUniform1f(p.uniform("u_studio"), 0.0f);
     glBindVertexArray(boxVao_);
     for (const BoxDraw& box : scene.boxes) {
         glUniformMatrix4fv(uModel, 1, GL_FALSE, box.world.m);

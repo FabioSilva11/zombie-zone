@@ -16,15 +16,25 @@ add_library(zombiezone SHARED
     world/block_textures.cpp
     world/buildings.cpp
     world/island.cpp
+    world/horizonte/block_mapping.cpp
+    world/horizonte/terrain.cpp
+    world/horizonte/terrain_noise.cpp
+    world/horizonte/chunk_generator.cpp
+    world/horizonte/village_generator.cpp
+    world/horizonte_adapter.cpp
+    world/fluids.cpp
+    world/destruction.cpp
     world/structures.cpp
     world/terrain.cpp
     world/world.cpp
     render/blocky.cpp
+    render/voxel_humanoid.cpp
     render/character.cpp
     render/gl_util.cpp
     render/renderer.cpp
-    render/weapon_asset.cpp
+    render/voxel_weapons.cpp
     game/game.cpp
+    game/game_world.cpp
     game/game_contract.cpp
     game/game_items.cpp
     game/game_mission.cpp
@@ -38,7 +48,7 @@ add_library(zombiezone SHARED
 
 # Sem -ffast-math: o mundo PvP é gerado em cada aparelho a partir da mesma semente
 # e precisa sair idêntico em todos eles.
-target_compile_options(zombiezone PRIVATE -Wall -Wextra -Wno-unused-parameter -O2)
+target_compile_options(zombiezone PRIVATE -Wall -Wextra -Wno-unused-parameter -O2 -ffp-contract=off)
 
 target_link_libraries(zombiezone
     android

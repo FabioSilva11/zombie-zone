@@ -4,10 +4,15 @@ package com.fabiosilva.ecosdeeldra.data
 data class WeaponTag(val label: String, val color: Int)
 
 /**
+ * ReticleType do template Multiplayer FPS (Unity): o desenho da mira de cada arma. A ordem espelha
+ * ReticleType em app/src/main/cpp/game/items.h.
+ */
+enum class Reticle { CROSS, TCROSS, OPEN_CIRCULAR, CIRCULAR_CROSS }
+
+/**
  * Atributos exibidos na mochila (estilo Free Fire). Os números vêm de kWeapons em
- * app/src/main/cpp/game/game_items.cpp: dano por disparo (chumbos somados), disparos por minuto (60 / intervalo),
- * alcance em metros, precisão (100 menos a média da dispersão do quadril e da mira, em milésimos) e velocidade
- * de movimento (moveMul x 100). Lança-chamas e lança-granadas acertam em área: a precisão deles é fixa.
+ * app/src/main/cpp/game/game_items.cpp: dano por acerto, disparos por minuto (60 / intervalo), alcance em metros,
+ * precisão (as armas do template não têm dispersão: 100) e velocidade de movimento (o template não muda: 100).
  */
 data class WeaponSpec(
     val category: String,
@@ -19,6 +24,7 @@ data class WeaponSpec(
     val tags: List<WeaponTag>,
     /** Traços que aparecem como "acessórios" no card da arma. */
     val traits: List<String> = emptyList(),
+    val reticle: Reticle = Reticle.CROSS,
 )
 
 object WeaponSpecs {
@@ -26,44 +32,34 @@ object WeaponSpecs {
 
     // Cores das etiquetas.
     private const val RED = 0xFFD9545E.toInt()
-    private const val BLUE = 0xFF4F8FE6.toInt()
     private const val ORANGE = 0xFFE8873A.toInt()
     private const val YELLOW = 0xFFD9A62B.toInt()
-    private const val TEAL = 0xFF2FB3A3.toInt()
     private const val PURPLE = 0xFF8E63D9.toInt()
-    private const val GREEN = 0xFF5DAA46.toInt()
 
     private val DANO = WeaponTag("DANO", RED)
-    private val LONGO = WeaponTag("LONGO ALCANCE", BLUE)
-    private val CURTO = WeaponTag("CURTO ALCANCE", ORANGE)
     private val CADENCIA = WeaponTag("CADÊNCIA", YELLOW)
-    private val MOBILIDADE = WeaponTag("MOBILIDADE", TEAL)
     private val PRECISAO = WeaponTag("PRECISÃO", PURPLE)
-    private val PERFURANTE = WeaponTag("PERFURANTE", PURPLE)
-    private val VERSATIL = WeaponTag("VERSÁTIL", GREEN)
-    private val FOGO = WeaponTag("FOGO", ORANGE)
-    private val EXPLOSIVO = WeaponTag("EXPLOSIVO", RED)
+    private val PROJETIL = WeaponTag("PROJÉTIL", ORANGE)
     private val CORPO = WeaponTag("CORPO A CORPO", ORANGE)
 
     private val specs = mapOf(
-        Items.RIFLE to WeaponSpec("FUZIL", 18, 600, 120, 90, 100, listOf(VERSATIL, LONGO)),
-        Items.PISTOL to WeaponSpec("PISTOLA", 30, 300, 90, 93, 108, listOf(MOBILIDADE, PRECISAO)),
-        Items.SHOTGUN to WeaponSpec("ESCOPETA", 117, 75, 32, 35, 95, listOf(DANO, CURTO), listOf("9 CHUMBOS")),
-        Items.SMG to WeaponSpec("SUBMETRALHADORA", 12, 923, 80, 81, 105, listOf(CADENCIA, MOBILIDADE)),
-        Items.SNIPER to WeaponSpec("RIFLE DE PRECISÃO", 120, 52, 220, 80, 92, listOf(DANO, LONGO), listOf("ZOOM 2X", "PERFURA 3")),
-        Items.LMG to WeaponSpec("METRALHADORA", 17, 706, 120, 79, 82, listOf(CADENCIA, PERFURANTE), listOf("PERFURA 1")),
-        Items.FLAMER to WeaponSpec("LANÇA-CHAMAS", 9, 857, 9, 60, 95, listOf(FOGO, CURTO), listOf("INCENDEIA")),
-        Items.LAUNCHER to WeaponSpec("LANÇA-GRANADAS", 160, 60, 70, 70, 90, listOf(EXPLOSIVO, DANO), listOf("EXPLOSIVO")),
+        // Fuzil de assalto (AssaultRifle.asset): hitscan, mira em cruz.
+        Items.RIFLE to WeaponSpec("FUZIL", 18, 600, 100, 100, 100, listOf(CADENCIA, PRECISAO), listOf("HITSCAN"), Reticle.CROSS),
+        // Escopeta (Shotgun.asset): bala que voa a 30 m/s, mira de círculo aberto.
+        Items.SHOTGUN to WeaponSpec("ESCOPETA", 36, 60, 90, 100, 100, listOf(DANO, PROJETIL), listOf("PROJÉTIL 30 M/S"), Reticle.OPEN_CIRCULAR),
         // Faca: ataque corpo a corpo (botão ∞), 55 de dano a ~2,4 m, uma vez a cada 0,55 s.
         KNIFE to WeaponSpec("CORPO A CORPO", 55, 109, 2, 100, 100, listOf(CORPO)),
     )
 
     /** Máximos usados para encher as barras. */
-    const val MAX_DAMAGE = 160
-    const val MAX_FIRE_RATE = 923
-    const val MAX_RANGE = 220
+    const val MAX_DAMAGE = 60
+    const val MAX_FIRE_RATE = 600
+    const val MAX_RANGE = 100
     const val MAX_ACCURACY = 100
     const val MAX_MOVE = 120
 
     fun get(id: Int): WeaponSpec? = specs[id]
+
+    /** Mira da arma [id] (o fuzil é o padrão, como weaponDef() no C++). */
+    fun reticle(id: Int): Reticle = specs[id]?.takeIf { id != KNIFE }?.reticle ?: Reticle.CROSS
 }

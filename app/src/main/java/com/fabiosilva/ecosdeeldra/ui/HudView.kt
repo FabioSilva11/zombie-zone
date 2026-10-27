@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RadialGradient
@@ -18,6 +19,8 @@ import com.fabiosilva.ecosdeeldra.data.ContractId
 import com.fabiosilva.ecosdeeldra.data.Contracts
 import com.fabiosilva.ecosdeeldra.data.Inventory
 import com.fabiosilva.ecosdeeldra.data.Items
+import com.fabiosilva.ecosdeeldra.data.Reticle
+import com.fabiosilva.ecosdeeldra.data.WeaponSpecs
 import com.fabiosilva.ecosdeeldra.data.ZombieKinds
 import com.fabiosilva.ecosdeeldra.engine.Hud
 import com.fabiosilva.ecosdeeldra.engine.NativeBridge
@@ -133,11 +136,18 @@ class HudView(context: Context, private val listener: Listener) : View(context),
     private val geo: Map<HudControl, Geo> = HudControl.entries.associateWith { Geo() }
     private fun g(c: HudControl): Geo = geo.getValue(c)
     private var mapX = 0f; private var mapY = 0f; private var mapSize = 0f
-    private var supplyX = 0f; private var supplyY = 0f; private var supplyW = 0f; private var supplyH = 0f
+    private var supplyX = 0f; private var supplyY = 0f; private var supplyR = 0f
     private var stickRadius = 0f
     private var stickHomeX = 0f; private var stickHomeY = 0f
     private var hotbarX = 0f; private var hotbarY = 0f; private var slotSize = 0f
     private var lastWeapon = -1
+    /** Base do chip de contrato neste quadro (0 sem chip): os efeitos ativos começam abaixo dele. */
+    private var contractBottom = 0f
+    private val fireDash = android.graphics.DashPathEffect(floatArrayOf(d(1.5f), d(4f)), 0f)
+    /** Degradê dourado do painel de armas, refeito só quando o painel muda de lugar. */
+    private var goldShader: LinearGradient? = null
+    private var goldShaderLeft = 0f
+    private var goldShaderRight = 0f
 
     private fun d(v: Float) = v * density
 
@@ -183,7 +193,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
             gc.visible = pos.visible
         }
         g(HudControl.MAP).let { mapX = it.x; mapY = it.y; mapSize = it.r * 2f }
-        g(HudControl.SUPPLY).let { supplyX = it.x; supplyY = it.y; supplyH = it.r * 2f; supplyW = it.r * 6.6f }
+        g(HudControl.SUPPLY).let { supplyX = it.x; supplyY = it.y; supplyR = it.r }
         g(HudControl.JOYSTICK).let { stickRadius = it.r; stickHomeX = it.x; stickHomeY = it.y }
         g(HudControl.HOTBAR).let { hotbarX = it.x; hotbarY = it.y; slotSize = it.r * 2f }
         coachDirty = true
@@ -246,9 +256,8 @@ class HudView(context: Context, private val listener: Listener) : View(context),
             val gc = g(c)
             val hit = when (c) {
                 HudControl.MAP -> abs(x - gc.x) < gc.r && abs(y - gc.y) < gc.r
-                HudControl.SUPPLY -> abs(x - gc.x) < gc.r * 3.3f && abs(y - gc.y) < gc.r * 1.3f
                 HudControl.HOTBAR -> abs(x - gc.x) < gc.r * 6.2f && abs(y - gc.y) < gc.r * 1.2f
-                HudControl.WEAPON -> abs(x - gc.x) < d(80f) * k(c) && abs(y - gc.y) < d(46f) * k(c)
+                HudControl.WEAPON -> weaponRect().contains(x, y)
                 else -> hypot(x - gc.x, y - gc.y) < gc.r * 1.25f + d(6f)
             }
             if (!hit) continue
@@ -327,9 +336,9 @@ class HudView(context: Context, private val listener: Listener) : View(context),
 
     private val buttons = listOf(
         HudControl.FIRE to Role.FIRE, HudControl.FIRE_LEFT to Role.FIRE_LEFT, HudControl.AIM to Role.AIM,
-        HudControl.JUMP to Role.JUMP, HudControl.CROUCH to Role.CROUCH,
-        HudControl.SPRINT to Role.SPRINT, HudControl.GRENADE to Role.GRENADE, HudControl.MEDKIT to Role.MEDKIT,
-        HudControl.PAUSE to Role.PAUSE,
+        HudControl.JUMP to Role.JUMP, HudControl.CROUCH to Role.CROUCH, HudControl.RELOAD to Role.RELOAD,
+        HudControl.SPRINT to Role.SPRINT, HudControl.MELEE to Role.MELEE, HudControl.GRENADE to Role.GRENADE,
+        HudControl.MEDKIT to Role.MEDKIT, HudControl.PAUSE to Role.PAUSE,
     )
 
     /** Espaço da barra rápida sob o toque (-1 se nenhum). */
@@ -357,7 +366,10 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         if (touchHit(HudControl.EMOTE, x, y)) return Role.EMOTE
         if (hotbarSlotAt(x, y) >= 0) return Role.HOTBAR
         if (touchHit(HudControl.BAG, x, y)) return Role.BAG
-        for ((c, role) in buttons) if (touchHit(c, x, y)) return role
+        // As folgas de toque de botões vizinhos se cruzam (como na referência): vale o centro mais próximo.
+        buttons.filter { touchHit(it.first, x, y) }
+            .minByOrNull { hypot(x - g(it.first).x, y - g(it.first).y) }
+            ?.let { return it.second }
         if (touchHit(HudControl.MAP, x, y)) return Role.MAP
         if (touchHit(HudControl.SUPPLY, x, y)) return Role.SUPPLY
         // Joystick dinâmico no lado em que ele foi posicionado.
@@ -386,7 +398,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
                     }
                     Role.FIRE, Role.FIRE_LEFT -> { NativeBridge.setFire(true); haptic(false) }
                     Role.AIM -> {
-                        aimStage = if (hud[Hud.WEAPON].toInt() == Items.SNIPER) (aimStage + 1) % 3 else if (aimStage == 0) 1 else 0
+                        aimStage = if (aimStage == 0) 1 else 0
                         aiming = aimStage > 0
                         NativeBridge.setAimStage(aimStage)
                         haptic(false)
@@ -513,7 +525,6 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         lastHealth = health
 
         drawStatusTint(canvas, w, h)
-        drawScope(canvas, w, h)
         drawVignette(canvas, w, h, health / maxHealth)
         drawDamageDirection(canvas, w, h)
         drawWorldLabels(canvas, w, h)
@@ -523,6 +534,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         drawReticle(canvas, w, h)
         if (available(HudControl.MAP)) drawMinimap(canvas)
         drawStatus(canvas, health, maxHealth)
+        contractBottom = 0f
         if (hud[Hud.PVP] > 0.5f) {
             drawPvpNames(canvas, w, h)
             drawPvpTop(canvas, w)
@@ -535,6 +547,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
                 if (available(HudControl.SUPPLY)) drawSupplyButton(canvas)
             }
         }
+        drawEffects(canvas)
         drawFeed(canvas, w, h)
         drawTip(canvas, w, h)
         drawCoach(canvas, w, h)
@@ -760,8 +773,8 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val half = (PI / 2).toFloat() // a bússola mostra 90° para cada lado
         fun xFor(rel: Float) = w / 2 + rel / half * (cw / 2 - d(8f))
         rect.set(left, top, left + cw, top + ch)
-        p.color = Color.argb(170, 8, 14, 26)
-        canvas.drawRoundRect(rect, d(8f), d(8f), p)
+        p.color = PANEL
+        canvas.drawRoundRect(rect, d(3f), d(3f), p)
         canvas.save()
         canvas.clipRect(rect)
         val names = arrayOf("N", "L", "S", "O")
@@ -826,11 +839,15 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         if (target != null) {
             val name = when (target.kind) { KIND_CRYSTAL -> "CRISTAL"; KIND_PORTAL -> "PORTAL"; KIND_CARGO -> "CARGA"; else -> "PRÓXIMO NINHO" }
             val label = if (target.marked) name else "$name ${formatDist(target.dist)}"
-            textPaint.textSize = d(if (target.marked) 9f else 11f)
-            textPaint.color = Color.argb(160, 0, 0, 0)
-            canvas.drawText(label, w / 2 + d(1f), top + ch + d(14f), textPaint)
-            textPaint.color = when (target.kind) { KIND_CRYSTAL -> Palette.cyan; KIND_PORTAL -> Color.rgb(200, 160, 255); KIND_CARGO -> CARGO_COLOR; else -> Color.rgb(240, 150, 240) }
+            // Texto branco fino com sombra, como os rótulos da referência; a cor do alvo fica só no marcador.
+            val face = textPaint.typeface
+            textPaint.typeface = Fonts.bold
+            textPaint.textSize = d(if (target.marked) 9.5f else 11f)
+            textPaint.color = Color.WHITE
+            textPaint.setShadowLayer(d(2f), d(1f), d(1f), Color.argb(200, 0, 0, 0))
             canvas.drawText(label, w / 2, top + ch + d(13f), textPaint)
+            textPaint.clearShadowLayer()
+            textPaint.typeface = face
         }
     }
 
@@ -838,7 +855,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
 
     /**
      * Chip do contrato (só com contrato ativo na ilha): nome curto e, quando há regra, alertas e reserva de munição.
-     * Fica à direita da bússola (y = COMPASS_TOP_DP + 6 dp), numa faixa que nenhum outro elemento do HUD usa no layout padrão.
+     * Fica na coluna da direita, logo abaixo do painel de armas (a faixa ao lado da bússola agora tem a pausa).
      */
     private fun drawContractChip(canvas: Canvas, w: Float) {
         if (!island) return
@@ -869,11 +886,13 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val nameW = textPaint.measureText(name)
         textPaint.textSize = d(9f)
         val statsW = if (stats.isEmpty()) 0f else textPaint.measureText(stats.toString())
-        val left = w / 2 + d(124f)
-        val maxW = (w - d(66f) - left).coerceAtLeast(d(80f))
-        val cw = minOf(maxW, maxOf(nameW + iconSize + d(6f), statsW) + pad * 2)
+        val panel = weaponRect()
+        val right = if (g(HudControl.WEAPON).visible) panel.right else w - d(8f)
+        val cw = minOf(d(200f), maxOf(nameW + iconSize + d(6f), statsW) + pad * 2)
+        val left = right - cw
         val ch = if (stats.isEmpty()) d(22f) else d(34f)
-        val top = d(COMPASS_TOP_DP) + d(6f)   // abaixo da faixa da sobrevivência (até 44 dp) e à direita da bússola
+        val top = (if (g(HudControl.WEAPON).visible) panel.bottom else d(COMPASS_TOP_DP)) + d(6f)
+        contractBottom = top + ch
         rect.set(left, top, left + cw, top + ch)
         p.color = Color.argb(205, 8, 14, 26)
         canvas.drawRoundRect(rect, d(9f), d(9f), p)
@@ -924,48 +943,97 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val state = hud[Hud.SUPPLY]
         if (state < 0f) return
         val ready = state >= 1f
-        rect.set(supplyX - supplyW / 2, supplyY - supplyH / 2, supplyX + supplyW / 2, supplyY + supplyH / 2)
-        p.color = if (ready) Palette.cyan else Color.argb(170, 12, 20, 36)
-        canvas.drawRoundRect(rect, d(10f), d(10f), p)
-        if (!ready) {
-            p.color = Color.argb(120, 60, 230, 255)
-            rect.right = rect.left + supplyW * state.coerceIn(0f, 1f)
-            canvas.drawRoundRect(rect, d(10f), d(10f), p)
+        // Botão redondo (E12 da referência): caixa de suprimentos; o anel enche até ficar pronto e pulsa pronto.
+        drawButton(canvas, supplyX, supplyY, supplyR, Palette.gold, false)
+        val ringR = supplyR + d(2.5f)
+        rect.set(supplyX - ringR, supplyY - ringR, supplyX + ringR, supplyY + ringR)
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeWidth = d(2.5f)
+        if (ready) {
+            val pulse = 0.55f + 0.45f * sin(System.currentTimeMillis() / 160.0).toFloat()
+            p.color = Color.argb((140 + 115 * pulse).toInt(), 255, 200, 61)
+            canvas.drawCircle(supplyX, supplyY, ringR, p)
+        } else {
+            p.color = Color.argb(170, 255, 255, 255)
+            canvas.drawArc(rect, -90f, 360f * state.coerceIn(0f, 1f), false, p)
         }
-        textPaint.textSize = d(11f)
-        textPaint.color = if (ready) Palette.dark else Color.argb(200, 255, 255, 255)
-        val pulse = if (ready) 1f + 0.05f * sin(System.currentTimeMillis() / 160.0).toFloat() else 1f
-        textPaint.textSize = d(11f) * pulse
-        canvas.drawText(if (ready) "▶ SUPRIMENTOS" else "SUPRIMENTOS...", supplyX, supplyY + d(4f), textPaint)
+        p.style = Paint.Style.FILL
+        drawCrateIcon(canvas, supplyX, supplyY, supplyR * 0.62f / 24f, if (ready) Palette.gold else ICON)
     }
 
+    /**
+     * Mira do template Multiplayer FPS (InGameHUD): cada arma tem o seu tipo (cruz no fuzil, círculo aberto na
+     * escopeta). Fica cinza recarregando ou entre disparos e branca por 100 ms logo depois do tiro; recarregando,
+     * um anel em volta enche conforme o progresso (o reticle_reload_circle do template).
+     */
     private fun drawReticle(canvas: Canvas, w: Float, h: Float) {
         val cx = w / 2
         val cy = h / 2
-        val fov = hud[Hud.FOV].coerceAtLeast(0.3f)
-        val focal = (h / 2) / tan(fov / 2)
-        val gap = (hud[Hud.SPREAD] * focal).coerceIn(d(5f), d(40f))
         val locked = hud[Hud.TARGET_LOCKED] > 0.5f
         val boosted = hud[Hud.BOOST] > 0f
-        val color = if (locked) Palette.red else if (boosted) Color.rgb(255, 160, 60) else Color.WHITE
-        val len = d(8f)
-        p.strokeWidth = d(2.4f)
-        p.strokeCap = Paint.Cap.SQUARE
-        p.color = Color.argb(140, 0, 0, 0)
-        for (pass in 0..1) {
-            if (pass == 1) { p.color = color; p.strokeWidth = d(1.6f) }
-            canvas.drawLine(cx - gap - len, cy, cx - gap, cy, p)
-            canvas.drawLine(cx + gap, cy, cx + gap + len, cy, p)
-            canvas.drawLine(cx, cy - gap - len, cx, cy - gap, p)
-            canvas.drawLine(cx, cy + gap, cx, cy + gap + len, p)
+        val ready = hud[Hud.WEAPON_READY] > 0.5f
+        val color = when {
+            !ready -> Color.rgb(140, 140, 140)
+            locked -> Palette.red
+            boosted -> Color.rgb(255, 160, 60)
+            else -> Color.WHITE
         }
+        // As texturas do template têm 256 px; aqui a mira inteira ocupa 60 dp.
+        val size = d(60f)
+        val k = size / 256f
+        val type = WeaponSpecs.reticle(hud[Hud.WEAPON].toInt())
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        for (pass in 0..1) {
+            // Primeiro a sombra (o brilho escuro das texturas), depois a linha.
+            if (pass == 0) { p.color = Color.argb(120, 0, 0, 0); p.strokeWidth = d(2.8f) }
+            else { p.color = color; p.strokeWidth = d(1.6f) }
+            when (type) {
+                Reticle.CROSS -> {
+                    canvas.drawLine(cx - 55 * k, cy, cx - 28 * k, cy, p)
+                    canvas.drawLine(cx + 28 * k, cy, cx + 55 * k, cy, p)
+                    canvas.drawLine(cx, cy - 55 * k, cx, cy - 28 * k, p)
+                    canvas.drawLine(cx, cy + 28 * k, cx, cy + 55 * k, p)
+                }
+                Reticle.TCROSS -> {
+                    canvas.drawLine(cx - 112 * k, cy, cx - 56 * k, cy, p)
+                    canvas.drawLine(cx + 56 * k, cy, cx + 112 * k, cy, p)
+                    canvas.drawLine(cx, cy + 47 * k, cx, cy + 72 * k, p)
+                }
+                Reticle.OPEN_CIRCULAR -> {
+                    // Quatro arcos de 50° em cima, embaixo e dos lados.
+                    rect.set(cx - 90 * k, cy - 90 * k, cx + 90 * k, cy + 90 * k)
+                    for (q in 0 until 4) canvas.drawArc(rect, q * 90f - 25f, 50f, false, p)
+                }
+                Reticle.CIRCULAR_CROSS -> {
+                    canvas.drawCircle(cx, cy, 108 * k, p)
+                    canvas.drawLine(cx - 108 * k, cy, cx - 88 * k, cy, p)
+                    canvas.drawLine(cx + 88 * k, cy, cx + 108 * k, cy, p)
+                    canvas.drawLine(cx, cy - 108 * k, cx, cy - 88 * k, p)
+                    canvas.drawLine(cx, cy + 88 * k, cx, cy + 108 * k, p)
+                }
+            }
+        }
+        val reload = hud[Hud.RELOAD]
+        if (reload >= 0f) {
+            rect.set(cx - 70 * k, cy - 70 * k, cx + 70 * k, cy + 70 * k)
+            p.strokeWidth = d(3f)
+            p.color = Color.argb(90, 255, 255, 255)
+            canvas.drawArc(rect, 0f, 360f, false, p)
+            p.color = Palette.gold
+            canvas.drawArc(rect, -90f, 360f * reload.coerceIn(0f, 1f), false, p)
+        }
+        p.style = Paint.Style.FILL
+        p.strokeCap = Paint.Cap.SQUARE
         p.color = color
-        canvas.drawCircle(cx, cy, d(1.6f), p)
+        canvas.drawCircle(cx, cy, d(1.4f), p)
+        val outer = 56 * k
         if (locked) {
             val f = hud[Hud.TARGET_HP]
             val bw = d(46f)
             p.color = Color.argb(160, 0, 0, 0)
-            rect.set(cx - bw / 2, cy + gap + len + d(6f), cx + bw / 2, cy + gap + len + d(10f))
+            rect.set(cx - bw / 2, cy + outer + d(6f), cx + bw / 2, cy + outer + d(10f))
             canvas.drawRect(rect, p)
             p.color = Palette.red
             rect.right = rect.left + bw * f
@@ -992,7 +1060,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val top = mapY - mapSize / 2
         rect.set(left, top, left + mapSize, top + mapSize)
         p.color = Color.argb(200, 8, 14, 26)
-        canvas.drawRoundRect(rect, d(14f), d(14f), p)
+        canvas.drawRoundRect(rect, d(MAP_CORNER), d(MAP_CORNER), p)
         val bmp = minimap
         val px = hud[Hud.PLAYER_X]
         val pz = hud[Hud.PLAYER_Z]
@@ -1000,7 +1068,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val scale = mapSize / 80f // 80 blocos visíveis
         canvas.save()
         path.reset()
-        path.addRoundRect(rect, d(14f), d(14f), Path.Direction.CW)
+        path.addRoundRect(rect, d(MAP_CORNER), d(MAP_CORNER), Path.Direction.CW)
         canvas.clipPath(path)
         canvas.translate(mapX, mapY)
         canvas.rotate(-yawDeg)
@@ -1059,59 +1127,56 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         path.moveTo(mapX, mapY - s); path.lineTo(mapX + s * 0.7f, mapY + s * 0.7f); path.lineTo(mapX, mapY + s * 0.3f); path.lineTo(mapX - s * 0.7f, mapY + s * 0.7f); path.close()
         p.color = Color.WHITE
         canvas.drawPath(path, p)
+        // Moldura fina e clara, cantos quase retos (E01 da referência), sem rótulo.
         p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2f)
-        p.color = Palette.line
-        canvas.drawRoundRect(rect, d(14f), d(14f), p)
+        p.strokeWidth = d(1.5f)
+        p.color = RING
+        canvas.drawRoundRect(rect, d(MAP_CORNER), d(MAP_CORNER), p)
         p.style = Paint.Style.FILL
-        textPaint.textSize = d(9f)
-        textPaint.color = Palette.muted
-        canvas.drawText("MAPA", mapX, top + mapSize - d(6f), textPaint)
     }
 
-    /** Vida, armadura e efeitos: painel compacto no canto superior esquerdo (acima do minimapa, nos dois modos de mão). */
-    /** Barra de vida (modelo do HTML): embaixo e centralizada, "HP x/y" à esquerda e barra branca à direita. */
+    /** Barra de vida (E26 da referência): "HP x/y" e, à direita dele, uma barra branca fina perto da base. */
     private fun drawStatus(canvas: Canvas, health: Float, maxHealth: Float) {
         val w = width.toFloat()
-        val h = height.toFloat()
-        val barW = minOf(d(394f), w * 0.9f)
-        val rowH = d(18f)
-        val left = (w - barW) / 2f
-        val top = h - d(18f) - rowH
+        val trackL = w * HP_BAR_LEFT
+        val trackR = w * HP_BAR_RIGHT
+        val barH = d(3.6f)
+        val trackTop = statusBaselineCenter() - barH / 2f
         val ratio = (health / maxHealth).coerceIn(0f, 1f)
         val label = "HP ${health.toInt()}/${maxHealth.toInt()}"
-        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.textAlign = Paint.Align.RIGHT
         textPaint.typeface = Fonts.bold
-        textPaint.textSize = d(13f)
+        textPaint.textSize = d(11.5f)
         textPaint.color = Color.WHITE
         textPaint.setShadowLayer(d(2f), d(1f), d(1f), Color.rgb(34, 34, 34))
-        canvas.drawText(label, left, top + rowH / 2f + d(4.5f), textPaint)
+        canvas.drawText(label, trackL - d(3f), statusBaselineCenter() + d(4f), textPaint)
         textPaint.clearShadowLayer()
-        val trackL = left + textPaint.measureText(label) + d(7f)
-        val trackR = left + barW
-        val trackTop = top + (rowH - d(7f)) / 2f
+        textPaint.textAlign = Paint.Align.CENTER
         p.style = Paint.Style.FILL
-        p.color = Color.argb(140, 30, 30, 30)
-        canvas.drawRect(trackL, trackTop, trackR, trackTop + d(7f), p)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = d(1f)
-        p.color = Color.argb(38, 255, 255, 255)
-        canvas.drawRect(trackL, trackTop, trackR, trackTop + d(7f), p)
-        p.style = Paint.Style.FILL
-        p.color = Color.WHITE
-        canvas.drawRect(trackL, trackTop, trackL + (trackR - trackL) * ratio, trackTop + d(7f), p)
-        // Efeitos ativos (ícones com tempo): coluna à direita, abaixo da mochila; longe da mira e da barra superior.
+        p.color = Color.argb(110, 0, 0, 0)
+        canvas.drawRect(trackL, trackTop, trackR, trackTop + barH, p)
+        p.color = if (ratio < 0.3f) Palette.danger else Color.WHITE
+        canvas.drawRect(trackL, trackTop, trackL + (trackR - trackL) * ratio, trackTop + barH, p)
+    }
+
+    /** Altura (px) do centro da linha da barra de vida. */
+    private fun statusBaselineCenter(): Float = height - d(14.7f)
+
+    /** Efeitos ativos (texto com tempo): coluna à direita, abaixo do painel de armas e do chip de contrato. */
+    private fun drawEffects(canvas: Canvas) {
         if (island) {
-            var y = d(132f)
+            var y = maxOf(weaponRect().bottom, contractBottom) + d(19f)
+            textPaint.textAlign = Paint.Align.LEFT
+            textPaint.typeface = Fonts.bold
             fun chip(label: String, seconds: Float, color: Int) {
                 if (seconds <= 0f) return
                 val txt = "$label ${seconds.toInt()}s"
-                textPaint.textSize = d(10f)
+                textPaint.textSize = d(10.5f)
                 val tw = textPaint.measureText(txt) + d(14f)
                 val x = width - d(8f) - tw
                 rect.set(x, y - d(13f), x + tw, y + d(5f))
-                p.color = Color.argb(200, Color.red(color) / 4, Color.green(color) / 4, Color.blue(color) / 4)
-                canvas.drawRoundRect(rect, d(8f), d(8f), p)
+                p.color = PANEL
+                canvas.drawRoundRect(rect, d(3f), d(3f), p)
                 textPaint.color = color
                 canvas.drawText(txt, x + d(7f), y, textPaint)
                 y += d(22f)
@@ -1123,6 +1188,7 @@ class HudView(context: Context, private val listener: Listener) : View(context),
             chip("⚡ ADRENALINA", hud[Hud.ADRENALINE], Color.rgb(90, 230, 255))
         }
         textPaint.textAlign = Paint.Align.CENTER
+        textPaint.typeface = Fonts.title
     }
 
     /** Corta o texto com reticências para caber em [maxW] (usa o tamanho de texto atual do textPaint). */
@@ -1678,21 +1744,36 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         canvas.drawText(text, w / 2, y, textPaint)
     }
 
-    private fun drawButton(canvas: Canvas, x: Float, y: Float, r: Float, fill: Int, active: Boolean) {
-        p.color = Color.argb(110, 0, 0, 0)
-        canvas.drawCircle(x, y + d(3f), r, p)
-        p.color = if (active) fill else Color.argb(150, 12, 20, 36)
+    /**
+     * Botão no estilo da referência: disco preto translúcido e aro claro fino. Aceso ([active]) o fundo clareia
+     * e o aro fica na cor [accent].
+     */
+    private fun drawButton(canvas: Canvas, x: Float, y: Float, r: Float, accent: Int, active: Boolean) {
+        p.style = Paint.Style.FILL
+        p.color = if (active) Color.argb(80, 255, 255, 255) else BUTTON_FILL
         canvas.drawCircle(x, y, r, p)
         p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2.2f)
-        p.color = if (active) Color.WHITE else Color.argb(170, Color.red(fill), Color.green(fill), Color.blue(fill))
-        canvas.drawCircle(x, y, r, p)
-        // aro interno discreto: dá relevo sem mudar a área do botão
-        p.strokeWidth = d(1f)
-        p.color = Color.argb(if (active) 70 else 36, 255, 255, 255)
-        canvas.drawCircle(x, y, (r - d(4f)).coerceAtLeast(d(2f)), p)
+        p.strokeWidth = d(if (active) 2.2f else 1.4f)
+        p.color = if (active) accent else RING
+        canvas.drawCircle(x, y, r - p.strokeWidth / 2f, p)
         p.style = Paint.Style.FILL
     }
+
+    /** Contador pequeno no canto inferior direito do botão (kit médico, granadas), como o "0" da referência. */
+    private fun drawCount(canvas: Canvas, gc: Geo, count: Int) {
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.typeface = Fonts.bold
+        textPaint.textSize = d(11f) * k2(gc)
+        textPaint.color = if (count > 0) Color.WHITE else Color.argb(170, 255, 255, 255)
+        textPaint.setShadowLayer(d(1.5f), 0f, d(1f), Color.BLACK)
+        canvas.drawText("$count", gc.x + gc.r * 0.6f, gc.y + gc.r * 0.78f, textPaint)
+        textPaint.clearShadowLayer()
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.typeface = Fonts.title
+    }
+
+    /** Fator de tamanho do texto pelo raio do botão (botões de 24 dp = 1). */
+    private fun k2(gc: Geo): Float = (gc.r / d(24f)).coerceIn(0.8f, 1.4f)
 
     private fun drawControls(canvas: Canvas) {
         val alpha = opacity
@@ -1706,6 +1787,8 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         if (available(HudControl.JUMP)) drawJump(canvas)
         if (available(HudControl.CROUCH)) drawCrouch(canvas)
         if (available(HudControl.SPRINT)) drawSprint(canvas)
+        if (available(HudControl.RELOAD)) drawReload(canvas)
+        if (available(HudControl.MELEE)) drawMelee(canvas)
         if (available(HudControl.GRENADE)) drawGrenade(canvas)
         if (available(HudControl.MEDKIT)) drawMedkit(canvas)
         if (available(HudControl.WEAPON)) drawWeaponPanel(canvas)
@@ -1723,33 +1806,29 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val top = hotbarY - slotSize / 2f
         val weaponSlot = hud[Hud.WEAPON_SLOT].toInt()
         val throwSlot = hud[Hud.THROW_SLOT].toInt()
-        rect.set(left - d(4f), top - d(4f), left + slotSize * 6f + d(4f), top + slotSize + d(4f))
-        p.color = Color.argb(150, 0, 0, 0)
-        canvas.drawRoundRect(rect, d(8f), d(8f), p)
+        // Fileira de ícones discreta (E25 da referência): espaços escuros translúcidos com aro fino.
         for (i in 0 until 6) {
             val x = left + i * slotSize
             rect.set(x + d(2f), top + d(2f), x + slotSize - d(2f), top + slotSize - d(2f))
-            p.color = Color.argb(200, 30, 36, 50)
+            p.color = BUTTON_FILL
             canvas.drawRoundRect(rect, d(5f), d(5f), p)
-            val id = if (editing) listOf(Items.RIFLE, Items.PISTOL, Items.GRENADE, Items.BANDAGE, Items.MEDKIT, 0)[i] else hud[Hud.INV + i * 2].toInt()
+            val id = if (editing) listOf(Items.RIFLE, Items.SHOTGUN, Items.GRENADE, Items.BANDAGE, Items.MEDKIT, 0)[i] else hud[Hud.INV + i * 2].toInt()
             val count = if (editing) (if (i in 2..3) 3 else 1) else hud[Hud.INV + i * 2 + 1].toInt()
             val pressed = touches.values.any { it.role == Role.HOTBAR && it.slot == i }
             val equipped = id != 0 && i == weaponSlot && Items.isWeapon(id)
             if (equipped) {
-                // arma em mãos: fundo esverdeado e sublinhado
-                p.color = Color.argb(70, 168, 255, 62)
+                // arma em mãos: fundo um pouco mais claro (o aro dourado vem abaixo)
+                p.color = Color.argb(50, 255, 255, 255)
                 canvas.drawRoundRect(rect, d(5f), d(5f), p)
-                p.color = Palette.lime
-                canvas.drawRoundRect(rect.left + d(6f), rect.bottom + d(0.5f), rect.right - d(6f), rect.bottom + d(3f), d(1.2f), d(1.2f), p)
             }
             val border = when {
                 pressed -> Color.WHITE
-                id != 0 && i == weaponSlot && Items.isWeapon(id) -> Palette.lime
+                id != 0 && i == weaponSlot && Items.isWeapon(id) -> Palette.gold
                 id != 0 && i == throwSlot && Items.isThrowable(id) -> Color.rgb(255, 150, 60)
-                else -> Color.argb(90, 255, 255, 255)
+                else -> RING
             }
             p.style = Paint.Style.STROKE
-            p.strokeWidth = d(if (border == Color.argb(90, 255, 255, 255)) 1.2f else 2.6f)
+            p.strokeWidth = d(if (border == RING) 1.2f else 2.2f)
             p.color = border
             canvas.drawRoundRect(rect, d(5f), d(5f), p)
             p.style = Paint.Style.FILL
@@ -1766,42 +1845,32 @@ class HudView(context: Context, private val listener: Listener) : View(context),
                 }
             }
         }
-        // Arma em mãos e munição acima da barra.
+        // A arma em mãos e a munição ficam só no painel de armas (como na referência); aqui só a vibração da troca.
         val weapon = if (editing) Items.RIFLE else hud[Hud.WEAPON].toInt()
-        val def = Items.get(weapon) ?: return
         if (weapon != lastWeapon && lastWeapon >= 0 && !editing) haptic(false)
         lastWeapon = weapon
-        val ammo = hud[Hud.AMMO].toInt()
-        val mag = hud[Hud.MAG].toInt()
-        val reloading = hud[Hud.RELOAD] >= 0f
-        val text = def.name.uppercase() + if (reloading) "  •  RECARREGANDO" else "  •  $ammo/$mag"
-        textPaint.textSize = d(11f)
-        val tw = textPaint.measureText(text) + d(16f)
-        rect.set(hotbarX - tw / 2, top - d(24f), hotbarX + tw / 2, top - d(7f))
-        p.color = Color.argb(160, 8, 14, 26)
-        canvas.drawRoundRect(rect, d(8f), d(8f), p)
-        textPaint.color = if (!reloading && ammo <= mag / 4) Palette.gold else def.color
-        canvas.drawText(text, hotbarX, top - d(11.5f), textPaint)
     }
 
     private fun drawBag(canvas: Canvas) {
         val gc = g(HudControl.BAG)
-        val s = k(HudControl.BAG)
         drawButton(canvas, gc.x, gc.y, gc.r, Palette.gold, false)
-        // Mochila: corpo, tampa e alça.
-        p.color = Color.rgb(170, 120, 60)
-        rect.set(gc.x - d(9f) * s, gc.y - d(6f) * s, gc.x + d(9f) * s, gc.y + d(10f) * s)
-        canvas.drawRoundRect(rect, d(3f) * s, d(3f) * s, p)
-        p.color = Color.rgb(130, 88, 40)
-        rect.set(gc.x - d(9f) * s, gc.y - d(6f) * s, gc.x + d(9f) * s, gc.y + d(1f) * s)
-        canvas.drawRoundRect(rect, d(3f) * s, d(3f) * s, p)
+        val u = iconUnit(gc)
+        // Mochila em silhueta branca: alça, corpo e bolso da frente recortado.
+        p.color = ICON
         p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2f) * s
-        canvas.drawArc(gc.x - d(5f) * s, gc.y - d(12f) * s, gc.x + d(5f) * s, gc.y - d(2f) * s, 180f, 180f, false, p)
+        p.strokeWidth = 3f * u
+        canvas.drawArc(gc.x - 6f * u, gc.y - 19f * u, gc.x + 6f * u, gc.y - 7f * u, 180f, 180f, false, p)
         p.style = Paint.Style.FILL
-        p.color = Palette.gold
-        canvas.drawRect(gc.x - d(2f) * s, gc.y, gc.x + d(2f) * s, gc.y + d(3f) * s, p)
+        rect.set(gc.x - 13f * u, gc.y - 11f * u, gc.x + 13f * u, gc.y + 17f * u)
+        canvas.drawRoundRect(rect, 7f * u, 7f * u, p)
+        p.color = ICON_CUT
+        rect.set(gc.x - 8f * u, gc.y + 3f * u, gc.x + 8f * u, gc.y + 13f * u)
+        canvas.drawRoundRect(rect, 3f * u, 3f * u, p)
+        canvas.drawRect(gc.x - 13f * u, gc.y - 2f * u, gc.x + 13f * u, gc.y - 0.5f * u, p)
     }
+
+    /** Unidade dos ícones: o desenho ocupa cerca de ±24 unidades, ~62% do raio do botão. */
+    private fun iconUnit(gc: Geo): Float = gc.r * 0.62f / 24f
 
     /** Durante a mira do arremesso: X para cancelar, instrução e distância no ponto de queda. */
     private fun drawThrowAim(canvas: Canvas, w: Float, h: Float) {
@@ -1846,39 +1915,6 @@ class HudView(context: Context, private val listener: Listener) : View(context),
             }
             canvas.drawText(label, x, y - d(10f), textPaint)
         }
-    }
-
-    /** Luneta do rifle de precisão: tudo escuro fora do círculo, com retícula fina. */
-    private fun drawScope(canvas: Canvas, w: Float, h: Float) {
-        if (hud[Hud.WEAPON].toInt() != Items.SNIPER || aimStage == 0 || hud[Hud.AIM] < 0.85f) return
-        val r = h * 0.42f
-        path.reset()
-        path.fillType = Path.FillType.EVEN_ODD
-        path.addRect(0f, 0f, w, h, Path.Direction.CW)
-        path.addCircle(w / 2, h / 2, r, Path.Direction.CW)
-        p.color = Color.argb(235, 0, 0, 0)
-        canvas.drawPath(path, p)
-        path.fillType = Path.FillType.WINDING
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2.2f)
-        p.color = Color.argb(235, 10, 10, 10)
-        canvas.drawCircle(w / 2, h / 2, r, p)
-        p.strokeWidth = d(1.1f)
-        canvas.drawLine(w / 2 - r, h / 2, w / 2 + r, h / 2, p)
-        canvas.drawLine(w / 2, h / 2 - r, w / 2, h / 2 + r, p)
-        val tick = if (aimStage >= 2) d(15f) else d(11f)
-        for (i in -3..3) {
-            if (i == 0) continue
-            val offset = i * tick
-            canvas.drawLine(w / 2 + offset, h / 2 - d(4f), w / 2 + offset, h / 2 + d(4f), p)
-            canvas.drawLine(w / 2 - d(4f), h / 2 + offset, w / 2 + d(4f), h / 2 + offset, p)
-        }
-        p.style = Paint.Style.FILL
-        p.color = Color.rgb(220, 38, 38)
-        canvas.drawCircle(w / 2, h / 2, d(2.2f), p)
-        textPaint.textSize = d(13f)
-        textPaint.color = Color.WHITE
-        canvas.drawText(if (aimStage >= 2) "8×" else "4×", w / 2, h / 2 + r - d(18f), textPaint)
     }
 
     /** Sobrevivência: direções de onde a horda está vindo (setas vermelhas numa faixa). */
@@ -1997,41 +2033,48 @@ class HudView(context: Context, private val listener: Listener) : View(context),
     }
 
     private fun drawJoystick(canvas: Canvas) {
-        val r = stickRadius
         val lit = stickActive || autoRun
         if (!g(HudControl.JOYSTICK).visible && !lit) return
-        p.color = Color.argb(if (lit) 70 else 40, 255, 255, 255)
+        // Parado: anel pequeno no canto (E24 da referência). Em uso: o anel inteiro onde o polegar tocou.
+        val r = if (stickActive) stickRadius else stickRadius * HudLayout.JOYSTICK_IDLE
+        p.color = if (stickActive) Color.argb(70, 0, 0, 0) else Color.argb(60, 255, 255, 255)
         canvas.drawCircle(stickBaseX, stickBaseY, r, p)
         p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2f)
-        p.color = if (autoRun) Palette.gold else Color.argb(if (lit) 160 else 90, 168, 255, 62)
+        p.strokeWidth = d(1.4f)
+        p.color = if (autoRun) Palette.gold else RING
         canvas.drawCircle(stickBaseX, stickBaseY, r, p)
         p.style = Paint.Style.FILL
-        p.color = if (autoRun) Palette.gold else Color.argb(if (lit) 220 else 120, 168, 255, 62)
+        p.color = if (autoRun) Palette.gold else Color.argb(if (stickActive) 200 else 150, 230, 230, 230)
         // Corrida automática sem o polegar no joystick: a bolinha fica empurrada para a frente.
         canvas.drawCircle(stickX, if (autoRun && !stickActive) stickBaseY - r * 0.6f else stickY, r * 0.41f, p)
-        val ks = k(HudControl.JOYSTICK)
-        when {
-            autoRun -> {
-                val text = "» CORRIDA AUTOMÁTICA"
-                textPaint.textSize = d(12f) * ks
-                val tw = textPaint.measureText(text) + d(16f)
-                val ty = stickBaseY - r - d(18f)
-                rect.set(stickBaseX - tw / 2, ty - d(14f), stickBaseX + tw / 2, ty + d(6f))
-                p.color = Color.argb(200, 40, 30, 8)
-                canvas.drawRoundRect(rect, d(9f), d(9f), p)
-                label(canvas, text, stickBaseX, ty, 12f * ks, Palette.gold)
-            }
-            hud[Hud.SPRINTING] > 0.5f -> label(canvas, "» CORRENDO", stickBaseX, stickBaseY - r - d(10f), 13f * ks, Palette.lime)
-            !stickActive -> label(canvas, if (hud[Hud.SLOWED] > 0f) "LENTO (ÁCIDO)" else "MOVER", stickBaseX, stickBaseY + r + d(14f), 10f * ks, Color.argb(140, 255, 255, 255))
+        val text = when {
+            autoRun -> "» CORRIDA AUTOMÁTICA"
+            hud[Hud.SPRINTING] > 0.5f -> "» CORRENDO"
+            !stickActive && hud[Hud.SLOWED] > 0f -> "LENTO (ÁCIDO)"
+            else -> return
         }
+        // Rótulo acima do anel, sem sair da tela quando o joystick está no canto.
+        textPaint.typeface = Fonts.bold
+        textPaint.textSize = d(11f)
+        val tw = textPaint.measureText(text)
+        val tx = stickBaseX.coerceIn(tw / 2 + d(6f), width - tw / 2 - d(6f))
+        textPaint.color = if (autoRun) Palette.gold else Color.WHITE
+        textPaint.setShadowLayer(d(2f), d(1f), d(1f), Color.BLACK)
+        canvas.drawText(text, tx, stickBaseY - r - d(8f), textPaint)
+        textPaint.clearShadowLayer()
+        textPaint.typeface = Fonts.title
     }
 
     private fun drawFireButton(canvas: Canvas, c: HudControl, firing: Boolean, main: Boolean) {
         val gc = g(c)
-        val ks = k(c)
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, firing)
-        drawCrosshairIcon(canvas, gc.x, gc.y, gc.r * 0.35f, if (firing) Palette.dark else Palette.lime)
+        // Anel pontilhado em volta e projétil com clarão (E14 da referência).
+        dash.color = Color.argb(70, 255, 255, 255)
+        dash.strokeWidth = d(1.5f)
+        dash.pathEffect = fireDash
+        canvas.drawCircle(gc.x, gc.y, gc.r * 1.22f, dash)
+        dash.pathEffect = null
+        drawButton(canvas, gc.x, gc.y, gc.r, Color.WHITE, firing)
+        drawBulletIcon(canvas, gc.x, gc.y, iconUnit(gc) * 1.15f, ICON)
         val reload = hud[Hud.RELOAD]
         if (main && reload >= 0f) {
             p.style = Paint.Style.STROKE
@@ -2045,138 +2088,78 @@ class HudView(context: Context, private val listener: Listener) : View(context),
 
     private fun drawAim(canvas: Canvas) {
         val gc = g(HudControl.AIM)
-        val s = k(HudControl.AIM)
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.cyan, aiming)
+        drawButton(canvas, gc.x, gc.y, gc.r, Color.WHITE, aiming)
+        // Retícula com cantoneiras (E23 da referência).
+        val u = iconUnit(gc)
         p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2f)
-        p.color = if (aiming) Palette.dark else Palette.cyan
-        canvas.drawCircle(gc.x, gc.y, d(9f) * s, p)
-        canvas.drawLine(gc.x - d(13f) * s, gc.y, gc.x + d(13f) * s, gc.y, p)
-        canvas.drawLine(gc.x, gc.y - d(13f) * s, gc.x, gc.y + d(13f) * s, p)
+        p.strokeCap = Paint.Cap.BUTT
+        p.strokeWidth = 2.6f * u
+        p.color = ICON
+        canvas.drawCircle(gc.x, gc.y, 11f * u, p)
+        canvas.drawLine(gc.x - 18f * u, gc.y, gc.x - 4f * u, gc.y, p)
+        canvas.drawLine(gc.x + 4f * u, gc.y, gc.x + 18f * u, gc.y, p)
+        canvas.drawLine(gc.x, gc.y - 18f * u, gc.x, gc.y - 4f * u, p)
+        canvas.drawLine(gc.x, gc.y + 4f * u, gc.x, gc.y + 18f * u, p)
+        p.strokeWidth = 3f * u
+        for (sx in listOf(-1f, 1f)) for (sy in listOf(-1f, 1f)) {
+            path.reset()
+            path.moveTo(gc.x + sx * 23f * u, gc.y + sy * 15f * u)
+            path.lineTo(gc.x + sx * 23f * u, gc.y + sy * 23f * u)
+            path.lineTo(gc.x + sx * 15f * u, gc.y + sy * 23f * u)
+            canvas.drawPath(path, p)
+        }
         p.style = Paint.Style.FILL
+        canvas.drawCircle(gc.x, gc.y, 2.6f * u, p)
     }
 
     private fun drawJump(canvas: Canvas) {
         val gc = g(HudControl.JUMP)
-        val s = k(HudControl.JUMP)
         val jumpReady = hud[Hud.JUMP_READY] > 0.5f || hud[Hud.IN_WATER] > 0.5f
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, false)
-        val x = gc.x
-        val y = gc.y
-        path.reset()
-        path.moveTo(x, y - d(12f) * s); path.lineTo(x + d(10f) * s, y); path.lineTo(x + d(4f) * s, y)
-        path.lineTo(x + d(4f) * s, y + d(8f) * s); path.lineTo(x - d(4f) * s, y + d(8f) * s); path.lineTo(x - d(4f) * s, y); path.lineTo(x - d(10f) * s, y); path.close()
-        p.color = if (jumpReady) Palette.lime else Palette.muted
-        canvas.drawPath(path, p)
+        drawButton(canvas, gc.x, gc.y, gc.r, Color.WHITE, false)
+        drawJumpFigure(canvas, gc.x, gc.y, iconUnit(gc) * 1.1f, if (jumpReady) ICON else ICON_DIM)
     }
 
     private fun drawReload(canvas: Canvas) {
         val gc = g(HudControl.RELOAD)
-        val s = k(HudControl.RELOAD)
         val ammo = hud[Hud.AMMO].toInt()
         val mag = hud[Hud.MAG].toInt().coerceAtLeast(1)
         val lowAmmo = ammo <= mag / 4
-        drawButton(canvas, gc.x, gc.y, gc.r, if (lowAmmo) Palette.gold else Palette.lime, false)
-        // Anel: cheio com o pente cheio, esvazia a cada tiro e some em zero; ao recarregar volta a encher.
         val reloading = hud[Hud.RELOAD] >= 0f
-        val frac = if (reloading) 1f else (ammo.toFloat() / mag).coerceIn(0f, 1f)
-        val ringR = gc.r + d(5f) * s
-        rect.set(gc.x - ringR, gc.y - ringR, gc.x + ringR, gc.y + ringR)
-        p.style = Paint.Style.STROKE
-        p.strokeCap = Paint.Cap.ROUND
-        p.strokeWidth = d(4f) * s
-        p.color = Color.argb(90, 0, 0, 0)
-        canvas.drawArc(rect, -90f, 360f, false, p)
-        p.color = if (reloading) Palette.cyan else if (lowAmmo) Palette.gold else Palette.lime
-        if (frac > 0f) canvas.drawArc(rect, -90f, 360f * frac, false, p)
-        p.style = Paint.Style.FILL
-        drawCartridge(canvas, gc.x, gc.y, d(26f) * s)
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.cyan, reloading)
+        drawMagazineIcon(canvas, gc.x, gc.y, iconUnit(gc) * 1.2f, if (lowAmmo && !reloading) Palette.gold else ICON)
     }
 
-    /** Cartucho de munição (corpo de latão com ponta), centralizado em (x, y). */
-    private fun drawCartridge(canvas: Canvas, x: Float, y: Float, h: Float) {
-        val w = h * 0.46f
-        val top = y - h / 2f
-        val neck = top + h * 0.34f
-        p.color = Color.rgb(212, 170, 80)
-        rect.set(x - w / 2f, neck, x + w / 2f, y + h / 2f)
-        canvas.drawRoundRect(rect, w * 0.15f, w * 0.15f, p)
-        p.color = Color.rgb(236, 236, 242)
-        path.reset()
-        path.moveTo(x - w / 2f, neck)
-        path.lineTo(x, top)
-        path.lineTo(x + w / 2f, neck)
-        path.close()
-        canvas.drawPath(path, p)
-    }
-
-    /** Tempo discreto, centralizado na base da tela (onde ficava a barra de itens). */
+    /** Tempo discreto à direita da barra de vida. */
     private fun drawClock(canvas: Canvas) {
         val elapsed = hud[Hud.ELAPSED].toInt()
-        textPaint.textAlign = Paint.Align.CENTER
-        textPaint.textSize = d(11f)
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.typeface = Fonts.bold
+        textPaint.textSize = d(10f)
         textPaint.color = Color.argb(170, 255, 255, 255)
-        canvas.drawText("%02d:%02d".format(elapsed / 60, elapsed % 60), width / 2f, height - d(10f), textPaint)
+        canvas.drawText("%02d:%02d".format(elapsed / 60, elapsed % 60), width * HP_BAR_RIGHT + d(8f), statusBaselineCenter() + d(3.5f), textPaint)
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.typeface = Fonts.title
     }
 
     private fun drawCrouch(canvas: Canvas) {
         val gc = g(HudControl.CROUCH)
-        val s = k(HudControl.CROUCH)
         val on = hud[Hud.CROUCH] > 0.5f
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, on)
-        // Bonequinho abaixado.
-        val color = if (on) Palette.dark else Palette.lime
-        p.color = color
-        canvas.drawCircle(gc.x + d(2f) * s, gc.y - d(9f) * s, d(3.2f) * s, p)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2.6f) * s
-        p.strokeCap = Paint.Cap.ROUND
-        path.reset()
-        path.moveTo(gc.x + d(1f) * s, gc.y - d(5f) * s)
-        path.lineTo(gc.x - d(4f) * s, gc.y + d(1f) * s)
-        path.lineTo(gc.x + d(4f) * s, gc.y + d(3f) * s)
-        path.lineTo(gc.x + d(2f) * s, gc.y + d(8f) * s)
-        canvas.drawPath(path, p)
-        canvas.drawLine(gc.x - d(4f) * s, gc.y + d(1f) * s, gc.x - d(8f) * s, gc.y + d(8f) * s, p)
-        p.style = Paint.Style.FILL
+        drawButton(canvas, gc.x, gc.y, gc.r, Palette.gold, on)
+        drawKneelFigure(canvas, gc.x, gc.y, iconUnit(gc) * 1.1f, if (on) Palette.gold else ICON)
     }
 
     private fun drawSprint(canvas: Canvas) {
         val gc = g(HudControl.SPRINT)
-        val s = k(HudControl.SPRINT)
         val on = hud[Hud.SPRINT_LOCK] > 0.5f || hud[Hud.SPRINTING] > 0.5f || autoRun
         drawButton(canvas, gc.x, gc.y, gc.r, Palette.gold, on)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = d(3f) * s
-        p.strokeCap = Paint.Cap.ROUND
-        p.color = if (on) Palette.dark else Palette.gold
-        for (i in 0..1) {
-            val y = gc.y - d(4f) * s + i * d(7f) * s
-            canvas.drawLine(gc.x - d(7f) * s, y, gc.x, y - d(6f) * s, p)
-            canvas.drawLine(gc.x, y - d(6f) * s, gc.x + d(7f) * s, y, p)
-        }
-        p.style = Paint.Style.FILL
+        drawRunFigure(canvas, gc.x, gc.y, iconUnit(gc) * 1.1f, if (on) Palette.gold else ICON)
     }
 
     private fun drawMelee(canvas: Canvas) {
         val gc = g(HudControl.MELEE)
-        val s = k(HudControl.MELEE)
         val cooldown = hud[Hud.MELEE].coerceIn(0f, 1f)
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.red, false)
-        // Faca na diagonal: lâmina e cabo.
-        canvas.save()
-        canvas.rotate(-45f, gc.x, gc.y - d(2f) * s)
-        p.color = Color.rgb(220, 226, 236)
-        path.reset()
-        path.moveTo(gc.x - d(2.5f) * s, gc.y - d(2f) * s)
-        path.lineTo(gc.x + d(2.5f) * s, gc.y - d(2f) * s)
-        path.lineTo(gc.x + d(2.5f) * s, gc.y - d(12f) * s)
-        path.lineTo(gc.x - d(2.5f) * s, gc.y - d(15f) * s)
-        path.close()
-        canvas.drawPath(path, p)
-        p.color = Color.rgb(140, 90, 50)
-        canvas.drawRect(gc.x - d(2.2f) * s, gc.y - d(2f) * s, gc.x + d(2.2f) * s, gc.y + d(6f) * s, p)
-        canvas.restore()
+        drawButton(canvas, gc.x, gc.y, gc.r, Color.WHITE, false)
+        drawKnifeIcon(canvas, gc.x, gc.y, iconUnit(gc) * 1.2f, ICON)
         if (cooldown > 0f) {
             p.color = Color.argb(150, 0, 0, 0)
             rect.set(gc.x - gc.r, gc.y - gc.r, gc.x + gc.r, gc.y + gc.r)
@@ -2186,18 +2169,20 @@ class HudView(context: Context, private val listener: Listener) : View(context),
 
     private fun drawGrenade(canvas: Canvas) {
         val gc = g(HudControl.GRENADE)
-        val s = k(HudControl.GRENADE)
         val count = hud[Hud.GRENADES].toInt()
         val aiming = hud[Hud.THROW_AIM] > 0.5f
         val kind = hud[Hud.THROW_KIND].toInt().takeIf { it != 0 } ?: Items.GRENADE
+        // Aro externo claro como o botão de habilidade da referência (E17).
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = d(3f)
+        p.color = Color.argb(45, 255, 255, 255)
+        canvas.drawCircle(gc.x, gc.y, gc.r + d(3.5f), p)
+        p.style = Paint.Style.FILL
         drawButton(canvas, gc.x, gc.y, gc.r, Color.rgb(255, 170, 70), aiming)
-        ItemIcons.draw(canvas, kind, gc.x, gc.y, d(26f) * s, if (count > 0) 255 else 110)
-        // Contador.
-        val bx = gc.x + gc.r * 0.72f
-        val by = gc.y - gc.r * 0.72f
-        p.color = if (count > 0) Palette.gold else Palette.stone
-        canvas.drawCircle(bx, by, d(8f) * s, p)
-        label(canvas, "$count", bx, by + d(3.5f) * s, 10f * s, Palette.dark)
+        val color = if (count > 0) ICON else ICON_DIM
+        if (kind == Items.GRENADE) drawGrenadeIcon(canvas, gc.x, gc.y, iconUnit(gc) * 1.15f, color)
+        else ItemIcons.draw(canvas, kind, gc.x, gc.y, gc.r * 1.1f, if (count > 0) 255 else 110)
+        drawCount(canvas, gc, count)
     }
 
     /** Kit médico: usa o primeiro kit da mochila inteira (como no Free Fire; o mesmo efeito de tocar no slot). */
@@ -2208,15 +2193,10 @@ class HudView(context: Context, private val listener: Listener) : View(context),
 
     private fun drawMedkit(canvas: Canvas) {
         val gc = g(HudControl.MEDKIT)
-        val s = k(HudControl.MEDKIT)
         val count = (0 until Inventory.SIZE).sumOf { if (hud[Hud.INV + it * 2].toInt() == Items.MEDKIT) hud[Hud.INV + it * 2 + 1].toInt() else 0 }
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, false)
-        ItemIcons.draw(canvas, Items.MEDKIT, gc.x, gc.y, d(26f) * s, if (count > 0) 255 else 110)
-        val bx = gc.x + gc.r * 0.72f
-        val by = gc.y - gc.r * 0.72f
-        p.color = if (count > 0) Palette.gold else Palette.stone
-        canvas.drawCircle(bx, by, d(8f) * s, p)
-        label(canvas, "$count", bx, by + d(3.5f) * s, 10f * s, Palette.dark)
+        drawButton(canvas, gc.x, gc.y, gc.r, Color.WHITE, false)
+        drawMedkitIcon(canvas, gc.x, gc.y, iconUnit(gc) * 1.1f, if (count > 0) ICON else ICON_DIM)
+        drawCount(canvas, gc, count)
     }
 
     // ------------------------------------------------------------------ painel da arma e emoji
@@ -2230,18 +2210,21 @@ class HudView(context: Context, private val listener: Listener) : View(context),
 
     private fun weaponRows(): Int = (weaponSlotIndexes().size + 2) / 3
 
-    /** Painel de armas (canto superior direito, segundo selecao_armas_hud.html): arma atual em cima, espacos embaixo. */
+    /**
+     * Painel de armas (E09 + E10 da referência): arma atual em cima, espaços embaixo. O centro do controle é o
+     * centro do painel com uma fileira; com mais armas ele cresce para baixo.
+     */
     private fun weaponRect(): RectF {
         val gc = g(HudControl.WEAPON)
         val s = k(HudControl.WEAPON)
-        val h = d(50f) * s + weaponRows() * d(43f) * s
-        return RectF(gc.x - d(80f) * s, gc.y - h / 2f, gc.x + d(80f) * s, gc.y + h / 2f)
+        val top = gc.y - d(WEAPON_ROW_DP) * s
+        return RectF(gc.x - d(80f) * s, top, gc.x + d(80f) * s, top + d(WEAPON_ROW_DP) * s * (1 + weaponRows()))
     }
 
     /** Bloco da arma atual: tocar nele recarrega. */
     private fun weaponTopRect(): RectF {
         val r = weaponRect()
-        return RectF(r.left, r.top, r.right, r.top + d(50f) * k(HudControl.WEAPON))
+        return RectF(r.left, r.top, r.right, r.top + d(WEAPON_ROW_DP - 3f) * k(HudControl.WEAPON))
     }
 
     /** Espaco j da lista (3 por linha), toda a area do espaco responde ao toque. */
@@ -2253,8 +2236,8 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val row = j / 3
         val col = j % 3
         val left = r.left + col * (w + gap)
-        val top = r.top + d(52f) * s + row * d(43f) * s
-        return RectF(left, top, left + w, top + d(40f) * s)
+        val top = r.top + d(WEAPON_ROW_DP) * s * (1 + row)
+        return RectF(left, top, left + w, top + d(WEAPON_ROW_DP - 3f) * s)
     }
 
     private fun weaponSlotAt(x: Float, y: Float): Int =
@@ -2277,44 +2260,83 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         val mag = hud[Hud.MAG].toInt().coerceAtLeast(1)
         val reloading = hud[Hud.RELOAD] >= 0f
         val low = isGun && ammo <= mag / 4
-        // Bloco da arma atual.
+        // Bloco da arma atual: fundo escuro, faixa dourada à direita com o canto chanfrado e barra do pente embaixo.
         val top = weaponTopRect()
+        val cut = d(10f) * s
         p.style = Paint.Style.FILL
-        p.color = Color.argb(222, 24, 24, 21)
-        canvas.drawRoundRect(top, d(4f) * s, d(4f) * s, p)
+        p.color = PANEL
+        path.reset()
+        path.moveTo(top.left, top.top); path.lineTo(top.right - cut, top.top); path.lineTo(top.right, top.top + cut)
+        path.lineTo(top.right, top.bottom); path.lineTo(top.left, top.bottom); path.close()
+        canvas.drawPath(path, p)
         if (isGun) {
-            p.color = Color.rgb(255, 200, 0)
-            canvas.drawRect(top.right - d(2f) * s, top.top, top.right, top.bottom, p)
+            val goldLeft = top.right - top.width() * 0.36f
+            if (goldShader == null || goldShaderLeft != goldLeft || goldShaderRight != top.right) {
+                goldShader = LinearGradient(goldLeft, 0f, top.right, 0f, Color.argb(0, 214, 160, 20), Color.argb(190, 214, 160, 20), Shader.TileMode.CLAMP)
+                goldShaderLeft = goldLeft
+                goldShaderRight = top.right
+            }
+            p.shader = goldShader
+            path.reset()
+            path.moveTo(goldLeft, top.top); path.lineTo(top.right - cut, top.top); path.lineTo(top.right, top.top + cut)
+            path.lineTo(top.right, top.bottom); path.lineTo(goldLeft, top.bottom); path.close()
+            canvas.drawPath(path, p)
+            p.shader = null
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = d(1.5f) * s
+            p.color = Color.rgb(255, 196, 0)
+            path.reset()
+            path.moveTo(goldLeft + top.width() * 0.12f, top.top); path.lineTo(top.right - cut, top.top)
+            path.lineTo(top.right, top.top + cut); path.lineTo(top.right, top.bottom)
+            canvas.drawPath(path, p)
+            p.style = Paint.Style.FILL
         }
         textPaint.textAlign = Paint.Align.LEFT
-        textPaint.typeface = Fonts.title
-        textPaint.textSize = d(24f) * s
+        textPaint.typeface = Fonts.bold
+        textPaint.textSize = d(25f) * s
         textPaint.color = if (low) Palette.gold else Color.WHITE
         val ammoStr = if (isGun) "$ammo" else "∞"
-        canvas.drawText(ammoStr, top.left + d(8f) * s, top.top + d(28f) * s, textPaint)
+        canvas.drawText(ammoStr, top.left + d(8f) * s, top.top + d(25f) * s, textPaint)
         if (isGun) {
             val w1 = textPaint.measureText(ammoStr)
-            textPaint.textSize = d(11f) * s
-            textPaint.color = Palette.muted
-            canvas.drawText("/$mag", top.left + d(10f) * s + w1, top.top + d(28f) * s, textPaint)
-            textPaint.textSize = d(8.5f) * s
-            textPaint.color = if (reloading) Palette.cyan else Palette.muted
-            canvas.drawText(if (reloading) "RECARREGANDO" else "Recarregar", top.left + d(8f) * s, top.top + d(42f) * s, textPaint)
+            textPaint.textSize = d(13f) * s
+            textPaint.color = Color.argb(220, 255, 255, 255)
+            canvas.drawText("/$mag", top.left + d(10f) * s + w1, top.top + d(25f) * s, textPaint)
+            textPaint.textSize = d(10f) * s
+            textPaint.color = if (reloading) Palette.cyan else Color.WHITE
+            canvas.drawText(if (reloading) "Recarregando" else "Recarregar", top.left + d(8f) * s, top.top + d(39f) * s, textPaint)
+            // Barra do pente: cheia com o pente cheio; recarregando mostra o progresso.
+            val frac = if (reloading) hud[Hud.RELOAD].coerceIn(0f, 1f) else (ammo.toFloat() / mag).coerceIn(0f, 1f)
+            rect.set(top.left + d(8f) * s, top.bottom - d(7f) * s, top.right - d(8f) * s, top.bottom - d(4f) * s)
+            p.color = Color.argb(90, 255, 255, 255)
+            canvas.drawRect(rect, p)
+            rect.right = rect.left + rect.width() * frac
+            p.color = if (reloading) Palette.cyan else if (low) Palette.gold else Color.WHITE
+            canvas.drawRect(rect, p)
         }
         textPaint.textAlign = Paint.Align.CENTER
-        if (wid != 0) ItemIcons.draw(canvas, wid, top.right - d(40f) * s, top.centerY(), d(50f) * s)
+        if (wid != 0) ItemIcons.draw(canvas, wid, top.right - d(42f) * s, top.top + d(19f) * s, d(54f) * s)
         // Espacos: armas da barra de itens e a faca.
         val indexes = weaponSlotIndexes()
         for ((j, qi) in indexes.withIndex()) {
             val rr = weaponSlotRect(j)
             val selected = qi == sel || (qi < 0 && !isGun)
-            p.color = if (selected) Color.argb(235, 255, 196, 0) else Color.argb(175, 18, 18, 17)
-            canvas.drawRoundRect(rr, d(3f) * s, d(3f) * s, p)
+            p.color = PANEL
+            canvas.drawRect(rr, p)
+            if (selected) {
+                p.style = Paint.Style.STROKE
+                p.strokeWidth = d(1.5f)
+                p.color = Color.rgb(255, 196, 0)
+                canvas.drawRect(rr, p)
+                p.style = Paint.Style.FILL
+            }
             if (qi < 0) {
-                textPaint.typeface = Fonts.title
-                textPaint.textSize = d(20f) * s
-                textPaint.color = if (selected) Palette.dark else Color.WHITE
-                canvas.drawText("∞", rr.centerX(), rr.centerY() + d(7f) * s, textPaint)
+                // Faca com o "∞" embaixo, como o punho da referência.
+                drawKnifeIcon(canvas, rr.centerX(), rr.centerY() - rr.height() * 0.12f, rr.height() / 80f, ICON)
+                textPaint.typeface = Fonts.bold
+                textPaint.textSize = d(13f) * s
+                textPaint.color = ICON
+                canvas.drawText("∞", rr.centerX(), rr.bottom - d(4f) * s, textPaint)
             } else {
                 ItemIcons.draw(canvas, hud[Hud.INV + qi * 2].toInt(), rr.centerX(), rr.centerY(), rr.height() * 0.8f)
             }
@@ -2331,17 +2353,19 @@ class HudView(context: Context, private val listener: Listener) : View(context),
     private fun drawEmote(canvas: Canvas) {
         val gc = g(HudControl.EMOTE)
         val s = k(HudControl.EMOTE)
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.cyan, emoteOpen)
-        p.color = Color.rgb(255, 214, 60)
-        canvas.drawCircle(gc.x, gc.y, gc.r * 0.6f, p)
-        p.color = Color.rgb(40, 30, 10)
-        canvas.drawCircle(gc.x - gc.r * 0.22f, gc.y - gc.r * 0.14f, d(2.4f) * s, p)
-        canvas.drawCircle(gc.x + gc.r * 0.22f, gc.y - gc.r * 0.14f, d(2.4f) * s, p)
+        drawButton(canvas, gc.x, gc.y, gc.r, Color.WHITE, emoteOpen)
+        // Rosto sorridente em contorno branco (E03 da referência).
+        val u = gc.r * 0.7f / 24f
         p.style = Paint.Style.STROKE
-        p.strokeWidth = d(2f) * s
-        rect.set(gc.x - gc.r * 0.32f, gc.y - gc.r * 0.14f, gc.x + gc.r * 0.32f, gc.y + gc.r * 0.3f)
-        canvas.drawArc(rect, 20f, 140f, false, p)
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeWidth = 3.4f * u
+        p.color = ICON
+        canvas.drawCircle(gc.x, gc.y, 20f * u, p)
+        rect.set(gc.x - 11f * u, gc.y - 6f * u, gc.x + 11f * u, gc.y + 12f * u)
+        canvas.drawArc(rect, 25f, 130f, false, p)
         p.style = Paint.Style.FILL
+        canvas.drawCircle(gc.x - 7f * u, gc.y - 5f * u, 2.8f * u, p)
+        canvas.drawCircle(gc.x + 7f * u, gc.y - 5f * u, 2.8f * u, p)
         if (emoteOpen) {
             for (i in emotes.indices) {
                 val cx = emoteCenterX(i)
@@ -2372,11 +2396,207 @@ class HudView(context: Context, private val listener: Listener) : View(context),
 
     private fun drawPause(canvas: Canvas) {
         val gc = g(HudControl.PAUSE)
-        val s = k(HudControl.PAUSE)
-        drawButton(canvas, gc.x, gc.y, gc.r, Palette.lime, false)
-        p.color = Color.WHITE
-        canvas.drawRect(gc.x - d(6f) * s, gc.y - d(7f) * s, gc.x - d(2f) * s, gc.y + d(7f) * s, p)
-        canvas.drawRect(gc.x + d(2f) * s, gc.y - d(7f) * s, gc.x + d(6f) * s, gc.y + d(7f) * s, p)
+        drawButton(canvas, gc.x, gc.y, gc.r, Color.WHITE, false)
+        drawGearIcon(canvas, gc.x, gc.y, gc.r * 0.72f / 24f, ICON)
+    }
+
+    // ------------------------------------------------------------------ ícones em silhueta branca
+    // Desenhos próprios do jogo (pictogramas), numa grade de ±24 unidades centrada em (x, y); u = px por unidade.
+
+    /** Traço arredondado dos bonecos (membros e tronco). */
+    private fun limb(canvas: Canvas, vararg pts: Float) {
+        path.reset()
+        path.moveTo(pts[0], pts[1])
+        var i = 2
+        while (i < pts.size) { path.lineTo(pts[i], pts[i + 1]); i += 2 }
+        canvas.drawPath(path, p)
+    }
+
+    private fun figurePaint(u: Float, color: Int) {
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeJoin = Paint.Join.ROUND
+        p.strokeWidth = 6f * u
+        p.color = color
+    }
+
+    private fun endFigure() {
+        p.style = Paint.Style.FILL
+        p.strokeJoin = Paint.Join.MITER
+        p.strokeCap = Paint.Cap.BUTT
+    }
+
+    /** Boneco correndo inclinado para a frente (CORRER). */
+    private fun drawRunFigure(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        figurePaint(u, color)
+        limb(canvas, x + 3f * u, y - 9f * u, x - 3f * u, y + 4f * u)                              // tronco
+        limb(canvas, x + 2f * u, y - 7f * u, x + 10f * u, y - 3f * u, x + 16f * u, y - 9f * u)    // braço da frente
+        limb(canvas, x + 2f * u, y - 7f * u, x - 6f * u, y - 4f * u, x - 11f * u, y + 2f * u)     // braço de trás
+        limb(canvas, x - 3f * u, y + 4f * u, x + 7f * u, y + 9f * u, x + 5f * u, y + 19f * u)     // perna da frente
+        limb(canvas, x - 3f * u, y + 4f * u, x - 9f * u, y + 12f * u, x - 18f * u, y + 11f * u)   // perna de trás
+        endFigure()
+        canvas.drawCircle(x + 6f * u, y - 16f * u, 4.8f * u, p)
+    }
+
+    /** Soldado no meio do pulo, joelhos encolhidos e arma à frente (PULAR). */
+    private fun drawJumpFigure(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        figurePaint(u, color)
+        limb(canvas, x + 3f * u, y - 9f * u, x - 1f * u, y + 3f * u)                              // tronco
+        limb(canvas, x - 1f * u, y + 3f * u, x + 10f * u, y + 6f * u, x + 5f * u, y + 16f * u)    // perna encolhida
+        limb(canvas, x - 1f * u, y + 3f * u, x - 8f * u, y + 11f * u, x - 2f * u, y + 19f * u)    // outra perna
+        limb(canvas, x + 2f * u, y - 7f * u, x - 7f * u, y - 3f * u)                              // braços na arma
+        p.strokeWidth = 3.6f * u
+        limb(canvas, x - 19f * u, y - 1f * u, x + 6f * u, y - 9f * u)                             // arma
+        endFigure()
+        canvas.drawCircle(x + 6f * u, y - 16f * u, 4.8f * u, p)
+    }
+
+    /** Soldado ajoelhado mirando para a esquerda (AGACHAR). */
+    private fun drawKneelFigure(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        figurePaint(u, color)
+        limb(canvas, x + 4f * u, y - 8f * u, x + 6f * u, y + 4f * u)                              // tronco
+        limb(canvas, x + 6f * u, y + 4f * u, x - 4f * u, y + 6f * u, x - 4f * u, y + 18f * u)     // perna da frente
+        limb(canvas, x + 6f * u, y + 4f * u, x + 11f * u, y + 18f * u, x + 20f * u, y + 18f * u)  // joelho no chão
+        limb(canvas, x + 4f * u, y - 6f * u, x - 7f * u, y - 6f * u)                              // braços na arma
+        p.strokeWidth = 3.6f * u
+        limb(canvas, x - 21f * u, y - 8f * u, x + 7f * u, y - 9f * u)                             // arma
+        endFigure()
+        canvas.drawCircle(x + 5f * u, y - 15f * u, 4.8f * u, p)
+    }
+
+    /** Projétil inclinado com o clarão do disparo (ATIRAR). */
+    private fun drawBulletIcon(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        p.style = Paint.Style.FILL
+        p.color = color
+        canvas.save()
+        canvas.rotate(-35f, x, y)
+        path.reset()
+        path.moveTo(x - 5f * u, y - 4f * u)
+        path.quadTo(x - 5f * u, y - 15f * u, x, y - 21f * u)
+        path.quadTo(x + 5f * u, y - 15f * u, x + 5f * u, y - 4f * u)
+        path.close()
+        canvas.drawPath(path, p)
+        rect.set(x - 5f * u, y - 2f * u, x + 5f * u, y + 14f * u)
+        canvas.drawRect(rect, p)
+        canvas.restore()
+        // Clarão: três raios saindo da base.
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeWidth = 2.6f * u
+        val bx = x + 7f * u
+        val by = y + 12f * u
+        canvas.drawLine(bx + 2f * u, by - 2f * u, bx + 11f * u, by - 10f * u, p)
+        canvas.drawLine(bx + 4f * u, by + 2f * u, bx + 15f * u, by + 1f * u, p)
+        canvas.drawLine(bx, by + 4f * u, bx + 4f * u, by + 13f * u, p)
+        p.style = Paint.Style.FILL
+        p.strokeCap = Paint.Cap.BUTT
+    }
+
+    /** Pente curvo com a ponta da bala aparecendo (RECARREGAR). */
+    private fun drawMagazineIcon(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        p.style = Paint.Style.FILL
+        p.color = color
+        path.reset()
+        path.moveTo(x - 8f * u, y - 10f * u)
+        path.lineTo(x + 6f * u, y - 10f * u)
+        path.quadTo(x + 9f * u, y + 4f * u, x + 14f * u, y + 16f * u)
+        path.lineTo(x + 1f * u, y + 19f * u)
+        path.quadTo(x - 5f * u, y + 6f * u, x - 8f * u, y - 10f * u)
+        path.close()
+        canvas.drawPath(path, p)
+        path.reset()
+        path.moveTo(x - 5f * u, y - 12f * u)
+        path.quadTo(x - 1f * u, y - 22f * u, x + 3f * u, y - 12f * u)
+        path.close()
+        canvas.drawPath(path, p)
+        p.color = ICON_CUT
+        canvas.drawRect(x - 5f * u, y - 3f * u, x + 6f * u, y - 1f * u, p)
+    }
+
+    /** Faca na diagonal, lâmina e cabo separados por um vão (FACA). */
+    private fun drawKnifeIcon(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        p.style = Paint.Style.FILL
+        p.color = color
+        canvas.save()
+        canvas.rotate(45f, x, y)
+        path.reset()
+        path.moveTo(x - 3.5f * u, y - 2f * u)
+        path.lineTo(x - 3.5f * u, y - 18f * u)
+        path.quadTo(x + 4f * u, y - 14f * u, x + 4f * u, y - 2f * u)
+        path.close()
+        canvas.drawPath(path, p)
+        rect.set(x - 4.5f * u, y + 1f * u, x + 4.5f * u, y + 3f * u)
+        canvas.drawRect(rect, p)
+        rect.set(x - 3f * u, y + 4.5f * u, x + 3f * u, y + 18f * u)
+        canvas.drawRoundRect(rect, 2f * u, 2f * u, p)
+        canvas.restore()
+    }
+
+    /** Granada de mão: corpo, alavanca e argola (GRANADA). */
+    private fun drawGrenadeIcon(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        p.style = Paint.Style.FILL
+        p.color = color
+        rect.set(x - 10f * u, y - 6f * u, x + 10f * u, y + 18f * u)
+        canvas.drawOval(rect, p)
+        rect.set(x - 4.5f * u, y - 12f * u, x + 4.5f * u, y - 5f * u)
+        canvas.drawRect(rect, p)
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeWidth = 3f * u
+        canvas.drawLine(x + 3f * u, y - 11f * u, x + 12f * u, y - 2f * u, p)
+        canvas.drawCircle(x - 8f * u, y - 13f * u, 3.5f * u, p)
+        p.style = Paint.Style.FILL
+        p.strokeCap = Paint.Cap.BUTT
+        p.color = ICON_CUT
+        canvas.drawRect(x - 10f * u, y + 5f * u, x + 10f * u, y + 7f * u, p)
+    }
+
+    /** Maleta de primeiros socorros com a cruz vazada (KIT MÉDICO). */
+    private fun drawMedkitIcon(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 3f * u
+        p.color = color
+        rect.set(x - 6f * u, y - 16f * u, x + 6f * u, y - 8f * u)
+        canvas.drawRoundRect(rect, 2f * u, 2f * u, p)
+        p.style = Paint.Style.FILL
+        rect.set(x - 17f * u, y - 10f * u, x + 17f * u, y + 15f * u)
+        canvas.drawRoundRect(rect, 4f * u, 4f * u, p)
+        p.color = ICON_CUT
+        canvas.drawRect(x - 2.5f * u, y - 5f * u, x + 2.5f * u, y + 10f * u, p)
+        canvas.drawRect(x - 7.5f * u, y, x + 7.5f * u, y + 5f * u, p)
+    }
+
+    /** Caixa de suprimentos presa a um paraquedas (SUPRIMENTOS). */
+    private fun drawCrateIcon(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        p.color = color
+        p.style = Paint.Style.FILL
+        rect.set(x - 17f * u, y - 20f * u, x + 17f * u, y + 0f * u)
+        canvas.drawArc(rect, 180f, 180f, true, p)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 1.8f * u
+        canvas.drawLine(x - 16f * u, y - 10f * u, x - 7f * u, y + 4f * u, p)
+        canvas.drawLine(x + 16f * u, y - 10f * u, x + 7f * u, y + 4f * u, p)
+        canvas.drawLine(x, y - 10f * u, x, y + 4f * u, p)
+        p.style = Paint.Style.FILL
+        rect.set(x - 9f * u, y + 4f * u, x + 9f * u, y + 19f * u)
+        canvas.drawRect(rect, p)
+        p.color = ICON_CUT
+        canvas.drawRect(x - 9f * u, y + 10.5f * u, x + 9f * u, y + 12.5f * u, p)
+    }
+
+    /** Engrenagem com o furo no meio (PAUSA / configurações). */
+    private fun drawGearIcon(canvas: Canvas, x: Float, y: Float, u: Float, color: Int) {
+        p.style = Paint.Style.FILL
+        p.color = color
+        for (i in 0 until 8) {
+            canvas.save()
+            canvas.rotate(i * 45f, x, y)
+            canvas.drawRect(x - 3.5f * u, y - 19f * u, x + 3.5f * u, y - 10f * u, p)
+            canvas.restore()
+        }
+        canvas.drawCircle(x, y, 13f * u, p)
+        p.color = ICON_CUT
+        canvas.drawCircle(x, y, 5.5f * u, p)
     }
 
     /** Controle oculto, mostrado só no editor para poder ser ligado de novo. */
@@ -2415,11 +2635,11 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         if (g(HudControl.MAP).visible) {
             rect.set(mapX - mapSize / 2, mapY - mapSize / 2, mapX + mapSize / 2, mapY + mapSize / 2)
             p.color = Color.argb(200, 8, 14, 26)
-            canvas.drawRoundRect(rect, d(14f), d(14f), p)
+            canvas.drawRoundRect(rect, d(MAP_CORNER), d(MAP_CORNER), p)
             p.style = Paint.Style.STROKE
-            p.strokeWidth = d(2f)
-            p.color = Palette.line
-            canvas.drawRoundRect(rect, d(14f), d(14f), p)
+            p.strokeWidth = d(1.5f)
+            p.color = RING
+            canvas.drawRoundRect(rect, d(MAP_CORNER), d(MAP_CORNER), p)
             p.style = Paint.Style.FILL
             label(canvas, "MINIMAPA", mapX, mapY + d(4f), 10f * k(HudControl.MAP), Palette.muted)
         }
@@ -2432,13 +2652,17 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         p.color = Palette.gold
         when (c) {
             HudControl.MAP -> { rect.set(gc.x - gc.r - d(5f), gc.y - gc.r - d(5f), gc.x + gc.r + d(5f), gc.y + gc.r + d(5f)); canvas.drawRoundRect(rect, d(16f), d(16f), p) }
-            HudControl.SUPPLY -> { rect.set(supplyX - supplyW / 2 - d(5f), supplyY - supplyH / 2 - d(5f), supplyX + supplyW / 2 + d(5f), supplyY + supplyH / 2 + d(5f)); canvas.drawRoundRect(rect, d(12f), d(12f), p) }
             HudControl.WEAPON -> { canvas.drawRoundRect(weaponRect(), d(12f), d(12f), p) }
             HudControl.HOTBAR -> { rect.set(hotbarX - slotSize * 3f - d(6f), hotbarY - slotSize / 2f - d(6f), hotbarX + slotSize * 3f + d(6f), hotbarY + slotSize / 2f + d(6f)); canvas.drawRoundRect(rect, d(10f), d(10f), p) }
+            HudControl.JOYSTICK -> canvas.drawCircle(gc.x, gc.y, gc.r * HudLayout.JOYSTICK_IDLE + d(6f), p)
             else -> canvas.drawCircle(gc.x, gc.y, gc.r + d(6f), p)
         }
         p.style = Paint.Style.FILL
-        val top = if (c == HudControl.SUPPLY) supplyY - supplyH / 2 else gc.y - gc.r
+        val top = when (c) {
+            HudControl.WEAPON -> weaponRect().top
+            HudControl.JOYSTICK -> gc.y - gc.r * HudLayout.JOYSTICK_IDLE
+            else -> gc.y - gc.r
+        }
         val text = "${c.label} • ${(layout[c].scale * 100).toInt()}%" + if (!gc.visible) " (oculto)" else ""
         textPaint.textSize = d(12f)
         val tw = textPaint.measureText(text) + d(16f)
@@ -2449,21 +2673,22 @@ class HudView(context: Context, private val listener: Listener) : View(context),
         label(canvas, text, gc.x, ty, 12f, Palette.gold)
     }
 
-    private fun drawCrosshairIcon(canvas: Canvas, x: Float, y: Float, r: Float, color: Int) {
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = d(3f)
-        p.color = color
-        canvas.drawCircle(x, y, r * 0.8f, p)
-        canvas.drawLine(x - r * 1.2f, y, x - r * 0.4f, y, p)
-        canvas.drawLine(x + r * 0.4f, y, x + r * 1.2f, y, p)
-        canvas.drawLine(x, y - r * 1.2f, x, y - r * 0.4f, p)
-        canvas.drawLine(x, y + r * 0.4f, x, y + r * 1.2f, p)
-        p.style = Paint.Style.FILL
-        p.color = color
-        canvas.drawCircle(x, y, d(2.5f), p)
-    }
-
     companion object {
+        // Estilo da referência (screenshots/xray-hud): botões pretos translúcidos, aro claro fino, ícones brancos.
+        private val BUTTON_FILL = Color.argb(120, 0, 0, 0)
+        private val RING = Color.argb(115, 255, 255, 255)
+        private val PANEL = Color.argb(185, 22, 22, 20)
+        private val ICON = Color.rgb(245, 245, 245)
+        private val ICON_DIM = Color.argb(120, 245, 245, 245)
+        /** Detalhes vazados dos ícones (bolso, cruz, furo da engrenagem). */
+        private val ICON_CUT = Color.rgb(48, 48, 46)
+        private const val MAP_CORNER = 3f
+        /** Barra de vida (E26): de 43% a 59,5% da largura. */
+        private const val HP_BAR_LEFT = 0.430f
+        private const val HP_BAR_RIGHT = 0.595f
+        /** Altura (dp, escala 1) do bloco da arma e de cada fileira de espaços do painel de armas. */
+        private const val WEAPON_ROW_DP = 52f
+
         private const val TAU = (PI * 2).toFloat()
         private val NEST_COLOR = Color.rgb(225, 75, 225)
         private val CARGO_COLOR = Palette.contractCrate   // dourado: a carga da Caixa perdida

@@ -44,6 +44,9 @@ void Game::startMission(const MissionConfig& config) {
     auto island = std::make_unique<IslandGenerator>(theme_, config.stage, config.seed, config.mode != 1);
     world_.resetStreaming(kIslandSize, kIslandHeight, kIslandSize, island.get());
     island_ = std::move(island);
+    fluids_ = {};
+    worldTime_ = 0;
+    terrainRevision_ = world_.revision();
     layout_ = WorldLayout{};
     layout_.seaLevel = island_->seaLevel();
     layout_.start = island_->start();
@@ -175,7 +178,7 @@ bool Game::findSpawnSpot(const Vec3& around, float minDist, float maxDist, bool 
         if (!world_.columnMeshed(x, z)) continue;
         int g = world_.groundHeight(x, z), s = world_.standHeight(x, z);
         if (g <= layout_.seaLevel + 1 || s - g > 1) continue;
-        if (world_.get(x, s, z) == B_WATER || world_.solid(x, s + 1, z)) continue;
+        if (isWaterBlock(world_.get(x, s, z)) || world_.solid(x, s + 1, z)) continue;
         out = {x + 0.5f, static_cast<float>(s), z + 0.5f};
         return true;
     }
@@ -429,9 +432,8 @@ void Game::updateChests(float dt) {
         for (int k = 0; k < extra; ++k) dropItem(c.pos + Vec3(0, 1.0f, 0), kChestLoot[rng_.rangeInt(0, 7)], 1);
         if (rng_.chance(0.08f * config_.luck)) dropItem(c.pos + Vec3(0, 1.0f, 0), IT_MEDKIT, 1);
         if (rng_.chance(0.05f * config_.luck)) {
-            static const int kWeaponsLoot[] = {IT_PISTOL, IT_SHOTGUN, IT_SMG, IT_SMG, IT_SHOTGUN, IT_SNIPER, IT_LMG, IT_FLAMER, IT_LAUNCHER};
-            int wpn = kWeaponsLoot[rng_.rangeInt(0, 8)];
-            if (countItem(wpn) == 0) dropItem(c.pos + Vec3(0, 1.2f, 0), wpn, 1);
+            // A única arma além do fuzil inicial é a escopeta do template.
+            if (countItem(IT_SHOTGUN) == 0) dropItem(c.pos + Vec3(0, 1.2f, 0), IT_SHOTGUN, 1);
         }
         emit(EV_CHEST, c.diamonds, grenade ? 1 : 0);
         emitSound(SND_CHEST, c.pos, 1.0f);
@@ -508,7 +510,7 @@ void Game::rebuildMinimap() {
             float shade = 0.82f + (top - sea) * 0.012f;
             int ref = (prevTops[static_cast<size_t>(i)] + leftTop) / 2;
             shade += top > ref ? 0.1f : (top < ref ? -0.1f : 0.0f);
-            if (b == B_WATER) {
+            if (isWaterBlock(b)) {
                 int depth = sea - world_.groundHeight(x, z);
                 shade = clampf(1.0f - depth * 0.05f, 0.55f, 1.0f);
             }

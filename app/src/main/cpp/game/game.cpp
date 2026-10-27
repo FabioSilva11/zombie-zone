@@ -1,5 +1,4 @@
 #include "game.h"
-#include "../render/weapon_asset.h"
 
 #include <GLES3/gl3.h>
 
@@ -61,12 +60,30 @@ int locomotionClip(const CharacterModel& model, const Vec3& velocity, float yaw,
     return model.clipIndex(knife ? "knife-walk" : (crouched ? "crouch-walk" : "walk"));
 }
 
+// Granadas e molotov em voo: o modelo da mão (~0,22 de altura) ampliado para ~0,26 m, o tamanho de antes.
+constexpr float kThrownScale = 1.2f;
+
+// Moldura do objeto na mão direita: no herói voxel parte da palma; no modelo antigo, da ponta do braço.
+Mat4 handFrame(const CharacterDraw& draw, int armR, float armReach) {
+    const int hand = draw.asset ? draw.asset->model.nodeIndex("RightHand") : -1;
+    if (hand >= 0)
+        return draw.world * draw.nodes[static_cast<size_t>(hand)] * Mat4::translation(Vec3(0.3f, -1.6f, 0.0f) * kBlockyPixel) * Mat4::rotationX(kPi * 0.5f);
+    return draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -armReach, 0.05f}) * Mat4::rotationX(kPi * 0.5f);
+}
+
+// Modelo em blocos do arremessável (granada, fumaça ou molotov).
+VoxelItem throwableVoxel(int item) {
+    if (item == IT_SMOKE) return VoxelItem::Smoke;
+    if (item == IT_MOLOTOV) return VoxelItem::Molotov;
+    return VoxelItem::Grenade;
+}
+
 }  // namespace
 
 Game::Game() {
     hud_.fill(0);
     result_.fill(0);
-    ak47Loaded_ = loadConvertedAk47(ak47Asset_);
+    for (size_t i = 0; i < voxelItems_.size(); ++i) buildVoxelItem(static_cast<VoxelItem>(i), voxelItems_[i]);
 }
 
 void Game::onSurfaceCreated() {
@@ -326,7 +343,7 @@ void Game::frame(double now) {
     time_ += dt;
     prof_.setContext(static_cast<int>(mode_), quality_, renderer_.cinematic());  // o log ZZPerf (5 s) substitui o antigo "FPS"
 
-    if (mode_ == Mode::Lobby) updateLobby(dt);
+    if (mode_ == Mode::Lobby) { worldTime_ += dt; updateLobby(dt); }
     else if (mode_ == Mode::Pvp) updatePvp(dt);
     else if (mode_ == Mode::Mission) {
         if (!paused_) updateMission(dt);
@@ -412,8 +429,8 @@ void Game::updateLobby(float dt) {
         target = c + Vec3(5.0f, 0.62f, 0);
         eye = target + Vec3(0.0f, 0.3f, 6.8f);
     } else {
-        target = c + Vec3(1.3f, 1.05f, 0);
-        eye = target + Vec3(std::sin(time_ * 0.2f) * 0.25f, 0.5f + std::sin(time_ * 0.13f) * 0.06f, 4.4f);
+        target = c + Vec3(-0.1f, 0.92f, 0);
+        eye = target + Vec3(std::sin(time_ * 0.2f) * 0.07f, 0.3f + std::sin(time_ * 0.13f) * 0.02f, 2.7f);
     }
     camPos_ = eye;
     camForward_ = normalize(target - eye);
@@ -431,7 +448,14 @@ void Game::updateMission(float dt) {
     if (autopilot_.active) perfDrive(in);
     if (!victory_) missionTime_ += dt;
 
+    worldTime_ += dt;
     streamWorld();
+    updateWater(dt);
+    if (terrainRevision_ != world_.revision()) {
+        terrainRevision_ = world_.revision();
+        navX_ = navZ_ = -1;
+        navTimer_ = 0;
+    }
     for (int i = 0; i < in.tapCount; ++i) handleSlotTap(in.taps[i]);
     for (int i = 0; i < in.useCount; ++i) useItemSlot(in.uses[i]);
     updateCamera(dt, in);
@@ -537,9 +561,8 @@ void Game::finishResult() {
 
 void Game::updateCamera(float dt, const InputState& in) {
     const WeaponDef& weapon = weaponDef(weaponId());
-    // Mirando, a sensibilidade cai junto com o zoom (luneta do rifle de precisão fica bem mais lenta).
-    const float aimedFov = (weaponId() == IT_SNIPER && aimStage_ >= 2) ? weapon.aimFov * 0.55f : weapon.aimFov;
-    float k = 0.0058f * config_.sensitivity * lerpf(1.0f, aimedFov * 0.85f, aimBlend_);
+    // Mirando, a sensibilidade cai junto com o zoom.
+    float k = 0.0058f * config_.sensitivity * lerpf(1.0f, weapon.aimFov * 0.85f, aimBlend_);
     if (targetLocked_ && firingNow_) k *= 0.72f;  // "fricção" da mira sobre o alvo
     if (!dead_) {
         camYaw_ = wrapAngle(camYaw_ + in.lookX * k);
@@ -564,7 +587,7 @@ void Game::updateCamera(float dt, const InputState& in) {
     shake_ = std::max(0.0f, shake_ - dt * 1.8f);
     // Ao correr o campo de visão abre um pouco (sensação de velocidade).
     sprintFov_ = lerpf(sprintFov_, sprinting_ ? 0.07f : 0.0f, damp(4.0f, dt));
-    fov_ = lerpf(1.0f, aimedFov, aimBlend_) + sprintFov_;
+    fov_ = lerpf(1.0f, weapon.aimFov, aimBlend_) + sprintFov_;
     float wantDistance = dead_ ? 5.5f : lerpf(lerpf(4.9f, 4.3f, crouchBlend_), 2.4f, aimBlend_);
     float shoulder = lerpf(1.0f, 0.78f, aimBlend_);
     float pitch = camPitch_ + recoil_;
@@ -692,7 +715,7 @@ void Game::unstickPlayer() {
                 int x = cx + dx, z = cz + dz;
                 if (!world_.columnReady(x, z)) continue;
                 int s = world_.standHeight(x, z), g = world_.groundHeight(x, z);
-                if (s < feet + 2 || s - g > 1 || world_.get(x, s, z) == B_WATER || world_.solid(x, s + 1, z)) continue;
+                if (s < feet + 2 || s - g > 1 || isWaterBlock(world_.get(x, s, z)) || world_.solid(x, s + 1, z)) continue;
                 player_.position = {x + 0.5f, static_cast<float>(s), z + 0.5f};
                 player_.velocity = {};
                 camPivotInit_ = false;
@@ -764,17 +787,11 @@ void Game::updatePlayer(float dt, const InputState& in) {
     if (sprinting_ && sprintLock_) response = 1.0f;
     // Andar no fim do analogico e 1.45x (como antes); correr pelo botao e 2x andar.
     float speed = kPlayerSpeed * (sprinting_ ? 2.0f : (mag > 0.9f ? 1.45f : 1.0f)) * (crouching_ ? 0.5f : 1.0f) * lerpf(1.0f, 0.6f, aimBlend_) *
-                  (player_.inWater ? 0.6f : 1.0f) * (slowed_ > 0 ? 0.55f : 1.0f) * weaponDef(weaponId()).moveMul *
+                  (player_.inWater ? 0.6f : 1.0f) * (slowed_ > 0 ? 0.55f : 1.0f) *
                   config_.speedMul * (adrenaline_ > 0 ? 1.3f : 1.0f);
     Vec3 fwd = forwardFromYaw(camYaw_), right = rightFromYaw(camYaw_);
     Vec3 wish = right * mx + fwd * my;
     if (lengthXZ(wish) > 1e-3f) wish = normalize(wish) * (response * speed);
-    // Mar aberto: uma corrente suave leva o jogador de volta à ilha.
-    if (island_ && player_.inWater) {
-        Vec3 toCenter(kIslandCenter - player_.position.x, 0, kIslandCenter - player_.position.z);
-        float d = lengthXZ(toCenter);
-        if (d > kIslandRadius + 380.0f) wish += normalize(toCenter) * clampf((d - kIslandRadius - 380.0f) * 0.05f, 0.0f, 3.5f);
-    }
     // Aceleração: arranca suave, freia firme, vira rápido; pouco controle no ar.
     Vec3 hv(player_.velocity.x, 0, player_.velocity.z);
     float accel;
@@ -855,6 +872,9 @@ void Game::updatePlayer(float dt, const InputState& in) {
         }
     }
     bool combat = aimBlend_ > 0.3f || in.fire || firingNow_ || meleeTime_ >= 0 || throwAiming_ || throwAnimTime_ >= 0;
+    // Herói voxel: mirando ou logo depois de atirar a coronha sobe ao ombro; andando, a arma volta a ficar pronta.
+    aimHold_ = (in.fire || firingNow_) ? 1.0f : std::max(0.0f, aimHold_ - dt);
+    gunAim_ = lerpf(gunAim_, (aimBlend_ > 0.3f || aimHold_ > 0) ? 1.0f : 0.0f, damp(10.0f, dt));
     if (combat) playerYaw_ = camYaw_;
     else if (horizontal > 0.6f) playerYaw_ = yawFromDirection(player_.velocity.x, player_.velocity.z);
     float prevYaw = playerModelYaw_;
@@ -866,7 +886,8 @@ void Game::updatePlayer(float dt, const InputState& in) {
 
     // Correndo a arma vai para as costas; parar, mirar ou atirar a traz de volta.
     const bool utility = throwAiming_ || throwAnimTime_ >= 0;
-    const bool holster = (sprinting_ || utility) && meleeTime_ < 0 && reloadTimer_ <= 0 && !player_.inWater;
+    const bool swimming = player_.inWater && !player_.onGround && playerAsset_ && playerAsset_->model.clipIndex("swim") >= 0;
+    const bool holster = ((sprinting_ || utility) && meleeTime_ < 0 && reloadTimer_ <= 0 && !player_.inWater) || swimming;
     armedBlend_ = lerpf(armedBlend_, holster ? 0.0f : 1.0f, damp(holster ? 7.0f : 16.0f, dt));
     airBlend_ = lerpf(airBlend_, (!player_.onGround && !player_.inWater) ? 1.0f : 0.0f, damp(player_.onGround ? 16.0f : 7.0f, dt));
     if (playerAsset_) {
@@ -881,6 +902,15 @@ void Game::updatePlayer(float dt, const InputState& in) {
             int clip = jumping ? jumpClip : locomotionClip(m, player_.velocity, playerModelYaw_, horizontal, sprinting, crouching_, meleeTime_ >= 0);
             float speed = jumping ? 1.0f : (crouching_ ? std::max(0.5f, horizontal / 2.2f)
                                      : (sprinting ? horizontal / 6.0f : std::max(0.6f, horizontal / 3.6f)));
+            // Animações do Mixamo: nadando; parado mirando ou atirando com a arma nas mãos.
+            const int swimClip = m.clipIndex("swim"), aimIdle = m.clipIndex("aim-idle");
+            if (swimming && swimClip >= 0) {
+                clip = swimClip;
+                speed = 1.0f;
+            } else if (clip == m.clipIndex("idle") && aimIdle >= 0 && gunAim_ > 0.5f && armedBlend_ > 0.5f && meleeTime_ < 0) {
+                clip = aimIdle;
+                speed = 1.0f;
+            }
             playerAnim_.play(clip, !jumping, jumping ? 0.1f : (sprinting ? 0.18f : 0.2f), speed);
         }
         playerAnim_.update(dt);
@@ -893,9 +923,9 @@ void Game::updateWeapon(float dt, const InputState& in) {
     const int magazine = magazineFor(weapon);
     const float interval = w.interval * (adrenaline_ > 0 ? 0.87f : 1.0f);
     fireCooldown_ = std::max(-interval, fireCooldown_ - dt);
-    bloom_ = std::max(0.0f, bloom_ - dt * 0.09f);
+    shotFeedback_ = std::max(0.0f, shotFeedback_ - dt);
     muzzleTimer_ = std::max(0.0f, muzzleTimer_ - dt);
-    weaponKick_ = std::max(0.0f, weaponKick_ - dt * (weapon == IT_SNIPER || weapon == IT_SHOTGUN ? 4.0f : 7.0f));
+    weaponKick_ = std::max(0.0f, weaponKick_ - dt * (weapon == IT_SHOTGUN ? 4.0f : 7.0f));
     if (throwAnimTime_ >= 0.0f) {
         throwAnimTime_ += dt;
         if (throwAnimTime_ > 0.62f) {
@@ -976,15 +1006,14 @@ void Game::updateWeapon(float dt, const InputState& in) {
         }
     }
     float cone = config_.aimAssist ? lerpf(0.075f, 0.045f, aimBlend_) : 0.0f;
-    if (w.kind == FireKind::Flame) cone = 0.12f;
     if (assistAngle_ > std::max(cone, 0.03f)) assistTarget_ = -1;
     targetLocked_ = assistTarget_ >= 0;
     targetHp_ = targetLocked_ ? zombies_[static_cast<size_t>(assistTarget_)].health / zombies_[static_cast<size_t>(assistTarget_)].maxHealth : 0;
 
     bool autoTrigger = false;
-    if (config_.autoFire && assistTarget_ >= 0 && w.kind != FireKind::Launcher) {
+    if (config_.autoFire && assistTarget_ >= 0) {
         const Zombie& z = zombies_[static_cast<size_t>(assistTarget_)];
-        float reach = w.kind == FireKind::Flame ? w.range : std::min(42.0f, w.range);
+        float reach = std::min(42.0f, w.range);
         autoTrigger = assistAngle_ < 0.035f && distXZ(z.body.position, player_.position) < reach;
     }
     bool trigger = (in.fire || autoTrigger) && swapTimer_ <= 0 && !throwAiming_ && throwAnimTime_ < 0;
@@ -999,9 +1028,9 @@ void Game::updateWeapon(float dt, const InputState& in) {
     firingNow_ = trigger && ammo_ > 0 && reloadTimer_ <= 0 && meleeTime_ < 0;
     int fired = 0;
     while (firingNow_ && fireCooldown_ <= 0 && fired < 3 && ammo_ > 0) {
-        if (w.kind == FireKind::Flame) fireFlame();
-        else if (w.kind == FireKind::Launcher) fireLauncher();
+        if (w.kind == FireKind::Projectile) fireProjectile();
         else fireShot();
+        shotFeedback_ = 0.1f;
         fireCooldown_ += interval;
         ++fired;
     }
@@ -1037,180 +1066,185 @@ void Game::meleeHit() {
     }
 }
 
+Game::ShotTrace Game::traceShot(const Vec3& origin, const Vec3& dir, float maxT, float minT, bool remotes) {
+    ShotTrace best;
+    RayHit wh;
+    if (world_.raycast(origin, dir, maxT, wh)) {
+        best.kind = ShotTrace::World;
+        best.t = wh.distance;
+        best.world = wh;
+        maxT = wh.distance;
+    }
+    // Zumbis: caixa da cabeça e do corpo (atrás da fumaça não dá para acertar).
+    for (size_t i = 0; i < zombies_.size(); ++i) {
+        const Zombie& z = zombies_[i];
+        if (z.state == ZState::Dead) continue;
+        float h = zombieHeight(z), hw = 0.36f * z.scale * z.bloat;
+        Vec3 p = z.body.position;
+        float t;
+        if (rayBox(origin, dir, p + Vec3(-hw * 0.85f, h * 0.68f, -hw * 0.85f), p + Vec3(hw * 0.85f, h + 0.05f, hw * 0.85f), t) && t > minT && t < maxT &&
+            !smokeObscures(origin, p + Vec3(0, h * 0.55f, 0))) {
+            maxT = t;
+            best = {ShotTrace::Zombie, t, static_cast<int>(i), true, {}};
+        }
+        if (rayBox(origin, dir, p + Vec3(-hw, 0, -hw), p + Vec3(hw, h * 0.68f, hw), t) && t > minT && t < maxT &&
+            !smokeObscures(origin, p + Vec3(0, h * 0.55f, 0))) {
+            maxT = t;
+            best = {ShotTrace::Zombie, t, static_cast<int>(i), false, {}};
+        }
+    }
+    // Núcleos dos ninhos de infecção.
+    int nest = -1;
+    float nestT = 0;
+    if (mode_ == Mode::Mission && damageNestRay(origin, dir, maxT, nestT, nest) && nestT > minT && !smokeObscures(origin, origin + dir * nestT)) {
+        maxT = nestT;
+        best = {ShotTrace::Nest, nestT, nest, false, {}};
+    }
+    // PvP: adversários (posições interpoladas que o jogador vê na tela).
+    if (remotes && mode_ == Mode::Pvp) {
+        for (int i = 0; i < kMaxNetPlayers; ++i) {
+            const RemotePlayer& r = remotes_[i];
+            if (!r.present || !r.alive || !net_.player(i).active) continue;
+            const float h = 1.8f, rw = 0.36f;
+            Vec3 p = r.renderPos;
+            if (smokeObscures(origin, p + Vec3(0, h * 0.55f, 0))) continue;
+            float t;
+            if (rayBox(origin, dir, p + Vec3(-rw * 0.85f, h * 0.68f, -rw * 0.85f), p + Vec3(rw * 0.85f, h + 0.05f, rw * 0.85f), t) && t > minT && t < maxT) {
+                maxT = t;
+                best = {ShotTrace::Remote, t, i, true, {}};
+            }
+            if (rayBox(origin, dir, p + Vec3(-rw, 0, -rw), p + Vec3(rw, h * 0.68f, rw), t) && t > minT && t < maxT) {
+                maxT = t;
+                best = {ShotTrace::Remote, t, i, false, {}};
+            }
+        }
+    }
+    return best;
+}
+
+// Dano e retorno visual do acerto. Devolve true se acertou um alvo (zumbi, ninho ou adversário).
+bool Game::applyShot(const ShotTrace& hit, const Vec3& origin, const Vec3& dir, int weapon, float damage) {
+    const WeaponDef& w = weaponDef(weapon);
+    const Vec3 point = origin + dir * hit.t;
+    switch (hit.kind) {
+        case ShotTrace::None:
+            return false;
+        case ShotTrace::World: {
+            const BlockInfo& info = blockInfo(hit.world.block);
+            Vec3 c = info.side < layerColors_.size() ? layerColors_[info.side] : Vec3(0.5f, 0.5f, 0.5f);
+            spawnBurst(point + Vec3(static_cast<float>(hit.world.nx), static_cast<float>(hit.world.ny), static_cast<float>(hit.world.nz)) * 0.06f,
+                       {c.x, c.y, c.z, 1.0f}, 5, 2.6f, 0.08f, false, 14.0f);
+            // No PvP a quebra é decidida pelo host após validar NE_FIRE.
+            if (mode_ != Mode::Pvp) breakTerrain(hit.world.x,hit.world.y,hit.world.z);
+            return false;
+        }
+        case ShotTrace::Nest:
+            damageNest(hit.index, damage, point);
+            break;
+        case ShotTrace::Remote: {
+            int dmg = hit.head ? 34 : 16;
+            net_.localHit(hit.index, dmg, hit.head);
+            labels_.push_back({point, dmg, hit.head ? 2 : 1, 0.8f});
+            spawnBurst(point, {0.75f, 0.12f, 0.12f, 1.0f}, hit.head ? 9 : 5, 2.2f, 0.1f, false, 14.0f);
+            emitSound(hit.head ? SND_HEADSHOT : SND_HIT, point, hit.head ? 0.9f : 0.6f);
+            break;
+        }
+        case ShotTrace::Zombie: {
+            Zombie& z = zombies_[static_cast<size_t>(hit.index)];
+            if (z.state == ZState::Dead) return false;
+            if (weapon == IT_SHOTGUN) z.body.velocity += Vec3(dir.x, 0, dir.z) * 0.9f;
+            damageZombie(z, damage * (hit.head ? w.headshot * config_.headshotMul : 1.0f), hit.head, dir, point);
+            break;
+        }
+    }
+    ++hits_;
+    hitMark_ = 0.18f;
+    headshotMark_ = hit.head;
+    return true;
+}
+
+// Hitscan do template: um raio exato da mira até HitscanRange, sem dispersão nem recuo de câmera.
 void Game::fireShot() {
     const int weapon = weaponId();
     const WeaponDef& w = weaponDef(weapon);
     --ammo_;
     ++shots_;
-    Vec3 f = camForward_;
-    Vec3 right = normalize(cross(f, Vec3(0, 1, 0)));
-    Vec3 up = cross(right, f);
-    float moving = std::min(1.0f, lengthXZ(player_.velocity) / kPlayerSpeed);
-    float spread = lerpf(w.spreadHip, w.spreadAim, aimBlend_) + bloom_ + moving * 0.008f;
-    bool boosted = damageBoost_ > 0;
-    float power = config_.power * config_.boostDamage * (boosted ? 1.5f : 1.0f);
-    float headMul = w.headshot * config_.headshotMul;
-    bool anyHit = false, anyHead = false;
+    const Vec3 f = camForward_;
+    Vec3 dir = f;
+    if (config_.aimAssist && assistTarget_ >= 0) {
+        const Zombie& z = zombies_[static_cast<size_t>(assistTarget_)];
+        Vec3 chest = z.body.position + Vec3(0, zombieHeight(z) * 0.6f, 0);
+        dir = normalize(lerp(dir, normalize(chest - camPos_), 0.6f));
+    }
+    const bool boosted = damageBoost_ > 0;
+    const float power = config_.power * config_.boostDamage * (boosted ? 1.5f : 1.0f);
+    ShotTrace hit = traceShot(camPos_, dir, w.range, camDistance_ * 0.7f, true);
+    const float endT = hit.kind == ShotTrace::None ? w.range : hit.t;
+    Vec3 hitPoint = camPos_ + dir * endT;
+    if (mode_ == Mode::Pvp) net_.localFire(muzzlePos_, hitPoint);
     Vec3 tracerColor = boosted ? Vec3(1.0f, 0.55f, 0.2f) : Vec3(w.tracerR, w.tracerG, w.tracerB);
+    Tracer tracer{muzzlePos_, hitPoint, 0.06f};
+    tracer.color = {tracerColor.x, tracerColor.y, tracerColor.z, 1.0f};
+    tracers_.push_back(tracer);
+    applyShot(hit, camPos_, dir, weapon, w.damage * power);
 
-    for (int pellet = 0; pellet < w.pellets; ++pellet) {
-        float ang = rng_.range(0, kTwoPi), rad = std::sqrt(rng_.uniform()) * spread;
-        Vec3 dir = normalize(f + right * (std::cos(ang) * rad) + up * (std::sin(ang) * rad));
-        if (config_.aimAssist && assistTarget_ >= 0 && w.pellets == 1) {
-            const Zombie& z = zombies_[static_cast<size_t>(assistTarget_)];
-            Vec3 chest = z.body.position + Vec3(0, zombieHeight(z) * 0.6f, 0);
-            dir = normalize(lerp(dir, normalize(chest - camPos_), 0.6f));
-        }
-
-        RayHit wh;
-        float maxT = w.range;
-        bool worldHit = world_.raycast(camPos_, dir, maxT, wh);
-        if (worldHit) maxT = wh.distance;
-        float minT = camDistance_ * 0.7f;
-        // Zumbis atingidos ao longo do raio, do mais próximo ao mais longe
-        // (o rifle de precisão e a metralhadora atravessam alguns).
-        struct Hit {
-            float t;
-            int index;
-            bool head;
-        };
-        Hit hits[8];
-        int hitCount = 0;
-        for (size_t i = 0; i < zombies_.size(); ++i) {
-            const Zombie& z = zombies_[i];
-            if (z.state == ZState::Dead) continue;
-            float h = zombieHeight(z), hw = 0.36f * z.scale * z.bloat;
-            Vec3 p = z.body.position;
-            if (smokeObscures(camPos_, p + Vec3(0, h * 0.55f, 0))) continue;
-            float t, best = 1e9f;
-            bool head = false;
-            if (rayBox(camPos_, dir, p + Vec3(-hw * 0.85f, h * 0.68f, -hw * 0.85f), p + Vec3(hw * 0.85f, h + 0.05f, hw * 0.85f), t) && t > minT && t < maxT) {
-                best = t;
-                head = true;
-            }
-            if (rayBox(camPos_, dir, p + Vec3(-hw, 0, -hw), p + Vec3(hw, h * 0.68f, hw), t) && t > minT && t < maxT && t < best) {
-                best = t;
-                head = false;
-            }
-            if (best > maxT) continue;
-            Hit hit{best, static_cast<int>(i), head};
-            int k = std::min(hitCount, 7);
-            while (k > 0 && hits[k - 1].t > hit.t) {
-                hits[k] = hits[k - 1];
-                --k;
-            }
-            hits[k] = hit;
-            hitCount = std::min(8, hitCount + 1);
-        }
-        const int maxTargets = 1 + w.pierce;
-        const int targets = std::min(hitCount, maxTargets);
-        float endT = targets > 0 ? hits[targets - 1].t : maxT;
-        if (hitCount >= maxTargets) worldHit = false;
-        // Núcleos dos ninhos de infecção.
-        int nestHit = -1;
-        float nestT = 0;
-        float nestLimit = hitCount > 0 ? hits[0].t : maxT;
-        if (mode_ == Mode::Mission && damageNestRay(camPos_, dir, nestLimit, nestT, nestHit) && nestT > minT) {
-            if (!smokeObscures(camPos_, camPos_ + dir * nestT)) {
-                hitCount = 0;
-                endT = nestT;
-                worldHit = false;
-            } else {
-                nestHit = -1;
-            }
-        } else {
-            nestHit = -1;
-        }
-        // PvP: adversários (posições interpoladas que o jogador vê na tela).
-        int bestRemote = -1;
-        bool remoteHead = false;
-        if (mode_ == Mode::Pvp) {
-            float bestT = hitCount > 0 ? hits[0].t : maxT;
-            for (int i = 0; i < kMaxNetPlayers; ++i) {
-                const RemotePlayer& r = remotes_[i];
-                if (!r.present || !r.alive || !net_.player(i).active) continue;
-                const float h = 1.8f, rw = 0.36f;
-                Vec3 p = r.renderPos;
-                if (smokeObscures(camPos_, p + Vec3(0, h * 0.55f, 0))) continue;
-                float t;
-                if (rayBox(camPos_, dir, p + Vec3(-rw * 0.85f, h * 0.68f, -rw * 0.85f), p + Vec3(rw * 0.85f, h + 0.05f, rw * 0.85f), t) && t > minT && t < bestT) {
-                    bestT = t;
-                    bestRemote = i;
-                    remoteHead = true;
-                }
-                if (rayBox(camPos_, dir, p + Vec3(-rw, 0, -rw), p + Vec3(rw, h * 0.68f, rw), t) && t > minT && t < bestT) {
-                    bestT = t;
-                    bestRemote = i;
-                    remoteHead = false;
-                }
-            }
-            if (bestRemote >= 0) {
-                endT = bestT;
-                hitCount = 0;
-                worldHit = false;
-            }
-        }
-        Vec3 hitPoint = camPos_ + dir * endT;
-        if (mode_ == Mode::Pvp) net_.localFire(muzzlePos_, hitPoint);
-        if (bestRemote >= 0) {
-            int dmg = remoteHead ? 34 : 16;
-            net_.localHit(bestRemote, dmg, remoteHead);
-            anyHit = true;
-            anyHead = anyHead || remoteHead;
-            labels_.push_back({hitPoint, dmg, remoteHead ? 2 : 1, 0.8f});
-            spawnBurst(hitPoint, {0.75f, 0.12f, 0.12f, 1.0f}, remoteHead ? 9 : 5, 2.2f, 0.1f, false, 14.0f);
-            emitSound(remoteHead ? SND_HEADSHOT : SND_HIT, hitPoint, remoteHead ? 0.9f : 0.6f);
-        }
-        Tracer tracer{muzzlePos_, hitPoint, w.pellets > 1 ? 0.05f : 0.06f};
-        tracer.color = {tracerColor.x, tracerColor.y, tracerColor.z, 1.0f};
-        tracers_.push_back(tracer);
-        if (nestHit >= 0) {
-            anyHit = true;
-            damageNest(nestHit, w.damage * power, hitPoint);
-        }
-        for (int k = 0; k < std::min(hitCount, maxTargets); ++k) {
-            Zombie& z = zombies_[static_cast<size_t>(hits[k].index)];
-            if (z.state == ZState::Dead) continue;
-            float falloff = w.pellets > 1 ? clampf(1.0f - (hits[k].t - 6.0f) / w.range, 0.3f, 1.0f) : 1.0f;
-            float pierceLoss = 1.0f - 0.2f * static_cast<float>(k);
-            float dmg = w.damage * power * falloff * pierceLoss * (hits[k].head ? headMul : 1.0f);
-            anyHit = true;
-            anyHead = anyHead || hits[k].head;
-            Vec3 hp = camPos_ + dir * hits[k].t;
-            if (weapon == IT_SHOTGUN) z.body.velocity += Vec3(dir.x, 0, dir.z) * 0.9f;
-            damageZombie(z, dmg, hits[k].head, dir, hp);
-        }
-        if (worldHit && hitCount == 0 && nestHit < 0 && bestRemote < 0) {
-            const BlockInfo& info = blockInfo(wh.block);
-            Vec3 c = info.side < layerColors_.size() ? layerColors_[info.side] : Vec3(0.5f, 0.5f, 0.5f);
-            spawnBurst(hitPoint + Vec3(static_cast<float>(wh.nx), static_cast<float>(wh.ny), static_cast<float>(wh.nz)) * 0.06f,
-                       {c.x, c.y, c.z, 1.0f}, w.pellets > 1 ? 2 : 5, 2.6f, 0.08f, false, 14.0f);
-        }
-    }
-    if (anyHit) {
-        ++hits_;
-        hitMark_ = 0.18f;
-        headshotMark_ = anyHead;
-    }
-    const bool heavy = weapon == IT_SHOTGUN || weapon == IT_SNIPER;
-    muzzleTimer_ = heavy ? 0.07f : 0.05f;
-    weaponKick_ = std::max(weaponKick_, weapon == IT_SNIPER ? 1.0f : (weapon == IT_PISTOL ? 0.72f : 0.5f));
+    muzzleTimer_ = 0.05f;
+    weaponKick_ = std::max(weaponKick_, 0.5f);
     for (int i = 0; i < 2; ++i) {
         FxParticle p;
         p.position = muzzlePos_ + f * (0.08f * i);
         p.velocity = f * 1.5f;
         p.color = boosted ? Vec4(1.0f, 0.6f, 0.25f, 1.0f) : Vec4(1.0f, 0.82f, 0.4f, 1.0f);
-        p.size = (0.32f - i * 0.1f) * (heavy ? 1.5f : (weapon == IT_PISTOL ? 0.75f : 1.0f));
+        p.size = 0.32f - i * 0.1f;
         p.life = p.maxLife = 0.05f;
         p.additive = true;
         particles_.push_back(p);
     }
-    bloom_ = std::min(0.045f, bloom_ + w.bloomPerShot * (1.0f - aimBlend_ * 0.5f));
-    recoil_ += w.recoil;
-    camPitch_ += w.recoil * 0.3f;
-    if (heavy) shake_ = std::max(shake_, 0.25f);
-    emitSound(w.sound, muzzlePos_, weapon == IT_SNIPER ? 0.95f : 0.75f);
-    alertNear(player_.position, weapon == IT_SNIPER ? 45.0f : 30.0f);
+    emitSound(w.sound, muzzlePos_, 0.75f);
+    alertNear(player_.position, 30.0f);
+}
+
+// Projectile do template: a bala sai do cano rumo ao ponto que a mira acerta e voa reto a ProjectileSpeed.
+void Game::fireProjectile() {
+    const int weapon = weaponId();
+    const WeaponDef& w = weaponDef(weapon);
+    --ammo_;
+    ++shots_;
+    const bool boosted = damageBoost_ > 0;
+    Vec3 target = camPos_ + camForward_ * w.range;
+    ShotTrace aim = traceShot(camPos_, camForward_, w.range, camDistance_ * 0.7f, false);
+    if (aim.kind != ShotTrace::None) target = camPos_ + camForward_ * aim.t;
+    Projectile p;
+    p.kind = ProjectileKind::Bullet;
+    p.friendly = true;
+    p.weapon = weapon;
+    p.pos = muzzlePos_;
+    Vec3 to = target - p.pos;
+    p.vel = (length(to) > 0.2f ? normalize(to) : camForward_) * w.projectileSpeed;
+    p.gravity = 0.0f;
+    p.target = target;
+    p.life = w.range / std::max(1.0f, w.projectileSpeed);
+    p.radius = w.behavior == ProjectileBehavior::AreaOfEffect ? w.aoeRadius : 0.0f;
+    p.damage = w.damage * config_.power * config_.boostDamage * (boosted ? 1.5f : 1.0f);
+    projectiles_.push_back(p);
+
+    const Vec3 f = camForward_;
+    muzzleTimer_ = 0.07f;
+    weaponKick_ = std::max(weaponKick_, 0.9f);
+    shake_ = std::max(shake_, 0.25f);
+    for (int i = 0; i < 2; ++i) {
+        FxParticle fx;
+        fx.position = muzzlePos_ + f * (0.08f * i);
+        fx.velocity = f * 1.5f;
+        fx.color = boosted ? Vec4(1.0f, 0.6f, 0.25f, 1.0f) : Vec4(1.0f, 0.82f, 0.4f, 1.0f);
+        fx.size = (0.32f - i * 0.1f) * 1.5f;
+        fx.life = fx.maxLife = 0.07f;
+        fx.additive = true;
+        particles_.push_back(fx);
+    }
+    spawnBurst(muzzlePos_, {0.8f, 0.8f, 0.8f, 0.5f}, 6, 1.6f, 0.2f, false, -1.0f);
+    emitSound(w.sound, muzzlePos_, 0.85f);
+    alertNear(player_.position, 30.0f);
 }
 
 void Game::damagePlayer(float amount, const Vec3& from) {
@@ -1344,7 +1378,7 @@ void Game::updatePickups(float dt) {
                 ammo_ = magazineFor(weaponId());
                 // Com reserva limitada (contrato) o suprimento só completa o pente atual: não repõe a reserva nem as outras armas.
                 if (!ammoLimited()) {
-                    for (int w = IT_RIFLE; w <= IT_LAUNCHER; ++w) clipsInit_[w] = false;
+                    for (bool& init : clipsInit_) init = false;
                     clipsInit_[weaponId()] = true;
                 }
                 clips_[weaponId()] = ammo_;
@@ -1592,16 +1626,22 @@ void Game::posePlayer(Pose& pose, bool armed) {
     if (armedW <= 0.01f) return;
     float pitch = playing ? camPitch_ : -0.3f;
     const int weapon = playing ? weaponId() : IT_RIFLE;
-    poseArmedBlend(pose, m, pitch, playing, 0.45f * (playing ? crouchBlend_ : 0.0f), armedW, weapon);
+    // Herói voxel: mira, coice, troca e recarga movem a arma; as mãos seguem pela IK (holdGun).
+    const bool humanoid = m.nodeIndex("RightForeArm") >= 0;
+    ikAim_ = playing ? gunAim_ : 0.0f;
+    ikTwist_ = currentClip == m.clipIndex("aim-idle") ? 0.0f : 1.0f;
+    ikKick_ = playing ? weaponKick_ : 0.0f;
+    ikDip_ = playing && swapTimer_ > 0 ? std::sin(clampf(swapTimer_ / 0.35f, 0.0f, 1.0f) * kPi) * 0.6f : 0.0f;
+    ikReload_ = playing && reloadTimer_ > 0 ? 1.0f - reloadTimer_ / std::max(0.01f, reloadDuration_) : -1.0f;
+    if (!(humanoid && meleeTime_ >= 0)) poseArmedBlend(pose, m, pitch, playing, 0.45f * (playing ? crouchBlend_ : 0.0f), armedW, weapon);
     if (!playing) return;
     int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left");
-    if (reloadTimer_ > 0) {
+    if (reloadTimer_ > 0 && !humanoid) {
         // Recarga: a arma desce e gira, a mão esquerda vai ao pente e volta.
         float k = 1.0f - reloadTimer_ / std::max(0.01f, reloadDuration_);
         float dip = std::sin(k * kPi);
-        const float reloadTurn = weapon == IT_PISTOL ? 0.45f : (weapon == IT_SNIPER ? 0.2f : 0.0f);
-        if (armR >= 0) pose.r[armR] = Quat::axisAngle({0, 0, 1}, -0.35f * dip) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - pitch * 0.85f + 0.75f * dip + reloadTurn * dip);
-        if (armL >= 0) pose.r[armL] = Quat::axisAngle({0, 1, 0}, -0.3f - reloadTurn * 0.2f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.25f - 0.5f * std::sin(k * kTwoPi));
+        if (armR >= 0) pose.r[armR] = Quat::axisAngle({0, 0, 1}, -0.35f * dip) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - pitch * 0.85f + 0.75f * dip);
+        if (armL >= 0) pose.r[armL] = Quat::axisAngle({0, 1, 0}, -0.3f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.25f - 0.5f * std::sin(k * kTwoPi));
     }
     if (meleeTime_ >= 0 && armR >= 0) {
         // Golpe de faca: o braço sobe e corta para a frente.
@@ -1621,32 +1661,22 @@ void Game::poseArmed(Pose& pose, const CharacterModel& m, float pitch, bool move
 // Braços apontando a arma para onde a câmera mira. `lean` compensa o tronco inclinado (agachado);
 // `weight` mistura com a pose da animação (sacar/guardar a arma ao parar/começar a correr).
 void Game::poseArmedBlend(Pose& pose, const CharacterModel& m, float pitch, bool moveHead, float lean, float weight, int weapon) {
-    int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left"), head = m.nodeIndex("head"), torso = m.nodeIndex("torso");
+    if (m.nodeIndex("RightForeArm") >= 0) {
+        holdGun(pose, m, pitch, moveHead, weight, weapon);
+        return;
+    }
+    int armR = m.nodeIndex("arm-right"), armL = m.nodeIndex("arm-left"), head = m.nodeIndex("head");
     float armPitch = pitch * 0.85f + lean;
     Quat aimR = Quat::axisAngle({0, 1, 0}, 0.08f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch);
     Quat aimL = Quat::axisAngle({0, 1, 0}, -0.5f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch + 0.1f);
-    if (weapon == IT_PISTOL) {
-        // Pistola em uma mão: a esquerda fica recolhida e livre para o equilíbrio.
-        aimR = Quat::axisAngle({0, 1, 0}, 0.16f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch);
-        aimL = Quat::axisAngle({0, 1, 0}, -0.92f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.34f - armPitch * 0.35f) * Quat::axisAngle({0, 0, 1}, 0.22f);
-    } else if (weapon == IT_SNIPER) {
-        // Apoio longo do rifle de precisão, cotovelo esquerdo mais à frente e cabeça baixa.
-        aimR = Quat::axisAngle({0, 1, 0}, 0.03f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch + 0.04f);
-        aimL = Quat::axisAngle({0, 1, 0}, -0.3f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.5f - armPitch + 0.18f);
-    } else if (weapon == IT_FLAMER) {
-        // O lança-chamas é pesado: as duas mãos sustentam a frente do corpo.
-        aimR = Quat::axisAngle({0, 1, 0}, 0.12f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.43f - armPitch);
-        aimL = Quat::axisAngle({0, 1, 0}, -0.36f) * Quat::axisAngle({1, 0, 0}, -kPi * 0.43f - armPitch + 0.08f);
-    }
     float move = clampf(lengthXZ(player_.velocity) / 6.0f, 0.0f, 1.0f);
-    float sway = std::sin(time_ * 9.0f) * move * (weapon == IT_SNIPER ? 0.012f : 0.035f);
-    float kick = weaponKick_ * (weapon == IT_SNIPER ? 0.18f : (weapon == IT_PISTOL ? 0.14f : 0.1f));
+    float sway = std::sin(time_ * 9.0f) * move * 0.035f;
+    float kick = weaponKick_ * (weapon == IT_SHOTGUN ? 0.14f : 0.1f);
     aimR = Quat::axisAngle({0, 0, 1}, sway) * Quat::axisAngle({1, 0, 0}, kick) * aimR;
     aimL = Quat::axisAngle({0, 0, 1}, -sway * 0.55f) * aimL;
     if (armR >= 0) pose.r[armR] = slerp(pose.r[armR], aimR, weight);
     if (armL >= 0) pose.r[armL] = slerp(pose.r[armL], aimL, weight);
     if (head >= 0 && moveHead) pose.r[head] = slerp(pose.r[head], Quat::axisAngle({1, 0, 0}, -pitch * 0.5f - lean), weight);
-    if (torso >= 0 && weapon == IT_SNIPER) pose.r[torso] = slerp(pose.r[torso], pose.r[torso] * Quat::axisAngle({1, 0, 0}, 0.04f), weight);
 }
 
 // Arma pendurada nas costas (correndo): cano para cima, na diagonal.
@@ -1658,29 +1688,169 @@ void Game::addWeaponOnBack(const CharacterDraw& draw, int torso, int weapon) {
 }
 
 void Game::addThrowableModel(const CharacterDraw& draw, int armR, int item) {
-    Mat4 hand = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -0.82f, 0.05f}) * Mat4::rotationX(kPi * 0.5f);
-    auto part = [&](const Vec3& center, const Vec3& size, const Vec4& color) {
-        BoxDraw box;
-        box.world = hand * Mat4::translation(center) * Mat4::scale(size);
-        box.color = color;
-        scene_.boxes.push_back(box);
-    };
-    if (item == IT_SMOKE) {
-        part({0, 0, 0.02f}, {0.16f, 0.26f, 0.16f}, {0.62f, 0.68f, 0.72f, 1});
-        part({0, 0.14f, 0.02f}, {0.12f, 0.05f, 0.12f}, {0.28f, 0.34f, 0.38f, 1});
-        part({0, -0.11f, 0.02f}, {0.18f, 0.04f, 0.18f}, {0.82f, 0.85f, 0.87f, 1});
-    } else if (item == IT_MOLOTOV) {
-        part({0, 0, 0.02f}, {0.12f, 0.26f, 0.12f}, {0.32f, 0.48f, 0.22f, 1});
-        part({0, 0.15f, 0.02f}, {0.06f, 0.08f, 0.06f}, {1.0f, 0.58f, 0.18f, 1});
-    } else {
-        part({0, 0, 0.02f}, {0.19f, 0.22f, 0.19f}, {0.3f, 0.37f, 0.2f, 1});
-        part({0, 0.13f, 0.02f}, {0.08f, 0.05f, 0.08f}, {0.72f, 0.74f, 0.74f, 1});
-    }
+    const Mat4 hand = handFrame(draw, armR, 0.82f);
+    addVoxelItem(throwableVoxel(item), hand);
 }
 
 void Game::addRifle(const CharacterDraw& draw, int armR, Vec3* muzzle) {
     Mat4 frame = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -0.9f, 0.0f}) * Mat4::rotationX(kPi * 0.5f);
+    if (gunHold_.valid) frame = draw.world * gunHold_.frame;
+    gunHold_.valid = false;
     addWeaponParts(frame, IT_RIFLE, muzzle);
+}
+
+namespace {
+
+Quat conjugate(const Quat& q) { return {-q.x, -q.y, -q.z, q.w}; }
+Vec3 rotateVec(const Quat& q, const Vec3& v) { return Mat4::fromQuat(q).transformDir(v); }
+
+// Quaternion da base ortonormal com colunas x, y, z.
+Quat quatFromBasis(const Vec3& x, const Vec3& y, const Vec3& z) {
+    const float tr = x.x + y.y + z.z;
+    Quat q;
+    if (tr > 0) {
+        const float s = std::sqrt(tr + 1.0f) * 2.0f;
+        q = {(y.z - z.y) / s, (z.x - x.z) / s, (x.y - y.x) / s, 0.25f * s};
+    } else if (x.x > y.y && x.x > z.z) {
+        const float s = std::sqrt(1.0f + x.x - y.y - z.z) * 2.0f;
+        q = {0.25f * s, (y.x + x.y) / s, (z.x + x.z) / s, (y.z - z.y) / s};
+    } else if (y.y > z.z) {
+        const float s = std::sqrt(1.0f + y.y - x.x - z.z) * 2.0f;
+        q = {(y.x + x.y) / s, 0.25f * s, (z.y + y.z) / s, (z.x - x.z) / s};
+    } else {
+        const float s = std::sqrt(1.0f + z.z - x.x - y.y) * 2.0f;
+        q = {(z.x + x.z) / s, (z.y + y.z) / s, 0.25f * s, (x.y - y.x) / s};
+    }
+    return normalize(q);
+}
+
+// Rotação no espaço do modelo de um osso do braço (repouso apontando para baixo, frente em +Z) até `dir`,
+// com a frente do osso virada para `front`.
+Quat segmentRotation(const Vec3& dir, const Vec3& front) {
+    const Vec3 d = normalize(dir);
+    const Vec3 u = normalize(front - d * dot(front, d));
+    const Vec3 w = cross(d, u);
+    return quatFromBasis(w * -1.0f, d * -1.0f, u);
+}
+
+Quat globalRotation(const Pose& pose, const CharacterModel& m, int node) {
+    Quat q;
+    for (int n = node; n >= 0; n = m.nodes()[static_cast<size_t>(n)].parent) q = pose.r[static_cast<size_t>(n)] * q;
+    return q;
+}
+
+// Mão em repouso: dedos para baixo (-Y), palma para o corpo, polegar para a frente (+Z). Na moldura da arma
+// (z = cano, y = cima, x = lado esquerdo): a direita fecha na empunhadura com o polegar por cima; a esquerda
+// segura o guarda-mão por baixo, dedos para o lado direito e polegar ao longo do cano.
+const Quat kHandOnGrip = quatFromBasis({1, 0, 0}, {0, 0, -1}, {0, 1, 0});
+const Quat kHandOnForegrip = quatFromBasis({0, -1, 0}, {1, 0, 0}, {0, 0, 1});
+
+}  // namespace
+
+// Herói voxel com as duas mãos na arma (como na página de teste tools/personagem-voxel): a arma fica presa ao
+// peito — pronta, atravessada no corpo com o cano para baixo e para a esquerda, ou com a coronha no ombro
+// apontando para onde a câmera mira — e os braços alcançam empunhadura e guarda-mão por IK de dois ossos.
+void Game::holdGun(Pose& pose, const CharacterModel& m, float pitch, bool moveHead, float weight, int weapon) {
+    gunHold_.valid = false;
+    const int spine = m.nodeIndex("Spine"), spine1 = m.nodeIndex("Spine1"), spine2 = m.nodeIndex("Spine2");
+    const int neck = m.nodeIndex("Neck"), head = m.nodeIndex("Head");
+    const int armR = m.nodeIndex("RightArm"), foreR = m.nodeIndex("RightForeArm"), handR = m.nodeIndex("RightHand");
+    const int armL = m.nodeIndex("LeftArm"), foreL = m.nodeIndex("LeftForeArm"), handL = m.nodeIndex("LeftHand");
+    if (weight <= 0.01f || spine2 < 0 || handR < 0 || handL < 0 || foreR < 0 || foreL < 0 || armR < 0 || armL < 0) return;
+    const float aim = clampf(ikAim_, 0.0f, 1.0f);
+    const float twist = aim * ikTwist_;
+    const float px = kBlockyPixel;
+    const VoxelItem item = weapon == IT_SHOTGUN ? VoxelItem::Shotgun : VoxelItem::Rifle;
+    auto ry = [](float a) { return Quat::axisAngle({0, 1, 0}, a); };
+    auto rx = [](float a) { return Quat::axisAngle({1, 0, 0}, a); };
+    auto rz = [](float a) { return Quat::axisAngle({0, 0, 1}, a); };
+    // Mirando: tronco de lado (ombro esquerdo à frente) e a cabeça volta para olhar pela alça de mira.
+    if (twist > 0.01f) {
+        if (spine >= 0) pose.r[static_cast<size_t>(spine)] = pose.r[static_cast<size_t>(spine)] * ry(-0.30f * twist);
+        if (spine1 >= 0) pose.r[static_cast<size_t>(spine1)] = pose.r[static_cast<size_t>(spine1)] * ry(-0.22f * twist);
+        pose.r[static_cast<size_t>(spine2)] = pose.r[static_cast<size_t>(spine2)] * ry(-0.24f * twist);
+        if (neck >= 0) pose.r[static_cast<size_t>(neck)] = pose.r[static_cast<size_t>(neck)] * ry(0.34f * twist) * rx(0.1f * twist);
+        if (head >= 0) pose.r[static_cast<size_t>(head)] = pose.r[static_cast<size_t>(head)] * ry(0.4f * twist) * rx(0.18f * twist);
+    }
+    if (moveHead && head >= 0) pose.r[static_cast<size_t>(head)] = pose.r[static_cast<size_t>(head)] * rx(-pitch * 0.5f);
+
+    m.globals(pose, ikGlobals_);
+    const Vec3 chest = ikGlobals_[static_cast<size_t>(spine2)].transformPoint({0, 0, 0});
+    const Quat chestQ = globalRotation(pose, m, spine2);
+    auto gunFrame = [&](const Vec3& dir, const Vec3& upHint, const Vec3& anchor, const Vec3& local, Quat& q, Vec3& origin) {
+        const Vec3 z = normalize(dir);
+        const Vec3 y = normalize(upHint - z * dot(upHint, z));
+        q = quatFromBasis(cross(y, z), y, z);
+        origin = anchor - rotateVec(q, local);
+    };
+    Quat readyQ, aimQ;
+    Vec3 readyO, aimO;
+    gunFrame(rotateVec(chestQ, {0.9f, -0.36f, 0.25f}), rotateVec(chestQ, {0.0f, 1.0f, 0.55f}), chest + rotateVec(chestQ, Vec3(-2.0f, -3.5f, 3.4f) * px),
+             voxelGrip(item), readyQ, readyO);
+    const float p = clampf(pitch, -1.2f, 1.2f);
+    gunFrame({0.0f, std::sin(p), std::cos(p)}, {0.0f, std::cos(p), -std::sin(p)}, chest + rotateVec(chestQ, Vec3(-1.7f, 2.7f, 0.3f) * px),
+             voxelButt(item), aimQ, aimO);
+    Quat gq = slerp(readyQ, aimQ, aim);
+    Vec3 go = lerp(readyO, aimO, aim);
+    const Vec3 gx = rotateVec(gq, {1, 0, 0}), gz = rotateVec(gq, {0, 0, 1});
+    // Coice (o cano sobe e a arma recua), troca de arma (desce) e recarga (inclina e baixa).
+    const float kick = ikKick_ * (weapon == IT_SHOTGUN ? 0.16f : 0.1f);
+    const float reload = ikReload_ >= 0 ? std::sin(clampf(ikReload_, 0.0f, 1.0f) * kPi) : 0.0f;
+    gq = Quat::axisAngle(gz, -0.55f * reload) * Quat::axisAngle(gx, ikDip_ + 0.35f * reload - kick) * gq;
+    go = go - gz * (kick * 0.3f) - Vec3(0.0f, 1.0f, 0.0f) * (reload * 1.4f * px);
+    const Mat4 gunM = Mat4::trs(go, gq, {1, 1, 1});
+    const Vec3 gripW = gunM.transformPoint(voxelGrip(item));
+    Vec3 foreW = gunM.transformPoint(voxelForegrip(item));
+    if (ikReload_ >= 0) {
+        // A mão esquerda vai ao carregador (entre a empunhadura e o guarda-mão, embaixo) e volta.
+        const Vec3 mag = gunM.transformPoint(lerp(voxelGrip(item), voxelForegrip(item), 0.55f) + Vec3(0.0f, -0.12f, 0.0f));
+        foreW = lerp(foreW, mag, std::max(0.0f, std::sin(clampf(ikReload_, 0.0f, 1.0f) * kTwoPi)));
+    }
+
+    auto solve = [&](int arm, int fore, int hand, const Vec3& contact, const Quat& handQ, const Vec3& palm, const Vec3& poleModel) {
+        const Quat orig[3] = {pose.r[static_cast<size_t>(arm)], pose.r[static_cast<size_t>(fore)], pose.r[static_cast<size_t>(hand)]};
+        const Vec3 wrist = contact - rotateVec(handQ, palm);
+        const Vec3 S = ikGlobals_[static_cast<size_t>(arm)].transformPoint({0, 0, 0});
+        const float a = length(pose.t[static_cast<size_t>(fore)]), b = length(pose.t[static_cast<size_t>(hand)]);
+        const Vec3 toT = wrist - S;
+        const float dist = clampf(length(toT), 0.01f, a + b - 0.001f);
+        const Vec3 dir = normalize(toT);
+        const float cosA = clampf((a * a + dist * dist - b * b) / (2.0f * a * dist), -1.0f, 1.0f);
+        const Vec3 pole = rotateVec(chestQ, poleModel);
+        const Vec3 pn = normalize(pole - dir * dot(pole, dir));
+        const Vec3 E = S + dir * (a * cosA) + pn * (a * std::sqrt(std::max(0.0f, 1.0f - cosA * cosA)));
+        const Vec3 thumb = rotateVec(handQ, {0, 0, 1});
+        const Quat parentQ = globalRotation(pose, m, m.nodes()[static_cast<size_t>(arm)].parent);
+        const Quat armW = segmentRotation(E - S, thumb);
+        const Quat foreW2 = segmentRotation(wrist - E, thumb);
+        pose.r[static_cast<size_t>(arm)] = slerp(orig[0], conjugate(parentQ) * armW, weight);
+        pose.r[static_cast<size_t>(fore)] = slerp(orig[1], conjugate(armW) * foreW2, weight);
+        pose.r[static_cast<size_t>(hand)] = slerp(orig[2], conjugate(foreW2) * handQ, weight);
+    };
+    solve(armR, foreR, handR, gripW, gq * kHandOnGrip, Vec3(0.95f, -1.55f, 0.0f) * px, lerp(Vec3(-1.0f, -0.9f, -0.6f), Vec3(-1.0f, -0.7f, -0.4f), aim));
+    solve(armL, foreL, handL, foreW, gq * kHandOnForegrip, Vec3(-0.75f, -1.45f, 0.1f) * px, lerp(Vec3(1.0f, -1.0f, -0.3f), Vec3(0.3f, -1.0f, -0.2f), aim));
+
+    // Dedos fechados na empunhadura (o indicador direito fica no gatilho) e no guarda-mão.
+    static const char* kFingerNames[] = {"Index", "Middle", "Ring", "Pinky"};
+    for (int side = 0; side < 2; ++side) {
+        const std::string hand = side == 0 ? "RightHand" : "LeftHand";
+        const float sign = side == 0 ? 1.0f : -1.0f;
+        for (int f = 0; f < 4; ++f) {
+            const bool trigger = side == 0 && f == 0;
+            const float amount[3] = {trigger ? 0.35f : 1.0f, trigger ? 0.55f : 1.15f, trigger ? 0.35f : 0.75f};
+            for (int i = 0; i < 3; ++i) {
+                const int n = m.nodeIndex(hand + kFingerNames[f] + std::to_string(i + 1));
+                if (n >= 0) pose.r[static_cast<size_t>(n)] = slerp(pose.r[static_cast<size_t>(n)], rz(sign * amount[i]), weight);
+            }
+        }
+        const float thumb[3] = {0.45f, 0.4f, 0.35f};
+        for (int i = 0; i < 3; ++i) {
+            const int n = m.nodeIndex(hand + "Thumb" + std::to_string(i + 1));
+            if (n >= 0) pose.r[static_cast<size_t>(n)] = slerp(pose.r[static_cast<size_t>(n)], ry(sign * thumb[i]), weight);
+        }
+    }
+    gunHold_.frame = gunM;
+    gunHold_.valid = weight > 0.5f;
 }
 
 void Game::buildScene() {
@@ -1690,7 +1860,7 @@ void Game::buildScene() {
     s.proj = proj_;
     s.cameraPos = camPos_;
     s.cameraForward = camForward_;
-    s.sky = theme_.sky;
+    s.sky = horizonte::cycleSky(theme_.sky,worldTime_);
     s.time = time_;
     s.focus = mode_ == Mode::Lobby ? layout_.start : player_.position;
     if (world_.streaming()) {
@@ -1703,6 +1873,10 @@ void Game::buildScene() {
     s.sky.fogStart = 1.0e6f;
     s.sky.fogEnd = 1.0e6f + 1.0f;
     s.characterCount = 0;
+    gunHold_.valid = false;
+    // Armas e projéteis em blocos entram como personagens: reserva folga antes de guardar referências a
+    // desenhos deste quadro (um emplace_back que realocasse invalidaria essas referências).
+    if (s.characters.capacity() < s.characters.size() + 64) s.characters.reserve(s.characters.size() + 64);
     s.boxes.clear();
     s.particles.clear();
     s.shadows.clear();
@@ -1716,7 +1890,7 @@ void Game::buildScene() {
     cands.clear();
     const Vec3 warm(1.0f, 0.72f, 0.42f);
     // Lanterna noturna: alta, à frente e suave (perto da cabeça ela "estourava" o personagem).
-    if (theme_.sky.night > 0.5f && mode_ != Mode::Lobby)
+    if (s.sky.night > 0.5f && mode_ != Mode::Lobby)
         s.lights.push_back({player_.position + Vec3(0, 4.6f, 0) + forwardFromYaw(camYaw_) * 2.0f, 14.0f, Vec3(0.55f, 0.53f, 0.47f)});
     for (const FlashLight& f : flashes_) {
         float a = f.life / f.maxLife;
@@ -1772,16 +1946,8 @@ void Game::buildScene() {
                 if (throwAiming_ || throwAnimTime_ < 0.18f) addThrowableModel(draw, armR, throwAiming_ ? throwableId() : throwAnimItem_);
             } else if (meleeTime_ >= 0) {
                 // Durante o golpe a mão direita segura a faca.
-                Mat4 hand = draw.world * draw.nodes[static_cast<size_t>(armR)] * Mat4::translation({0.0f, -0.85f, 0.05f}) * Mat4::rotationX(kPi * 0.5f);
-                BoxDraw grip;
-                grip.world = hand * Mat4::translation({0, 0, 0.08f}) * Mat4::scale({0.09f, 0.09f, 0.24f});
-                grip.color = {0.3f, 0.2f, 0.12f, 1};
-                s.boxes.push_back(grip);
-                BoxDraw blade;
-                blade.world = hand * Mat4::translation({0, 0.02f, 0.42f}) * Mat4::scale({0.03f, 0.13f, 0.46f});
-                blade.color = {0.85f, 0.88f, 0.92f, 1};
-                blade.emissive = 0.2f;
-                s.boxes.push_back(blade);
+                const Mat4 hand = handFrame(draw, armR, 0.85f);
+                addVoxelItem(VoxelItem::Knife, hand);
             } else if (playing && armedBlend_ < 0.5f && torsoNode >= 0) {
                 // Correndo: a arma vai para as costas e os braços balançam livres.
                 addWeaponOnBack(draw, torsoNode, weaponId());
@@ -1802,6 +1968,10 @@ void Game::buildScene() {
             bool crouched = r.alive && (r.flags & NF_CROUCH);
             if (crouched) poseCrouch(scratchPose_, r.asset->model, 1.0f, clampf(r.speed / 2.0f, 0.0f, 1.0f));
             const bool holster = (r.flags & NF_SPRINT) && !(r.flags & NF_FIRING);
+            ikAim_ = (r.flags & (NF_FIRING | NF_AIM)) ? 1.0f : 0.0f;
+            ikTwist_ = 1.0f;
+            ikKick_ = ikDip_ = 0.0f;
+            ikReload_ = -1.0f;
             if (r.alive && !holster) poseArmed(scratchPose_, r.asset->model, r.renderPitch, true);
             float flash = net_.player(i).invulnerable > 0 && std::fmod(time_, 0.3f) < 0.15f ? 0.25f : 0.0f;
             addCharacter(r.asset, r.renderPos - Vec3(0, crouched ? 0.22f : 0.0f, 0), r.renderYaw, 1.0f, scratchPose_, {1, 1, 1}, flash);
@@ -2065,9 +2235,7 @@ void Game::buildScene() {
                 s.boxes.push_back(b);
                 break;
             case ProjectileKind::Molotov:
-                b.world = Mat4::translation(p.pos) * Mat4::rotationX(p.spin) * Mat4::scale({0.14f, 0.3f, 0.14f});
-                b.color = {0.3f, 0.45f, 0.2f, 1};
-                s.boxes.push_back(b);
+                addVoxelItem(VoxelItem::Molotov, Mat4::translation(p.pos) * Mat4::rotationX(p.spin) * Mat4::scale({kThrownScale, kThrownScale, kThrownScale}));
                 s.particles.push_back({p.pos + Vec3(0, 0.15f, 0), {1.0f, 0.6f, 0.2f, 0.9f}, 0.55f, true});
                 if (s.lights.size() < 8) s.lights.push_back({p.pos, 6.0f, Vec3(1.0f, 0.55f, 0.2f)});
                 s.decals.push_back({p.target, 2.6f, {1.0f, 0.45f, 0.1f, 0.85f}, 1});
@@ -2078,26 +2246,37 @@ void Game::buildScene() {
                 s.decals.push_back({p.target, 2.0f, {0.5f, 1.0f, 0.2f, 0.8f}, 1});
                 break;
             case ProjectileKind::Grenade:
-                b.world = Mat4::translation(p.pos) * Mat4::rotationX(p.spin) * Mat4::rotationZ(p.spin * 0.6f) * Mat4::scale({0.22f, 0.26f, 0.22f});
-                b.color = {0.28f, 0.34f, 0.18f, 1};
-                s.boxes.push_back(b);
+                addVoxelItem(VoxelItem::Grenade, Mat4::translation(p.pos) * Mat4::rotationX(p.spin) * Mat4::rotationZ(p.spin * 0.6f) *
+                                                     Mat4::scale({kThrownScale, kThrownScale, kThrownScale}));
                 s.decals.push_back({p.target, 5.0f, {1.0f, 0.85f, 0.3f, 0.55f}, 1});
                 break;
             case ProjectileKind::Smoke:
-                b.world = Mat4::translation(p.pos) * Mat4::rotationX(p.spin) * Mat4::rotationZ(p.spin * 0.6f) * Mat4::scale({0.2f, 0.32f, 0.2f});
-                b.color = {0.58f, 0.64f, 0.68f, 1};
-                s.boxes.push_back(b);
+                addVoxelItem(VoxelItem::Smoke, Mat4::translation(p.pos) * Mat4::rotationX(p.spin) * Mat4::rotationZ(p.spin * 0.6f) *
+                                                   Mat4::scale({kThrownScale, kThrownScale, kThrownScale}));
                 s.particles.push_back({p.pos + Vec3(0, 0.18f, 0), {0.75f, 0.84f, 0.9f, 0.65f}, 0.38f, false});
                 s.decals.push_back({p.target, 5.2f, {0.65f, 0.76f, 0.82f, 0.48f}, 1});
                 break;
+            case ProjectileKind::Bullet: {
+                // Bala luminosa alongada no sentido do voo, com rastro e luz.
+                Vec3 d = normalize(p.vel);
+                float yaw = std::atan2(d.x, d.z);
+                float pitch = -std::asin(clampf(d.y, -1, 1));
+                const WeaponDef& w = weaponDef(p.weapon);
+                b.world = Mat4::translation(p.pos) * Mat4::rotationY(yaw) * Mat4::rotationX(pitch) * Mat4::scale({0.09f, 0.09f, 0.42f});
+                b.color = {w.tracerR, w.tracerG, w.tracerB, 1};
+                b.emissive = 1.0f;
+                s.boxes.push_back(b);
+                s.particles.push_back({p.pos - d * 0.35f, {1.0f, 0.75f, 0.35f, 0.8f}, 0.3f, true});
+                if (s.lights.size() < 8) s.lights.push_back({p.pos, 4.0f, Vec3(1.0f, 0.7f, 0.35f)});
+                break;
+            }
             case ProjectileKind::Knife: {
                 Vec3 d = normalize(p.vel);
                 float yaw = std::atan2(d.x, d.z);
                 float pitch = -std::asin(clampf(d.y, -1, 1));
-                b.world = Mat4::translation(p.pos) * Mat4::rotationY(yaw) * Mat4::rotationX(pitch) * Mat4::rotationZ(p.spin) * Mat4::scale({0.05f, 0.14f, 0.5f});
-                b.color = {0.85f, 0.88f, 0.92f, 1};
-                b.emissive = 0.2f;
-                s.boxes.push_back(b);
+                // A faca em blocos tem ~0,68 de comprimento a partir do cabo: centraliza e reduz para ~0,58 m.
+                addVoxelItem(VoxelItem::Knife, Mat4::translation(p.pos) * Mat4::rotationY(yaw) * Mat4::rotationX(pitch) * Mat4::rotationZ(p.spin) *
+                                                   Mat4::scale({0.85f, 0.85f, 0.85f}) * Mat4::translation({0.0f, 0.0f, -0.29f}));
                 break;
             }
         }
@@ -2178,7 +2357,7 @@ void Game::resetPlayerState(const Vec3& position, float yaw, float health, int m
     reloadTimer_ = 0;
     reloadDuration_ = 1.6f / std::max(0.5f, config_.reloadSpeed);
     fireCooldown_ = 0;
-    bloom_ = recoil_ = aimBlend_ = 0;
+    shotFeedback_ = recoil_ = aimBlend_ = 0;
     weaponKick_ = 0;
     aimToggle_ = false;
     invulnerable_ = 1.0f;
@@ -2298,8 +2477,19 @@ void Game::startPvp(const PvpConfig& c) {
     nc.hostIp = c.hostIp;
     nc.killLimit = c.killLimit;
     nc.timeLimit = c.timeLimit;
+    nc.seed = c.seed;
     for (int i = 0; i < kMaxNetPlayers; ++i) { nc.skins[i] = c.skins[i]; nc.ips[i] = c.ips[i]; }
     bool ok = net_.start(nc, layout_.spawnPoints);
+    fluids_ = {};
+    worldTime_ = 0;
+    terrainRevision_ = world_.revision();
+    net_.setWorldShot([this](const Vec3& from,const Vec3& to) {
+        Vec3 delta=to-from;
+        float distance=length(delta);
+        RayHit hit;
+        if (distance>0.001f && world_.raycast(from,delta/distance,distance+.1f,hit))
+            breakTerrain(hit.x,hit.y,hit.z);
+    });
     // Anfitrião: tiros remotos que atravessam blocos sólidos do mundo da arena são rejeitados (ver pvp_rules.h).
     net_.setLineOfSight([this](const Vec3& a, const Vec3& b) { return world_.lineOfSight(a, b); });
     pvpSpawnSeq_ = 0;
@@ -2386,6 +2576,9 @@ void Game::updatePvp(float dt) {
 
     netEvents_.clear();
     net_.update(dt, netEvents_);
+    for (const auto& edit : net_.takeTerrainEdits()) writeTerrain(edit.x,edit.y,edit.z,edit.block);
+    worldTime_ = std::max(0.0,double(pvp_.timeLimit-net_.timeLeft()));
+    updateWater(dt);
     for (const NetEvent& e : netEvents_) {
         switch (e.kind) {
             case NE_FIRE:
@@ -2529,10 +2722,12 @@ void Game::publishHud() {
     h[H_ELAPSED] = missionTime_;
     h[H_TARGET_LOCKED] = targetLocked_ ? 1.0f : 0.0f;
     h[H_TARGET_HP] = targetHp_;
-    h[H_AIM] = aimBlend_ * (aimStage_ >= 2 ? 2.0f : 1.0f);
+    h[H_AIM] = aimBlend_;
+    h[H_SPREAD] = 0.0f;  // as armas do template não têm dispersão
     {
-        const WeaponDef& w = weaponDef(weaponId());
-        h[H_SPREAD] = lerpf(w.spreadHip, w.spreadAim, aimBlend_) + bloom_ + std::min(1.0f, lengthXZ(player_.velocity) / kPlayerSpeed) * 0.008f;
+        // InGameHUD do template: mira cinza recarregando ou entre disparos, branca por 100 ms logo depois do tiro.
+        const bool grey = reloadTimer_ > 0 || (fireCooldown_ > 0 && shotFeedback_ <= 0);
+        h[H_WEAPON_READY] = grey ? 0.0f : 1.0f;
     }
     h[H_HITMARK] = hitMark_ / 0.18f;
     h[H_HEADSHOT_MARK] = headshotMark_ ? 1.0f : 0.0f;
@@ -2605,10 +2800,10 @@ void Game::publishHud() {
         h[H_SWAP] = swapTimer_ / 0.35f;
         h[H_MAG_MUL] = std::max(1.0f, static_cast<float>(config_.magazine) / 30.0f);
         // Munição no pente de cada arma (mochila estilo Free Fire): a da mão usa ammo_, que é o valor vivo.
-        for (int w = IT_RIFLE; w <= IT_LAUNCHER; ++w) {
+        for (int w = IT_RIFLE; w < IT_RIFLE + 8; ++w) {
             float clip = clipsInit_[w] ? static_cast<float>(clips_[w]) : -1.0f;
             if (w == weaponId()) clip = static_cast<float>(ammo_);
-            h[H_CLIPS + w - IT_RIFLE] = clip;
+            h[H_CLIPS + w - IT_RIFLE] = isWeaponItem(w) ? clip : -1.0f;
         }
         h[H_THROW_AIM] = throwAiming_ ? 1.0f : 0.0f;
         if (throwAiming_ && throwLandingValid_) {
@@ -2832,7 +3027,7 @@ void Game::copyMinimap(uint32_t* argb, int count) {
             float r = ((c >> 16) & 0xFF), g = ((c >> 8) & 0xFF), bl = (c & 0xFF);
             int left = world_.topBlockY(std::max(0, x - 1), std::max(0, z - 1));
             float shade = 0.82f + (top - layout_.seaLevel) * 0.012f + (top > left ? 0.12f : (top < left ? -0.12f : 0.0f));
-            if (b == B_WATER) shade = 0.9f;
+            if (isWaterBlock(b)) shade = 0.9f;
             if (b == B_PATH) { r = 196; g = 160; bl = 104; }
             shade = clampf(shade, 0.45f, 1.3f);
             uint32_t R = static_cast<uint32_t>(clampf(r * shade, 0, 255));

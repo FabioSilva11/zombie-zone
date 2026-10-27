@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 #include "../core/math.h"
 #include "../core/perf.h"
@@ -13,7 +14,7 @@
 namespace zz {
 
 constexpr int kChunkSize = 16;
-constexpr float kPosScale = 8.0f;  // posições dos vértices em 1/8 de bloco
+constexpr float kPosScale = 8.0f;  // vértices em 1/8 de bloco; x/z locais ao chunk
 
 enum VertexFlags : uint8_t {
     VF_WATER = 1,
@@ -167,7 +168,11 @@ public:
     bool raycast(const Vec3& origin, const Vec3& direction, float maxDistance, RayHit& hit) const;
     bool lineOfSight(const Vec3& from, const Vec3& to) const;
     bool boxCollides(const Vec3& minCorner, const Vec3& maxCorner) const;
-    bool isWaterAt(const Vec3& p) const { return get(static_cast<int>(std::floor(p.x)), static_cast<int>(std::floor(p.y)), static_cast<int>(std::floor(p.z))) == B_WATER; }
+    bool isWaterAt(const Vec3& p) const {
+        int x=int(std::floor(p.x)), y=int(std::floor(p.y)), z=int(std::floor(p.z));
+        uint8_t b=get(x,y,z);
+        return isWaterBlock(b) && p.y-y < waterHeight(b,isWaterBlock(get(x,y+1,z)));
+    }
 
     const std::vector<Chunk*>& chunks() const { return list_; }
     Chunk* chunkAt(int cx, int cz) {
@@ -181,6 +186,7 @@ public:
     int chunksX() const { return chunksX_; }
     int chunksZ() const { return chunksZ_; }
     uint32_t generation() const { return generation_; }
+    uint32_t revision() const { return revision_; }
     void markAllDirty();
     // Remalha até maxChunks chunks sujos (com vizinhos prontos); retorna quantos foram reconstruídos.
     int rebuildDirty(int maxChunks);
@@ -216,10 +222,15 @@ private:
     void markDirtyAt(int x, int z);
     void buildChunk(Chunk& chunk);
     void updateMaxY(Chunk& chunk);
+    void restoreEdits(Chunk& chunk);
+    void lowerGround(Chunk& chunk, int lx, int lz);
+    void refreshLights(Chunk& chunk);
 
     int width_ = 0, height_ = 0, depth_ = 0;
     int chunksX_ = 0, chunksZ_ = 0;
     uint32_t generation_ = 0;
+    uint32_t revision_ = 0;
+    std::unordered_map<uint32_t, std::unordered_map<uint16_t, uint8_t>> edits_;
     ChunkSource* source_ = nullptr;
     std::vector<std::unique_ptr<Chunk>> grid_;
     std::vector<Chunk*> list_;

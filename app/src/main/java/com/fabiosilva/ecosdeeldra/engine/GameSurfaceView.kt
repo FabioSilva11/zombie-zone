@@ -6,8 +6,12 @@ import android.opengl.GLSurfaceView
 import android.os.Build
 import android.view.Choreographer
 import android.view.Surface
+import javax.microedition.khronos.egl.EGL10
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+
+/** EGL_OPENGL_ES3_BIT_KHR (não existe constante em EGL10). */
+private const val EGL_OPENGL_ES3_BIT = 0x40
 
 /**
  * Superfície OpenGL ES 3 que hospeda o motor C++.
@@ -28,7 +32,22 @@ class GameSurfaceView(
 
     init {
         setEGLContextClientVersion(3)
-        setEGLConfigChooser(8, 8, 8, 8, 24, 0)
+        // Antisserrilhado 4x (as bordas dos blocos do herói e das armas ficam lisas, como na página de teste);
+        // aparelhos sem MSAA caem na configuração simples de antes.
+        setEGLConfigChooser { egl, display ->
+            fun choose(samples: Int): EGLConfig? {
+                val attribs = mutableListOf(
+                    EGL10.EGL_RED_SIZE, 8, EGL10.EGL_GREEN_SIZE, 8, EGL10.EGL_BLUE_SIZE, 8, EGL10.EGL_ALPHA_SIZE, 8,
+                    EGL10.EGL_DEPTH_SIZE, 24, EGL10.EGL_STENCIL_SIZE, 0, EGL10.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+                )
+                if (samples > 0) attribs += listOf(EGL10.EGL_SAMPLE_BUFFERS, 1, EGL10.EGL_SAMPLES, samples)
+                attribs += EGL10.EGL_NONE
+                val configs = arrayOfNulls<EGLConfig>(1)
+                val count = IntArray(1)
+                return if (egl.eglChooseConfig(display, attribs.toIntArray(), configs, 1, count) && count[0] > 0) configs[0] else null
+            }
+            choose(4) ?: choose(0) ?: throw IllegalStateException("Nenhuma configuração EGL compatível com OpenGL ES 3")
+        }
         preserveEGLContextOnPause = true
         setRenderer(object : Renderer {
             override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {

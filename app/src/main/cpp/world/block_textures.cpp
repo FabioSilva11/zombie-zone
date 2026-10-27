@@ -1,8 +1,11 @@
 #include "block_textures.h"
 
 #include <cmath>
+#include <algorithm>
+#include <utility>
 
 #include "../core/random.h"
+#include "../core/platform.h"
 
 namespace zz {
 
@@ -486,6 +489,20 @@ std::vector<uint8_t> generateBlockTextures(const Theme& theme) {
     c = layer(T_WOOL_RED); fillNoise(c, {160, 40, 40}, 10, s + 70);
     c = layer(T_BOOKSHELF); bookshelf(c, s + 71);
     c = layer(T_PUMP); pump(c);
+    // Horizonte usa o primeiro quadro dos sprites de líquido; o shader anima
+    // as coordenadas. Preservar a textura e o tom de água 0x429be6 da origem.
+    std::copy_n(data.begin()+T_WATER*16*16*4,16*16*4,data.begin()+T_WATER_FLOW*16*16*4);
+    for (const auto& entry : {std::pair<int,const char*>{T_WATER,"horizonte/water_still.png"},
+                              {T_WATER_FLOW,"horizonte/water_flow.png"}}) {
+        Image image;
+        if (!platform::decodeAssetImage(entry.second,4096,image) || image.width<=0 || image.height<image.width) continue;
+        Canvas target=layer(entry.first);
+        for (int y=0;y<16;++y) for (int x=0;x<16;++x) {
+            int sx=x*image.width/16, sy=y*image.width/16;
+            const auto* pixel=&image.rgba[(sy*image.width+sx)*4];
+            target.set(x,y,pixel[0]*66/255,pixel[1]*155/255,pixel[2]*230/255,pixel[3]);
+        }
+    }
     return data;
 }
 

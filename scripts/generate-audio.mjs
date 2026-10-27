@@ -490,9 +490,6 @@ function gunshot({ seconds, crackDecay, bodyFreq, bodyDecay, tailDecay, tailGain
   return b;
 }
 
-function pistolShot() { return finish(gunshot({ seconds: 0.24, crackDecay: 0.02, bodyFreq: 150, bodyDecay: 0.04, tailDecay: 0.07, tailGain: 0.2, cutoff: 6500 }), 0.9); }
-function smgShot() { return finish(gunshot({ seconds: 0.18, crackDecay: 0.016, bodyFreq: 125, bodyDecay: 0.035, tailDecay: 0.05, tailGain: 0.18, cutoff: 6000 }), 0.85); }
-function lmgShot() { return finish(gunshot({ seconds: 0.3, crackDecay: 0.03, bodyFreq: 75, bodyDecay: 0.08, tailDecay: 0.12, tailGain: 0.3, cutoff: 4200 }), 0.95); }
 
 function shotgunShot() {
   const b = gunshot({ seconds: 0.75, crackDecay: 0.05, bodyFreq: 58, bodyDecay: 0.12, tailDecay: 0.22, tailGain: 0.45, cutoff: 3600 });
@@ -502,43 +499,6 @@ function shotgunShot() {
   scrape(b.data, b.rate, 0.55, 0.07, 500, 900, 0.22);
   click(b.data, b.rate, 0.63, 2200, 0.5);
   return finish(b, 0.97, 10);
-}
-
-function sniperShot() {
-  const b = gunshot({ seconds: 1.2, crackDecay: 0.012, bodyFreq: 70, bodyDecay: 0.1, tailDecay: 0.45, tailGain: 0.3, cutoff: 7000 });
-  // Eco distante e ferrolho.
-  const { rate, data } = b;
-  const delay = Math.floor(rate * 0.18);
-  for (let i = data.length - 1; i >= delay; i--) data[i] += data[i - delay] * 0.35;
-  click(data, rate, 0.8, 1500, 0.35);
-  scrape(data, rate, 0.85, 0.12, 700, 1100, 0.18);
-  click(data, rate, 0.99, 2400, 0.4);
-  return finish(b, 0.97, 20);
-}
-
-function flameRoar() {
-  const b = buffer(0.42); const { rate, data } = b;
-  for (let i = 0; i < data.length; i++) {
-    const t = i / rate;
-    const roar = noise() * Math.sin(Math.PI * Math.min(1, t / 0.42)) * (0.75 + 0.25 * Math.sin(TAU * 31 * t));
-    const crackle = rand() < 0.01 ? noise() * 1.8 : 0;
-    data[i] = roar + crackle;
-  }
-  lowpass(data, rate, 2400);
-  return finish(b, 0.7, 30);
-}
-
-function launcherThump() {
-  const b = buffer(0.55); const { rate, data } = b;
-  for (let i = 0; i < data.length; i++) {
-    const t = i / rate;
-    const thump = Math.sin(TAU * (75 - 40 * Math.min(1, t * 3)) * t) * env(t, 0.002, 0.12);
-    const air = noise() * env(t, 0.004, 0.08) * 0.6;
-    const hiss = noise() * env(t, 0.05, 0.2) * 0.2;
-    data[i] = thump + air + hiss;
-  }
-  lowpass(data, rate, 2600);
-  return finish(b, 0.92, 12);
 }
 
 function equip() {
@@ -570,12 +530,6 @@ function waveHorn() {
   return finish(b, 0.85, 40);
 }
 
-writeWav('sfx_pistol', pistolShot());
 writeWav('sfx_shotgun', shotgunShot());
-writeWav('sfx_smg', smgShot());
-writeWav('sfx_sniper', sniperShot());
-writeWav('sfx_lmg', lmgShot());
-writeWav('sfx_flame', flameRoar());
-writeWav('sfx_launcher', launcherThump());
 writeWav('sfx_equip', equip());
 writeWav('sfx_wave', waveHorn());

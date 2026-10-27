@@ -384,17 +384,16 @@ class InventoryScreen(
             }
         }
 
-        // Cards das armas: 2 principais, pistola e faca (como os 4 espaços de arma do Free Fire).
+        // Cards das armas: as 2 principais (fuzil e escopeta do template) e a faca.
         private fun drawWeapons(c: Canvas, h: Float, left: Float) {
             val x0 = left + h * 0.167f
             val x1 = left + h * 0.522f
             val primaries = inventory.primarySlots()
             weaponCard(c, h, RectF(x0, h * 0.063f, x1, h * 0.315f), primaries.getOrNull(0) ?: -1, Items.RIFLE, true)
-            weaponCard(c, h, RectF(x0, h * 0.326f, x1, h * 0.576f), primaries.getOrNull(1) ?: -1, Items.RIFLE, true)
-            weaponCard(c, h, RectF(x0, h * 0.589f, left + h * 0.338f, h * 0.697f), inventory.pistolSlot(), Items.PISTOL, false)
+            weaponCard(c, h, RectF(x0, h * 0.326f, x1, h * 0.576f), primaries.getOrNull(1) ?: -1, Items.SHOTGUN, true)
 
             // Faca (ataque corpo a corpo, sempre disponível).
-            val r = RectF(left + h * 0.346f, h * 0.589f, x1, h * 0.697f)
+            val r = RectF(x0, h * 0.589f, x1, h * 0.697f)
             fill.color = CARD
             c.drawRect(r, fill)
             outlineIcon(c, Icon.FIST, r.centerX(), r.centerY(), h * 0.034f, null)
@@ -632,7 +631,7 @@ class InventoryScreen(
             is Sel.Weapon -> {
                 val slot = inventory.firstSlotOf(s.id)
                 val primaries = inventory.primarySlots()
-                val equipped = slot in primaries || (slot >= 0 && slot == inventory.pistolSlot())
+                val equipped = slot in primaries
                 if (equipped) {
                     val inHand = slot == inventory.weaponSlot
                     listOf(
@@ -642,7 +641,7 @@ class InventoryScreen(
                             done()
                         },
                     )
-                } else if (s.id == Items.PISTOL || primaries.size < Inventory.MAX_PRIMARIES) {
+                } else if (primaries.size < Inventory.MAX_PRIMARIES) {
                     listOf(Pill("EQUIPAR", slot >= 0) {
                         if (!inventory.equipWeapon(slot)) showToast("Sem espaço na barra rápida")
                         done()

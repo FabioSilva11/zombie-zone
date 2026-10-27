@@ -31,8 +31,6 @@ object ItemIcons {
         sourceIconsLoaded = true
         listOf(
             Items.RIFLE to "icons/ak47.svg",
-            Items.PISTOL to "icons/pistol.svg",
-            Items.SNIPER to "icons/sniper.svg",
         ).forEach { (id, asset) ->
             runCatching { parseSvg(context, asset) }.getOrNull()?.let { sourceIcons[id] = it }
         }
@@ -112,11 +110,6 @@ object ItemIcons {
                 box(-4f, -6f, 3f, -3f, dark)
                 box(4f, -4f, 7f, -2f, accent)
             }
-            Items.PISTOL -> {
-                box(-9f, -6f, 9f, 0f, metal)
-                box(-8f, 0f, -2f, 10f, dark)
-                box(6f, -7f, 8f, -5f, accent)
-            }
             Items.SHOTGUN -> {
                 box(-15f, -4f, 15f, -1f, dark)
                 box(-15f, -1f, 15f, 1f, dark)
@@ -124,44 +117,6 @@ object ItemIcons {
                 box(-16f, -3f, -6f, 5f, wood)
                 box(-6f, -3f, 1f, 3f, metal)
                 box(13f, -6f, 15f, -4f, accent)
-            }
-            Items.SMG -> {
-                box(-9f, -5f, 7f, 2f, metal)
-                box(6f, -3f, 13f, -1f, dark)
-                box(-2f, 2f, 2f, 13f, dark)
-                box(-8f, 2f, -5f, 8f, dark)
-                box(-15f, -3f, -9f, -1f, dark)
-                box(-4f, -8f, 2f, -5f, accent)
-            }
-            Items.SNIPER -> {
-                box(-12f, -3f, 6f, 2f, metal)
-                box(5f, -2f, 16f, 0f, dark)
-                box(-7f, -9f, 3f, -5f, dark)
-                box(3f, -8f, 4f, -6f, Color.rgb(100, 220, 255))
-                box(-16f, -2f, -10f, 5f, wood)
-                box(-6f, 2f, -3f, 8f, dark)
-            }
-            Items.LMG -> {
-                box(-12f, -5f, 8f, 3f, Color.rgb(84, 98, 58))
-                box(7f, -3f, 16f, 0f, dark)
-                box(-6f, 3f, 2f, 10f, Color.rgb(66, 76, 44))
-                box(-15f, -3f, -10f, 3f, dark)
-                box(12f, 0f, 13f, 9f, dark)
-                box(-3f, -8f, 1f, -5f, accent)
-            }
-            Items.FLAMER -> {
-                box(-14f, -5f, -4f, 7f, Color.rgb(200, 50, 40), 4f)
-                box(-4f, -3f, 13f, 0f, dark)
-                box(-2f, 0f, 1f, 8f, dark)
-                p.color = Color.rgb(255, 170, 60)
-                p.alpha = alpha
-                canvas.drawCircle(cx + 15f * s, cy - 1.5f * s, 2.6f * s, p)
-            }
-            Items.LAUNCHER -> {
-                box(-15f, -5f, 12f, 2f, Color.rgb(84, 98, 58), 3f)
-                box(11f, -6f, 14f, 3f, accent)
-                box(-3f, 2f, 1f, 10f, dark)
-                box(-6f, -9f, -3f, -5f, dark)
             }
             Items.MEDKIT -> {
                 box(-12f, -9f, 12f, 11f, Color.rgb(240, 240, 240), 3f)

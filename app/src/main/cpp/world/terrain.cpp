@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "../core/random.h"
+#include "horizonte_adapter.h"
 
 namespace zz {
 
@@ -43,106 +44,14 @@ struct HeightField {
     bool inside(int x, int z) const { return x >= 0 && z >= 0 && x < w && z < d; }
 };
 
-struct Blob {
-    float x, z, r;
-};
+struct MapShape {};
 
-// Forma geral do mapa (ilha elíptica, ilhas, vale...) sorteada por partida.
-struct MapShape {
-    MapStyle style = MapStyle::Island;
-    float cx = 0, cz = 0, rx = 1, rz = 1, angle = 0;
-    std::vector<Blob> blobs;
-    float nx = 1, nz = 0, offset = 0;
-    float terrace = 3;
-};
-
-MapShape makeShape(MapStyle style, int size, Rng& rng) {
-    MapShape s;
-    s.style = style;
-    s.cx = size * rng.range(0.44f, 0.56f);
-    s.cz = size * rng.range(0.44f, 0.56f);
-    s.rx = size * rng.range(0.37f, 0.47f);
-    s.rz = size * rng.range(0.37f, 0.47f);
-    s.angle = rng.range(0, kPi);
-    if (style == MapStyle::Archipelago) {
-        int n = rng.rangeInt(4, 6);
-        s.blobs.push_back({size * 0.5f + rng.range(-8, 8), size * 0.5f + rng.range(-8, 8), size * rng.range(0.19f, 0.24f)});
-        float base = rng.range(0, kTwoPi);
-        for (int i = 1; i < n; ++i) {
-            float a = base + i * kTwoPi / (n - 1) + rng.range(-0.3f, 0.3f);
-            float dist = size * rng.range(0.27f, 0.34f);
-            float r = size * rng.range(0.1f, 0.15f);
-            float bx = clampf(size * 0.5f + std::cos(a) * dist, r + 10, size - r - 10);
-            float bz = clampf(size * 0.5f + std::sin(a) * dist, r + 10, size - r - 10);
-            s.blobs.push_back({bx, bz, r});
-        }
-    }
-    float a = rng.range(0, kPi);
-    s.nx = std::cos(a);
-    s.nz = std::sin(a);
-    s.offset = rng.range(-0.08f, 0.08f) * size;
-    s.terrace = 1.0f;  // degraus de um bloco: nada de paredes mais altas que o jogador
-    return s;
-}
-
-float landMask(const MapShape& s, float x, float z, int size, uint32_t seed) {
-    float wobble = (fbm(x / 26.0f, z / 26.0f, seed + 71, 2) - 0.5f) * 0.22f;
-    float mask = 0;
-    if (s.style == MapStyle::Archipelago) {
-        for (const Blob& b : s.blobs) {
-            float d = std::sqrt((x - b.x) * (x - b.x) + (z - b.z) * (z - b.z)) / b.r + wobble;
-            mask = std::max(mask, 1.0f - smoothstepf(0.62f, 1.0f, d));
-        }
-    } else {
-        float dx = x - s.cx, dz = z - s.cz;
-        float c = std::cos(s.angle), sn = std::sin(s.angle);
-        float u = (dx * c + dz * sn) / s.rx, v = (-dx * sn + dz * c) / s.rz;
-        float r = std::sqrt(u * u + v * v) + wobble;
-        mask = 1.0f - smoothstepf(0.78f, 1.02f, r);
-    }
-    float edge = std::min(std::min(x, z), std::min(size - x, size - z));
-    return mask * smoothstepf(4.0f, 14.0f, edge);
-}
-
-float naturalHeight(const MapShape& s, float x, float z, int size, const Theme& theme, uint32_t seed, int sea) {
-    float n = fbm(x / 46.0f, z / 46.0f, seed, 4);
-    float detail = fbm(x / 13.0f, z / 13.0f, seed + 31, 2);
-    float hills = (n - 0.5f) * 2.0f * 7.0f * theme.hilliness + (detail - 0.5f) * 3.0f;
-    float ridge = fbm(x / 64.0f, z / 64.0f, seed + 5, 3);
-    float mountains = ridge > 0.6f ? (ridge - 0.6f) * 55.0f * theme.hilliness : 0.0f;
-    switch (s.style) {
-        case MapStyle::Valley: {
-            float dist = std::fabs((x - size * 0.5f) * s.nx + (z - size * 0.5f) * s.nz - s.offset) / (size * 0.5f);
-            hills *= 0.55f;
-            mountains = smoothstepf(0.28f, 0.75f, dist) * 24.0f * theme.hilliness * (0.7f + ridge * 0.6f);
-            break;
-        }
-        case MapStyle::Mesas: {
-            float raw = hills * 1.3f + mountains * 0.8f + (ridge - 0.5f) * 10.0f;
-            hills = std::floor(raw / s.terrace) * s.terrace;
-            mountains = 0;
-            break;
-        }
-        case MapStyle::Crater: {
-            float dx = (x - s.cx) / s.rx, dz = (z - s.cz) / s.rz;
-            float r = std::sqrt(dx * dx + dz * dz);
-            float ring = std::exp(-((r - 0.5f) / 0.13f) * ((r - 0.5f) / 0.13f)) * 17.0f * theme.hilliness;
-            mountains = ring + mountains * 0.3f;
-            if (r < 0.32f) hills = lerpf(-7.0f, hills, smoothstepf(0.06f, 0.32f, r));  // bacia com encosta suave
-            break;
-        }
-        case MapStyle::Rivers:
-            hills *= 0.6f;
-            mountains *= 0.5f;
-            break;
-        case MapStyle::Archipelago:
-            mountains *= 0.7f;
-            break;
-        default:
-            break;
-    }
-    float base = sea + 4.0f + hills + mountains;
-    return lerpf(sea - 7.0f, base, landMask(s, x, z, size, seed));
+float naturalHeight(const MapShape&, float x, float z, int size, const Theme&, uint32_t seed, int sea) {
+    horizonte::Terrain terrain(seed);
+    float h=float(terrain.groundHeight(int(x),int(z))+1);
+    // Somente a borda da arena finita desce para a água; o miolo usa o relevo original.
+    float edge=std::min(std::min(x,z),std::min(size-x,size-z));
+    return lerpf(float(sea-4),h,smoothstepf(3,12,edge));
 }
 
 void flattenDisc(HeightField& hf, float cx, float cz, float radius, float target, float blend, uint8_t reserveTag) {
@@ -157,36 +66,6 @@ void flattenDisc(HeightField& hf, float cx, float cz, float radius, float target
             } else if (d < radius + blend) {
                 float t = smoothstepf(radius, radius + blend, d);
                 hf.at(x, z) = lerpf(target, hf.at(x, z), t);
-            }
-        }
-    }
-}
-
-// Rio sinuoso que atravessa o mapa de borda a borda.
-void carveRiver(HeightField& hf, Vec2 from, Vec2 to, Rng& rng, int sea) {
-    Vec2 delta = to - from;
-    float len = delta.length();
-    if (len < 10) return;
-    Vec2 perp(-delta.y / len, delta.x / len);
-    float amp = rng.range(6.0f, 14.0f), waves = rng.range(1.5f, 3.0f), phase = rng.range(0, kTwoPi);
-    float width = rng.range(1.6f, 2.6f);
-    int steps = static_cast<int>(len);
-    for (int i = 0; i <= steps; ++i) {
-        float t = static_cast<float>(i) / steps;
-        Vec2 p = from + delta * t + perp * (std::sin(t * kPi * waves + phase) * amp);
-        int r = static_cast<int>(width + 5);
-        for (int z = static_cast<int>(p.y) - r; z <= static_cast<int>(p.y) + r; ++z) {
-            for (int x = static_cast<int>(p.x) - r; x <= static_cast<int>(p.x) + r; ++x) {
-                if (!hf.inside(x, z)) continue;
-                float d = std::sqrt((x + 0.5f - p.x) * (x + 0.5f - p.x) + (z + 0.5f - p.y) * (z + 0.5f - p.y));
-                float& h = hf.at(x, z);
-                if (d <= width) {
-                    h = std::min(h, static_cast<float>(sea - 2));
-                    hf.res(x, z) = R_RIVER;
-                } else if (d < width + 5.0f && h > sea + 0.6f) {
-                    float bank = sea + 0.6f;
-                    h = lerpf(bank, h, smoothstepf(width, width + 5.0f, d));
-                }
             }
         }
     }
@@ -244,40 +123,25 @@ void carvePath(HeightField& hf, Vec2 a, Vec2 b, uint32_t seed, int sea) {
 }
 
 void fillColumns(World& world, HeightField& hf, const Theme& theme, int sea, uint32_t seed) {
-    Rng rng(seed ^ 0xA5A5u);
-    for (int z = 0; z < hf.d; ++z) {
-        for (int x = 0; x < hf.w; ++x) {
-            int top = std::max(2, std::min(kWorldHeight - 14, static_cast<int>(std::lround(hf.at(x, z)))));
-            uint8_t res = hf.res(x, z);
-            bool bridge = res == R_PATH && hf.naturalAt(x, z) <= sea + 0.5f;
-            for (int y = 0; y < top; ++y) {
-                uint8_t b;
-                if (y == 0) b = B_BEDROCK;
-                else if (y < top - 4) {
-                    b = theme.deep;
-                    if (b == B_STONE && rng.chance(0.025f)) b = rng.chance(0.6f) ? B_COAL_ORE : B_IRON_ORE;
-                } else if (y < top - 1) b = bridge ? theme.deep : theme.filler;
-                else {
-                    if (bridge) b = B_PLANKS;
-                    else if (res == R_PATH) b = B_PATH;
-                    else if (top - 1 <= sea + 1 && res != R_CAMP) b = theme.beach;
-                    else if (top > 31 && theme.id != 1) b = (top > 33) ? B_SNOW : B_STONE;
-                    else if (top > 28 && theme.id == 1) b = B_TERRACOTTA;
-                    else b = theme.surface;
-                    if (theme.id == 3 && b == B_ASH && rng.chance(0.015f)) b = B_MAGMA;
-                }
-                world.set(x, y, z, b, false);
-            }
-            int ground = top;
-            if (top <= sea) {
-                for (int y = top; y <= sea; ++y) world.set(x, y, z, B_WATER, false);
-                if (theme.id == 2) {  // lagos congelados na neve
-                    world.set(x, sea, z, B_ICE, false);
-                    ground = sea + 1;
-                }
-            }
-            world.setGroundHeight(x, z, ground);
+    horizonte::Terrain terrain(seed);
+    for (Chunk* chunk:world.chunks()) horizonte::generate(terrain,*chunk,world.height());
+    for (int z=0;z<hf.d;++z) for (int x=0;x<hf.w;++x) {
+        int natural=terrain.groundHeight(x,z)+1;
+        int top=std::max(2,std::min(world.height()-14,int(std::lround(hf.at(x,z)))));
+        bool modified=top!=natural || hf.res(x,z)==R_PATH || hf.res(x,z)==R_CAMP;
+        if (!modified) continue;
+        bool bridge=hf.res(x,z)==R_PATH && hf.naturalAt(x,z)<=sea+.5f;
+        int low=std::max(1,std::min(natural,top)-4);
+        int high=std::min(world.height(),std::max(natural,top)+8);
+        auto floating=horizonte::floatingColumn(seed,x,z);
+        if (floating.exists()) high=std::min(high,floating.bottom);
+        for (int y=low;y<high;++y) {
+            uint8_t block=y<top-1 ? (y<top-4 ? B_STONE : B_DIRT) :
+                y==top-1 ? (bridge ? B_PLANKS : hf.res(x,z)==R_PATH ? B_PATH : horizonte::surface(terrain,x,z)) :
+                y<=sea ? B_WATER : B_AIR;
+            world.set(x,y,z,block,false);
         }
+        world.setGroundHeight(x,z,bridge ? std::max(top,sea+1) : top);
     }
 }
 
@@ -287,54 +151,6 @@ bool farFromAll(const Vec2& p, const std::vector<Vec2>& others, float minDist) {
     return true;
 }
 
-void scatterTreesAndPlants(World& world, HeightField& hf, const Theme& theme, int sea, uint32_t seed, float densityScale) {
-    Rng rng(seed ^ 0x51ED27u);
-    std::vector<uint8_t> trunk(static_cast<size_t>(hf.w) * hf.d, 0);
-    auto nearReserved = [&](int x, int z, int radius) {
-        for (int dz = -radius; dz <= radius; ++dz)
-            for (int dx = -radius; dx <= radius; ++dx) {
-                if (!hf.inside(x + dx, z + dz)) continue;
-                uint8_t r = hf.res(x + dx, z + dz);
-                if (r == R_PATH || r == R_CAMP) return true;
-                if (trunk[static_cast<size_t>(z + dz) * hf.w + x + dx]) return true;
-            }
-        return false;
-    };
-    for (int z = 3; z < hf.d - 3; ++z) {
-        for (int x = 3; x < hf.w - 3; ++x) {
-            int y = world.groundHeight(x, z);
-            if (y <= sea + 1 || y >= kWorldHeight - 16) continue;
-            uint8_t surface = world.get(x, y - 1, z);
-            if (surface != theme.surface && surface != B_GRASS) continue;
-            float forest = fbm(x / 34.0f, z / 34.0f, seed + 9, 3);
-            float p = theme.treeDensity * densityScale * (0.25f + forest * forest * 4.0f);
-            if (rng.chance(p) && !nearReserved(x, z, theme.tree == TreeKind::Cactus ? 2 : 3)) {
-                WorldSink sink(world);
-                placeTree(sink, pickTreeKind(theme, x, z, seed, y <= sea + 4), x, y, z, rng);
-                trunk[static_cast<size_t>(z) * hf.w + x] = 1;
-                hf.res(x, z) = R_TREE;
-                continue;
-            }
-            if (hf.res(x, z) == R_NONE && world.get(x, y, z) == B_AIR && rng.chance(theme.plantDensity)) {
-                world.set(x, y, z, rng.chance(0.5f) ? theme.plantA : theme.plantB, false);
-            }
-        }
-    }
-    int boulders = static_cast<int>(hf.w * hf.d / 2600 * densityScale);
-    for (int i = 0; i < boulders; ++i) {
-        int x = rng.rangeInt(8, hf.w - 9), z = rng.rangeInt(8, hf.d - 9);
-        if (nearReserved(x, z, 3)) continue;
-        int y = world.groundHeight(x, z);
-        if (y <= sea + 1) continue;
-        uint8_t rock = theme.id == 1 ? B_SANDSTONE : (theme.id == 3 ? B_NETHERRACK : B_COBBLE);
-        for (int dz = 0; dz < 2; ++dz)
-            for (int dx = 0; dx < 2; ++dx)
-                if (rng.chance(0.85f)) {
-                    world.set(x + dx, y, z + dz, rock, false);
-                    if (rng.chance(0.35f)) world.set(x + dx, y + 1, z + dz, B_STONE, false);
-                }
-    }
-}
 
 }  // namespace
 
@@ -378,19 +194,15 @@ Theme applySkyVariant(const Theme& base, uint32_t seed, bool allowNight) {
 
 WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint32_t seed, const GenOptions& options) {
     const int size = options.size;
-    const int sea = 13;
+    const int sea = horizonte::kSea;
     world.reset(size, kWorldHeight, size);
     WorldLayout layout;
     layout.seaLevel = sea;
     Rng rng(seed);
 
-    // Estilo do mapa: deserto favorece mesetas; neve favorece vales.
-    int styleRoll = rng.rangeInt(0, static_cast<int>(MapStyle::Count) - 1);
-    if (theme.id == 1 && rng.chance(0.35f)) styleRoll = static_cast<int>(MapStyle::Mesas);
-    if (theme.id == 2 && rng.chance(0.3f)) styleRoll = static_cast<int>(MapStyle::Valley);
-    if (options.pvp && styleRoll == static_cast<int>(MapStyle::Archipelago)) styleRoll = static_cast<int>(MapStyle::Island);
-    layout.style = static_cast<MapStyle>(styleRoll);
-    MapShape shape = makeShape(layout.style, size, rng);
+    // A arena usa o mesmo relevo contínuo, com a borda finita ajustada.
+    layout.style = MapStyle::Island;
+    MapShape shape;
 
     HeightField hf;
     hf.w = size;
@@ -400,31 +212,13 @@ WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint
     for (int z = 0; z < size; ++z)
         for (int x = 0; x < size; ++x) hf.at(x, z) = naturalHeight(shape, x + 0.5f, z + 0.5f, size, theme, seed, sea);
 
-    // Rios.
-    int rivers = layout.style == MapStyle::Rivers ? 2 : (layout.style == MapStyle::Valley ? 1 : (rng.chance(0.3f) ? 1 : 0));
-    if (options.pvp) rivers = std::min(rivers, 1);
-    for (int i = 0; i < rivers; ++i) {
-        Vec2 from, to;
-        if (layout.style == MapStyle::Valley && i == 0) {
-            Vec2 dir(-shape.nz, shape.nx);
-            Vec2 mid(size * 0.5f + shape.nx * shape.offset, size * 0.5f + shape.nz * shape.offset);
-            from = mid - dir * (size * 0.7f);
-            to = mid + dir * (size * 0.7f);
-        } else {
-            float a = rng.range(0, kTwoPi);
-            Vec2 dir(std::cos(a), std::sin(a));
-            Vec2 mid(size * 0.5f + rng.range(-20, 20), size * 0.5f + rng.range(-20, 20));
-            from = mid - dir * (size * 0.7f);
-            to = mid + dir * (size * 0.7f);
-        }
-        carveRiver(hf, from, to, rng, sea);
-    }
     hf.natural = hf.h;
 
     // Candidatos a acampamento: terra firme, longe da borda e dos rios.
     auto okSpot = [&](Vec2 c) {
         int x = static_cast<int>(c.x), z = static_cast<int>(c.y);
         if (!hf.inside(x, z) || hf.res(x, z) == R_RIVER) return false;
+        if (!horizonte::clearFootprint(horizonte::Terrain(seed),seed,x,z,18.0f)) return false;
         float h = hf.get(x, z);
         return h > sea + 1.5f && h < sea + 15.0f;
     };
@@ -476,7 +270,7 @@ WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint
     for (const auto& c : camps) flattenDisc(hf, c.center.x, c.center.z, c.radius, c.center.y, 2.0f, R_CAMP);
 
     fillColumns(world, hf, theme, sea, seed);
-    scatterTreesAndPlants(world, hf, theme, sea, seed, options.pvp ? 1.3f : 1.0f);
+    // Árvores e aldeias são geradas pelo núcleo Horizonte.
 
     for (auto& c : camps) {
         c.center = {std::floor(c.center.x) + 0.5f, static_cast<float>(world.groundHeight(static_cast<int>(c.center.x), static_cast<int>(c.center.z))), std::floor(c.center.z) + 0.5f};
@@ -502,10 +296,26 @@ WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint
         return world.groundHeight(x, z) > sea + 1 && world.standHeight(x, z) - world.groundHeight(x, z) < 1 &&
                !world.solid(x, world.standHeight(x, z) + 1, z);
     };
+    // A decoração pode ocupar o centro de um acampamento (pilhas, paredes,
+    // postes). Escolher os pontos após a construção evita nascer dentro dela.
+    auto safeNear = [&](const Camp& camp, Vec3& out) {
+        int cx=int(camp.center.x), cz=int(camp.center.z)+2;
+        for (int r=0;r<=int(camp.radius)+5;++r)
+            for (int dz=-r;dz<=r;++dz) for (int dx=-r;dx<=r;++dx) {
+                if (std::max(std::abs(dx),std::abs(dz))!=r) continue;
+                int x=cx+dx,z=cz+dz;
+                if (world.columnInBounds(x,z) && clearSpot(x,z)) { out=standPoint(x,z); return true; }
+            }
+        return false;
+    };
+    safeNear(camps[0],layout.start);
 
     if (options.pvp) {
         // Pontos de renascimento espalhados (acampamentos + clareiras).
-        for (const auto& c : camps) layout.spawnPoints.push_back(c.center + Vec3(0, 0, 2.5f));
+        for (const auto& c : camps) {
+            Vec3 point;
+            if (safeNear(c,point)) layout.spawnPoints.push_back(point);
+        }
         for (int attempt = 0; attempt < 600 && layout.spawnPoints.size() < 14; ++attempt) {
             int x = rng.rangeInt(12, size - 13), z = rng.rangeInt(12, size - 13);
             Vec3 p = standPoint(x, z);
@@ -548,8 +358,8 @@ WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint
 
 WorldLayout generateLobbyWorld(World& world, const Theme& theme) {
     const int size = 64;
-    const int sea = 10;
-    world.reset(size, 40, size);
+    const int sea = horizonte::kSea;
+    world.reset(size, horizonte::kHeight, size);
     WorldLayout layout;
     layout.seaLevel = sea;
     HeightField hf;
@@ -560,17 +370,15 @@ WorldLayout generateLobbyWorld(World& world, const Theme& theme) {
     const uint32_t seed = 4242u;
     for (int z = 0; z < size; ++z)
         for (int x = 0; x < size; ++x) {
-            float dx = (x - size * 0.5f), dz = (z - size * 0.5f);
-            float d = std::sqrt(dx * dx + dz * dz);
-            float hills = (fbm(x / 14.0f, z / 14.0f, seed, 3) - 0.5f) * 8.0f + smoothstepf(10, 30, d) * 6.0f;
-            hf.at(x, z) = 16.0f + hills;
+            hf.at(x,z)=naturalHeight(MapShape{},x+.5f,z+.5f,size,theme,seed,sea);
         }
-    Camp camp{{size * 0.5f, 16.0f, size * 0.5f}, 6.0f, true, false, K_FIRE};
-    flattenDisc(hf, camp.center.x, camp.center.z, 9.0f, 16.0f, 5.0f, R_CAMP);
+    const float lobbyFloor=std::max(float(sea+2),hf.get(size/2,size/2));
+    Camp camp{{size * 0.5f, lobbyFloor, size * 0.5f}, 6.0f, true, false, K_FIRE};
+    flattenDisc(hf, camp.center.x, camp.center.z, 9.0f, lobbyFloor, 5.0f, R_CAMP);
     carvePath(hf, {size * 0.5f, size * 0.5f}, {size * 0.5f + 4, size - 4.0f}, seed, sea);
     hf.natural = hf.h;
     fillColumns(world, hf, theme, sea, seed);
-    scatterTreesAndPlants(world, hf, theme, sea, seed, 2.6f);
+    // A vegetação do Horizonte já acompanha o terreno.
     int cy = world.groundHeight(static_cast<int>(camp.center.x), static_cast<int>(camp.center.z));
     camp.center.y = static_cast<float>(cy);
     int fx = static_cast<int>(camp.center.x) + 3, fz = static_cast<int>(camp.center.z) - 2;

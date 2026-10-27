@@ -9,6 +9,7 @@ void CharacterModel::build(std::vector<ModelNode> nodes, std::vector<ModelMesh> 
     nodes_ = std::move(nodes);
     meshes_ = std::move(meshes);
     clips_ = std::move(clips);
+    aliases_.clear();
     // Ordem topológica: pais antes dos filhos.
     order_.clear();
     std::vector<int> depth(nodes_.size(), 0);
@@ -55,6 +56,8 @@ int CharacterModel::clipIndex(const std::string& name) const {
 int CharacterModel::nodeIndex(const std::string& name) const {
     for (size_t i = 0; i < nodes_.size(); ++i)
         if (nodes_[i].name == name) return static_cast<int>(i);
+    for (const auto& a : aliases_)
+        if (a.first == name) return a.second;
     return -1;
 }
 

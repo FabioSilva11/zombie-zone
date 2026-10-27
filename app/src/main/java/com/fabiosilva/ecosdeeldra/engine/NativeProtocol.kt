@@ -92,6 +92,7 @@ object Hud {
     const val FPS = 36
     const val CRYSTAL_TOTAL = 37
     const val COMBO = 38
+    const val WEAPON_READY = 39   // 1 = mira branca (pode atirar), 0 = cinza (recarregando ou entre disparos)
     const val ENEMY_COUNT = 40
     const val ENEMIES = 41
     const val LABEL_COUNT = 161
@@ -149,7 +150,7 @@ object Hud {
     const val THROW_SX = 619
     const val THROW_SY = 620
     const val THROW_ONSCREEN = 621
-    const val CLIPS = 622             // 622..629 munição no pente de cada arma (id 1..8); -1 = cheio
+    const val CLIPS = 622             // 622..629 munição no pente de cada arma (id 1..8); -1 = cheio ou sem arma
     const val MAG_MUL = 644           // multiplicador do pente: pente = round(base * MAG_MUL)
     const val SURV = 630
     const val WAVE = 631
@@ -263,16 +264,10 @@ object Snd {
     const val CHEST = 21
     const val SPIT = 22
     const val RACK = 23
-    const val PISTOL = 24
-    const val SHOTGUN = 25
-    const val SMG = 26
-    const val SNIPER = 27
-    const val LMG = 28
-    const val FLAME = 29
-    const val LAUNCHER = 30
-    const val EQUIP = 31
-    const val WAVE = 32
-    const val COUNT = 33
+    const val SHOTGUN = 24
+    const val EQUIP = 25
+    const val WAVE = 26
+    const val COUNT = 27
 }
 
 object Res {

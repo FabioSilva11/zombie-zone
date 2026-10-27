@@ -20,14 +20,9 @@ data class ItemDef(
 )
 
 object Items {
+    // Armas do template Multiplayer FPS (Unity). Os ids 2 e 4..8 eram as armas antigas, excluídas.
     const val RIFLE = 1
-    const val PISTOL = 2
     const val SHOTGUN = 3
-    const val SMG = 4
-    const val SNIPER = 5
-    const val LMG = 6
-    const val FLAMER = 7
-    const val LAUNCHER = 8
     const val MEDKIT = 20
     const val BANDAGE = 21
     const val ANTIDOTE = 22
@@ -39,14 +34,8 @@ object Items {
     const val SMOKE = 28
 
     val all = listOf(
-        ItemDef(RIFLE, "Fuzil de assalto", "Equilibrado: rajada rápida e boa precisão.", ItemKind.WEAPON, 0xFF8FD46B.toInt(), 0, 1, "18", "10/s", 30),
-        ItemDef(PISTOL, "Pistola", "Leve e precisa; você anda mais rápido com ela.", ItemKind.WEAPON, 0xFFB8C4D8.toInt(), 120, 1, "30", "5/s", 12),
-        ItemDef(SHOTGUN, "Escopeta", "9 chumbos de perto: arrasa hordas, fraca de longe.", ItemKind.WEAPON, 0xFFE0A35E.toInt(), 320, 2, "9×13", "1,2/s", 6),
-        ItemDef(SMG, "Submetralhadora", "Cadência altíssima para limpar corredores.", ItemKind.WEAPON, 0xFF7FD8FF.toInt(), 450, 4, "12", "15/s", 36),
-        ItemDef(SNIPER, "Rifle de precisão", "Luneta com zoom; atravessa até 4 zumbis.", ItemKind.WEAPON, 0xFF9DB4FF.toInt(), 700, 6, "120", "0,9/s", 5),
-        ItemDef(LMG, "Metralhadora", "Pente de 90 balas que atravessam; pesada.", ItemKind.WEAPON, 0xFFC9D16A.toInt(), 900, 9, "17", "12/s", 90),
-        ItemDef(FLAMER, "Lança-chamas", "Jato de fogo de curto alcance que incendeia tudo.", ItemKind.WEAPON, 0xFFFF7A3D.toInt(), 1100, 12, "9+fogo", "14/s", 80),
-        ItemDef(LAUNCHER, "Lança-granadas", "Disparos explosivos em linha reta.", ItemKind.WEAPON, 0xFFB6FF5C.toInt(), 1500, 15, "160", "1/s", 3),
+        ItemDef(RIFLE, "Fuzil de assalto", "Hitscan: acerta na hora onde a mira aponta, 10 tiros/s.", ItemKind.WEAPON, 0xFF8FD46B.toInt(), 0, 1, "18", "10/s", 30),
+        ItemDef(SHOTGUN, "Escopeta", "Dispara uma bala pesada que voa até o alvo; 1 tiro/s.", ItemKind.WEAPON, 0xFFE0A35E.toInt(), 320, 2, "36", "1/s", 10),
         ItemDef(MEDKIT, "Kit médico", "Recupera 40% da vida e estanca sangramento. Espera de 8 s entre curas.", ItemKind.HEAL, 0xFFFF6B6B.toInt(), 90),
         ItemDef(BANDAGE, "Bandagem", "Recupera 12% da vida e estanca sangramento. Espera de 8 s entre curas.", ItemKind.HEAL, 0xFFF2DDB8.toInt(), 30),
         ItemDef(ANTIDOTE, "Antídoto", "Cura veneno, lentidão e fogo (não recupera vida).", ItemKind.HEAL, 0xFF8CFF6B.toInt(), 30),
@@ -61,7 +50,7 @@ object Items {
     private val byId = all.associateBy { it.id }
 
     fun get(id: Int): ItemDef? = byId[id]
-    fun isWeapon(id: Int) = id in RIFLE..LAUNCHER
+    fun isWeapon(id: Int) = id == RIFLE || id == SHOTGUN
     fun isThrowable(id: Int) = id == GRENADE || id == MOLOTOV || id == SMOKE
     val weapons: List<ItemDef> get() = all.filter { it.kind == ItemKind.WEAPON }
     val consumables: List<ItemDef> get() = all.filter { it.kind != ItemKind.WEAPON }
@@ -167,7 +156,7 @@ class Inventory {
     }
 
     // ------------------------------------------------------------------ equipamento estilo Free Fire
-    // As armas equipadas ficam na barra rápida (é a barra que o HUD mostra): até 2 principais e a pistola.
+    // As armas equipadas ficam na barra rápida (é a barra que o HUD mostra): até 2 principais.
     // O resto das armas fica guardado na mochila. Os consumíveis aparecem agrupados por tipo.
 
     fun firstSlotOf(id: Int): Int = slots.indexOfFirst { !it.empty && it.id == id }
@@ -175,14 +164,11 @@ class Inventory {
 
     /** Espaços das armas principais equipadas (na ordem da barra rápida), no máximo 2. */
     fun primarySlots(): List<Int> =
-        (0 until HOTBAR).filter { Items.isWeapon(slots[it].id) && slots[it].id != Items.PISTOL }.take(MAX_PRIMARIES)
-
-    /** Espaço da pistola equipada, ou -1. */
-    fun pistolSlot(): Int = (0 until HOTBAR).firstOrNull { slots[it].id == Items.PISTOL } ?: -1
+        (0 until HOTBAR).filter { Items.isWeapon(slots[it].id) }.take(MAX_PRIMARIES)
 
     /** Armas fora do equipamento (guardadas na mochila ou sobrando na barra). */
     fun spareWeaponSlots(): List<Int> {
-        val equipped = primarySlots().toSet() + pistolSlot()
+        val equipped = primarySlots().toSet()
         return slots.indices.filter { Items.isWeapon(slots[it].id) && it !in equipped }
     }
 
@@ -233,7 +219,7 @@ class Inventory {
         val before = encode()
         normalize()
         if (weaponSlot >= HOTBAR) equipWeapon(weaponSlot)
-        val primaries = (0 until HOTBAR).filter { Items.isWeapon(slots[it].id) && slots[it].id != Items.PISTOL }
+        val primaries = (0 until HOTBAR).filter { Items.isWeapon(slots[it].id) }
         if (primaries.size > MAX_PRIMARIES) {
             val keep = (listOf(weaponSlot).filter { it in primaries } + primaries).distinct().take(MAX_PRIMARIES)
             for (slot in primaries) if (slot !in keep) stowWeapon(slot)
@@ -312,10 +298,13 @@ class Inventory {
         const val HOTBAR = 6
         const val MAX_PRIMARIES = 2
 
-        /** Kit inicial: fuzil, pistola e alguns consumíveis na barra rápida. */
+        /** Id da pistola nos saves anteriores ao template (a arma foi removida). */
+        private const val LEGACY_PISTOL = 2
+
+        /** Kit inicial: as duas armas do template (fuzil e escopeta) e alguns consumíveis na barra rápida. */
         fun starter(): Inventory = Inventory().apply {
             add(Items.RIFLE, 1)
-            add(Items.PISTOL, 1)
+            add(Items.SHOTGUN, 1)
             add(Items.GRENADE, 3)
             add(Items.SMOKE, 2)
             add(Items.BANDAGE, 2)
@@ -327,13 +316,30 @@ class Inventory {
             val inv = Inventory()
             if (text.isBlank()) return starter()
             val parts = text.split('|')
-            parts[0].split(',').take(SIZE).forEachIndexed { i, e ->
+            val entries = parts[0].split(',').take(SIZE)
+            // Armas que saíram do jogo: a pistola (id 2) de um save antigo vira a escopeta no mesmo espaço, se o save
+            // ainda não tinha uma. As demais (ids 2 e 4..8 sem escopeta) somem.
+            var shotgunPlaced = entries.any { it.substringBefore(':').toIntOrNull() == Items.SHOTGUN }
+            entries.forEachIndexed { i, e ->
                 val kv = e.split(':')
-                val id = kv.getOrNull(0)?.toIntOrNull() ?: 0
+                var id = kv.getOrNull(0)?.toIntOrNull() ?: 0
                 val n = kv.getOrNull(1)?.toIntOrNull() ?: 0
+                if (id == LEGACY_PISTOL && !shotgunPlaced) {
+                    id = Items.SHOTGUN
+                    shotgunPlaced = true
+                }
                 if (Items.get(id) != null && n > 0) {
                     inv.slots[i].id = id
                     inv.slots[i].count = n.coerceAtMost(maxOf(1, Items.maxStack(id, 60)))
+                }
+            }
+            // Todo save com alguma arma recebe a escopeta: se nenhum espaço a trouxe, ela entra no primeiro vazio da barra
+            // rápida. Save sem arma nenhuma segue o caminho antigo (normalize() dá o fuzil).
+            if (!inv.has(Items.SHOTGUN) && inv.weaponCount() > 0) {
+                val free = (0 until HOTBAR).firstOrNull { inv.slots[it].empty } ?: inv.firstEmpty()
+                if (free >= 0) {
+                    inv.slots[free].id = Items.SHOTGUN
+                    inv.slots[free].count = 1
                 }
             }
             inv.weaponSlot = parts.getOrNull(1)?.toIntOrNull() ?: 0

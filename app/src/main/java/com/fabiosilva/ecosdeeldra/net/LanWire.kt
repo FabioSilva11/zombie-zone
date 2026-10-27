@@ -8,7 +8,8 @@ package com.fabiosilva.ecosdeeldra.net
  * O PvP é casual entre amigos: isto barra lixo e abuso simples, não é segurança competitiva.
  */
 object LanWire {
-    const val PREFIX = "ZZ1"
+    // Versão 3: terreno Horizonte destrutível, com journal autoritativo confirmado pela rede.
+    const val PREFIX = "ZZ3"
     const val MAX_PLAYERS = 8
     const val MAX_DATAGRAM = 600          // a maior mensagem legítima (START com 8 jogadores) tem ~300 bytes
     const val MAX_NAME = 14

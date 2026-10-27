@@ -36,7 +36,7 @@ struct GenOptions {
 };
 
 constexpr int kWorldSize = 192;
-constexpr int kWorldHeight = 48;
+constexpr int kWorldHeight = 128;
 
 WorldLayout generateStageWorld(World& world, const Theme& theme, int stage, uint32_t seed, const GenOptions& options = GenOptions());
 WorldLayout generateLobbyWorld(World& world, const Theme& theme);

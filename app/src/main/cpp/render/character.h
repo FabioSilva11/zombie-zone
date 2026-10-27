@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../core/math.h"
@@ -56,6 +57,8 @@ public:
     const std::vector<AnimClip>& clips() const { return clips_; }
     int clipIndex(const std::string& name) const;
     int nodeIndex(const std::string& name) const;
+    // Outro nome para um nó (os nomes antigos das partes apontam para os ossos do esqueleto humano).
+    void addAlias(const std::string& alias, int node) { aliases_.emplace_back(alias, node); }
     float bindHeight() const { return bindHeight_; }
     float bindMinY() const { return bindMinY_; }
 
@@ -66,6 +69,7 @@ public:
 
 private:
     std::vector<ModelNode> nodes_;
+    std::vector<std::pair<std::string, int>> aliases_;
     std::vector<int> order_;  // pais antes dos filhos
     std::vector<ModelMesh> meshes_;
     std::vector<AnimClip> clips_;

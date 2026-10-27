@@ -16,8 +16,12 @@
 #include "../render/blocky.h"
 #include "../render/character.h"
 #include "../render/renderer.h"
+#include "../render/voxel_weapons.h"
 #include "../world/island.h"
 #include "../world/terrain.h"
+#include "../world/fluids.h"
+#include "../world/world_clock.h"
+#include "../world/destruction.h"
 #include "../world/theme.h"
 #include "../world/world.h"
 #include "contract_rules.h"
@@ -227,7 +231,8 @@ struct Pickup {
     bool taken = false;
 };
 
-enum class ProjectileKind { Rock, Molotov, Acid, Knife, Grenade, Smoke };
+// Bullet: projétil das armas do tipo Projectile (escopeta do template), reto e sem gravidade.
+enum class ProjectileKind { Rock, Molotov, Acid, Knife, Grenade, Smoke, Bullet };
 
 struct Projectile {
     ProjectileKind kind = ProjectileKind::Rock;
@@ -238,7 +243,8 @@ struct Projectile {
     float life = 4;
     float spin = 0;
     bool friendly = false;  // lançado pelo jogador (não o atinge)
-    float radius = 5.0f;    // raio da explosão (granada/lança-granadas)
+    float radius = 5.0f;    // raio da explosão (granada) ou do dano em área da bala (AreaOfEffect)
+    int weapon = 0;         // arma que disparou a bala (Bullet)
 };
 
 // Área perigosa no chão: fogo do molotov ou poça de ácido.
@@ -259,6 +265,7 @@ struct Explosion {
     float playerDamage;
     float zombieDamage;
     bool fire;
+    bool destroyTerrain = false;
 };
 
 struct FlashLight {
@@ -394,7 +401,7 @@ private:
     static constexpr int kBigMapSize = 256;
 
     CharacterAsset* character(uint32_t look);
-    void addImportedAk47(const Mat4& frame, Vec3* muzzle);
+    void addVoxelItem(VoxelItem item, const Mat4& world);
     void emit(int type, int a = 0, int b = 0, int c = 0);
     void emitSound(int sound, const Vec3& at, float volume = 1.0f);
 
@@ -409,14 +416,24 @@ private:
     void addWeaponOnBack(const CharacterDraw& draw, int torso, int weapon);
     void addThrowableModel(const CharacterDraw& draw, int armRight, int item);
     void poseArmed(Pose& pose, const CharacterModel& model, float pitch, bool moveHead);
+    void holdGun(Pose& pose, const CharacterModel& model, float pitch, bool moveHead, float weight, int weapon);
     void poseArmedBlend(Pose& pose, const CharacterModel& model, float pitch, bool moveHead, float lean, float weight, int weapon = IT_RIFLE);
     void poseAir(Pose& pose, const CharacterModel& model, float blend, bool armsFree);
     void updatePlayer(float dt, const InputState& in);
     void updateCamera(float dt, const InputState& in);
     void updateWeapon(float dt, const InputState& in);
     void fireShot();
-    void fireFlame();
-    void fireLauncher();
+    void fireProjectile();
+    // Primeiro alvo no raio (zumbi, ninho, adversário do PvP ou bloco), como o raycast do template.
+    struct ShotTrace {
+        enum Kind { None, World, Zombie, Nest, Remote } kind = None;
+        float t = 0;
+        int index = -1;
+        bool head = false;
+        RayHit world;
+    };
+    ShotTrace traceShot(const Vec3& origin, const Vec3& dir, float maxT, float minT, bool remotes);
+    bool applyShot(const ShotTrace& hit, const Vec3& origin, const Vec3& dir, int weapon, float damage);
     void meleeHit();
 
     // Inventário e itens (game_items.cpp)
@@ -513,7 +530,12 @@ private:
     void updateProjectiles(float dt);
     void impactProjectile(const Projectile& p, const Vec3& at, bool hitPlayer);
     void updateHazards(float dt);
-    void explode(const Vec3& at, float radius, float playerDamage, float zombieDamage, bool fire);
+    void explode(const Vec3& at, float radius, float playerDamage, float zombieDamage, bool fire, bool destroyTerrain = false);
+    bool protectedTerrain(int x,int y,int z) const;
+    bool breakTerrain(int x,int y,int z);
+    void terrainEdited(int x,int y,int z);
+    void writeTerrain(int x,int y,int z,uint8_t block);
+    void updateWater(float dt);
     void processExplosions();
     void addZombieVisuals(const Zombie& z, const CharacterDraw& draw);
 
@@ -527,6 +549,8 @@ private:
 
     Renderer renderer_;
     World world_;
+    fluids::FluidSimulation fluids_;
+    uint32_t terrainRevision_ = 0;
     NavField nav_;
     WorldLayout layout_;
     std::unique_ptr<IslandGenerator> island_;
@@ -542,8 +566,8 @@ private:
     int bombs_ = 0;                // 4C: Inchados gerados por ninhos
     Cargo cargo_;                  // 4D
     std::map<uint32_t, std::unique_ptr<CharacterAsset>> characters_;
-    CharacterAsset ak47Asset_;
-    bool ak47Loaded_ = false;
+    // Armas, granadas e faca em blocos (render/voxel_weapons.cpp), um modelo por VoxelItem.
+    std::array<CharacterAsset, static_cast<size_t>(VoxelItem::Count)> voxelItems_;
     std::vector<Vec3> layerColors_;
     int viewRadius_ = 8;
     int quality_ = 1;
@@ -573,6 +597,7 @@ private:
     // Tempo
     double lastTime_ = -1;
     float time_ = 0;
+    double worldTime_ = 0;
     float missionTime_ = 0;
     float fps_ = 60;
 
@@ -619,6 +644,19 @@ private:
     float bobPhase_ = 0;
     float mantleTime_ = -1, mantleDuration_ = 0.4f;
     float armedBlend_ = 1.0f;  // 1 = arma nas mãos, 0 = nas costas (correndo)
+    // Herói voxel com as duas mãos na arma (holdGun): a pose prepara a moldura da arma para o próximo desenho.
+    struct GunHold {
+        bool valid = false;
+        Mat4 frame;  // espaço do modelo do personagem
+    } gunHold_;
+    float ikAim_ = 0;      // 0 = pronta (atravessada no corpo), 1 = coronha no ombro
+    float ikTwist_ = 1;    // gira o tronco de lado ao mirar (0 quando a animação já faz isso)
+    float ikKick_ = 0;     // coice do disparo
+    float ikDip_ = 0;      // troca de arma (a arma desce e volta)
+    float ikReload_ = -1;  // progresso da recarga (0..1) ou -1
+    float gunAim_ = 0;     // mistura suave entre pronta e mirando
+    float aimHold_ = 0;    // segundos de mira depois do último disparo
+    std::vector<Mat4> ikGlobals_;
     float airBlend_ = 0;       // pose de pulo/queda
     Vec3 mantleFrom_, mantleTo_;
     float wallPush_ = 0;
@@ -636,7 +674,6 @@ private:
     float adrenaline_ = 0;
     float healCooldown_ = 0;  // intervalo entre kits médicos e bandagens
     float sinceHurt_ = 0;
-    float flameSoundTimer_ = 0;
     float invFullTimer_ = 0;
     // Mira do arremesso
     bool throwAiming_ = false;
@@ -652,7 +689,7 @@ private:
     float reloadTimer_ = 0;
     float reloadDuration_ = 1.6f;
     float fireCooldown_ = 0;
-    float bloom_ = 0;
+    float shotFeedback_ = 0;  // mira branca por 100 ms depois do disparo (InGameHUD do template)
     float recoil_ = 0;
     float aimBlend_ = 0;
     float hitMark_ = 0;

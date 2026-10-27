@@ -9,33 +9,27 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Equipamento estilo Free Fire: 2 armas principais + pistola na barra rápida, o resto guardado na mochila. */
+/** Equipamento estilo Free Fire: as 2 armas do template (fuzil e escopeta) na barra rápida, o resto na mochila. */
 class BackpackLoadoutTest {
     @Test
-    fun starterLoadoutHasRiflePrimaryAndPistol() {
+    fun starterLoadoutHasRifleAndShotgunPrimaries() {
         val inv = Inventory.starter()
-        assertEquals(listOf(0), inv.primarySlots())
-        assertEquals(1, inv.pistolSlot())
+        assertEquals(listOf(0, 1), inv.primarySlots())
+        assertEquals(Items.SHOTGUN, inv[1].id)
         assertTrue(inv.spareWeaponSlots().isEmpty())
         assertFalse(inv.fitLoadout())
     }
 
     @Test
-    fun fitLoadoutKeepsTwoPrimariesAndPrefersTheOneInHand() {
+    fun fitLoadoutKeepsBothTemplateWeaponsAndTheOneInHand() {
         val inv = Inventory()
         inv.add(Items.RIFLE, 1)    // 0
         inv.add(Items.SHOTGUN, 1)  // 1
-        inv.add(Items.SMG, 1)      // 2
-        inv.add(Items.PISTOL, 1)   // 3
-        inv.weaponSlot = 2
-        assertTrue(inv.fitLoadout())
-        val primaries = inv.primarySlots().map { inv[it].id }
-        assertEquals(2, primaries.size)
-        assertTrue(Items.SMG in primaries)
-        assertEquals(Items.SMG, inv[inv.weaponSlot].id)
-        assertEquals(listOf(Items.SHOTGUN), inv.spareWeaponSlots().map { inv[it].id })
-        assertTrue(inv.spareWeaponSlots().all { it >= Inventory.HOTBAR })
-        assertTrue(inv.pistolSlot() in 0 until Inventory.HOTBAR)
+        inv.weaponSlot = 1
+        assertFalse(inv.fitLoadout())
+        assertEquals(listOf(Items.RIFLE, Items.SHOTGUN), inv.primarySlots().map { inv[it].id })
+        assertEquals(Items.SHOTGUN, inv[inv.weaponSlot].id)
+        assertTrue(inv.spareWeaponSlots().isEmpty())
     }
 
     @Test
@@ -51,15 +45,13 @@ class BackpackLoadoutTest {
     @Test
     fun equipSpareIntoAnEquippedSlotSwapsAndKeepsTheHand() {
         val inv = Inventory.starter()
-        inv.add(Items.SNIPER, 1)  // a barra do kit inicial está cheia: vai direto para a mochila
-        val added = inv.firstSlotOf(Items.SNIPER)
-        if (added < Inventory.HOTBAR) assertTrue(inv.stowWeapon(added))
-        val from = inv.firstSlotOf(Items.SNIPER)
+        assertTrue(inv.stowWeapon(inv.firstSlotOf(Items.SHOTGUN)))  // a escopeta fica guardada na mochila
+        val from = inv.firstSlotOf(Items.SHOTGUN)
         assertTrue(from >= Inventory.HOTBAR)
         val rifle = inv.firstSlotOf(Items.RIFLE)
         assertEquals(rifle, inv.weaponSlot)
         assertTrue(inv.equipWeapon(from, rifle))
-        assertEquals(Items.SNIPER, inv[rifle].id)
+        assertEquals(Items.SHOTGUN, inv[rifle].id)
         assertEquals(rifle, inv.weaponSlot)  // a arma nova fica na mão
         assertEquals(Items.RIFLE, inv[from].id)
     }
@@ -67,15 +59,13 @@ class BackpackLoadoutTest {
     @Test
     fun equipWithoutTargetUsesAFreeOrConsumableHotbarSlot() {
         val inv = Inventory.starter()
-        inv.add(Items.SMG, 1)
-        val smg = inv.firstSlotOf(Items.SMG)
-        if (smg < Inventory.HOTBAR) assertTrue(inv.stowWeapon(smg))
+        assertTrue(inv.stowWeapon(inv.firstSlotOf(Items.SHOTGUN)))
         // Lota a barra com consumíveis: a arma troca de lugar com um deles.
         for (i in 0 until Inventory.HOTBAR) if (inv[i].empty) { inv[i].id = Items.ANTIDOTE; inv[i].count = 1 }
-        val from = inv.firstSlotOf(Items.SMG)
+        val from = inv.firstSlotOf(Items.SHOTGUN)
         val bandages = inv.count(Items.BANDAGE) + inv.count(Items.GRENADE) + inv.count(Items.SMOKE) + inv.count(Items.ANTIDOTE) + inv.count(Items.MEDKIT)
         assertTrue(inv.equipWeapon(from))
-        assertTrue(inv.firstSlotOf(Items.SMG) < Inventory.HOTBAR)
+        assertTrue(inv.firstSlotOf(Items.SHOTGUN) < Inventory.HOTBAR)
         val after = inv.count(Items.BANDAGE) + inv.count(Items.GRENADE) + inv.count(Items.SMOKE) + inv.count(Items.ANTIDOTE) + inv.count(Items.MEDKIT)
         assertEquals(bandages, after)  // nenhum consumível se perdeu
     }
@@ -84,8 +74,8 @@ class BackpackLoadoutTest {
     fun handWeaponCannotBeStowed() {
         val inv = Inventory.starter()
         assertFalse(inv.stowWeapon(inv.weaponSlot))
-        assertTrue(inv.stowWeapon(inv.pistolSlot()))
-        assertEquals(-1, inv.pistolSlot())
+        assertTrue(inv.stowWeapon(inv.firstSlotOf(Items.SHOTGUN)))
+        assertEquals(listOf(0), inv.primarySlots())
         assertTrue(inv.holdWeapon(inv.primarySlots().first()))
         assertFalse(inv.holdWeapon(20))
     }

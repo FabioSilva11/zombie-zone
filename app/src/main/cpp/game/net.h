@@ -11,6 +11,7 @@
 
 #include "../core/math.h"
 #include "pvp_rules.h"
+#include "terrain_sync.h"
 
 namespace zz {
 
@@ -55,6 +56,7 @@ struct NetPlayer {
     bool hasSeq = false;
     pvp::PacketBucket packets;  // limite de pacotes por segundo
     pvp::ShooterState shooter;  // cadência, pente, recarga e tiros validados
+    uint32_t terrainAck = 0, terrainSent = 0;  // revisão contígua confirmada / maior revisão enviada
 };
 
 struct NetConfig {
@@ -63,6 +65,7 @@ struct NetConfig {
     std::string hostIp;
     int killLimit = 10;
     float timeLimit = 300;
+    uint32_t seed = 1;  // identifica o terreno e a partida nos pacotes de edição
     uint8_t skins[kMaxNetPlayers] = {255, 255, 255, 255, 255, 255, 255, 255};
     uint32_t ips[kMaxNetPlayers] = {};  // IPv4 (ordem de host) esperado de cada id; 0 = sem verificação
 };
@@ -79,6 +82,9 @@ public:
     void setLocalState(const Vec3& pos, float yaw, float pitch, uint8_t flags, float speed);
     void localFire(const Vec3& from, const Vec3& to);
     void localHit(int target, int damage, bool headshot);
+    void setWorldShot(std::function<void(const Vec3&, const Vec3&)> fn) { worldShot_ = std::move(fn); }
+    void recordTerrainEdit(int x, int y, int z, uint8_t block);
+    std::vector<TerrainEdit> takeTerrainEdits();
 
     // Anfitrião: teste de linha de tiro no mundo da arena (true = livre). Sem isso o filtro de linha de tiro fica desligado.
     void setLineOfSight(std::function<bool(const Vec3&, const Vec3&)> fn) { los_ = std::move(fn); }
@@ -107,6 +113,9 @@ private:
     void pushHostEvent(NetEvent e, std::vector<NetEvent>& out);
     void sendSnapshot();
     void sendState();
+    void sendTerrain();
+    void sendTerrainAck();
+    void handleTerrainAck(const uint8_t* data, size_t len, const sockaddr_in& from);
     int chooseSpawn(int id) const;
     bool seenHostEvent(uint16_t id);
     void reject(pvp::Reject why);
@@ -134,6 +143,9 @@ private:
     int seenHostCount_ = 0;
     // Validação no anfitrião (PvP casual: ver pvp_rules.h).
     std::function<bool(const Vec3&, const Vec3&)> los_;
+    std::function<void(const Vec3&, const Vec3&)> worldShot_;
+    terrainwire::Journal terrainJournal_;
+    terrainwire::Receiver terrainReceiver_;
     pvp::Counters guard_;
     pvp::Counters guardLogged_;
     double clock_ = 0;       // relógio real (s) do anfitrião, usado por cadência e pacotes por segundo
