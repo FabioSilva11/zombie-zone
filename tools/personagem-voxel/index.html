@@ -80,6 +80,13 @@
       <button class="btn" data-anim="unarmed">Sem arma</button>
       <button class="btn" data-anim="tpose">T-pose</button>
     </div></section>
+    <section class="panel"><h2>Teste manual</h2><div class="grid2">
+      <button class="btn" id="shoot">Disparo único</button><button class="btn" id="reload">Recarregar</button>
+      <button class="btn" id="pause">Pausar</button><button class="btn" id="advance">+1 quadro (30 fps)</button>
+    </div>
+      <label style="display:block;font-size:11px;margin-top:10px">Tempo (s) <input id="previewTime" type="number" min="0" step="0.03333333333333333" value="0" style="width:90px"></label>
+      <label style="display:block;font-size:11px;margin-top:8px">Recarga <input id="reloadScrub" aria-label="Progresso da recarga" type="range" min="0" max="1" step="0.001" value="0" style="width:100%"></label>
+    </section>
     <section class="panel"><h2>Animações do Mixamo</h2>
       <div class="grid2"><button class="btn wide" id="demo">Testar com animações Mixamo (X Bot)</button></div>
       <div class="drop" id="drop" style="margin-top:8px">Arraste aqui um <b>.fbx do Mixamo</b><br>ou <label for="file">escolha o arquivo</label>
@@ -546,7 +553,36 @@ function curlFingers(side, grip) {
 }
 
 // ============================================================================ poses e animações procedurais
-const state = { anim:'ready', source:null, sourceClip:null, ik:true, inPlace:true, slow:false, view:'persp', time:0 };
+// BEGIN PREVIEW TRANSPORT
+function createPreviewTransport() {
+  const validTime = value => { if (!Number.isFinite(value) || value < 0) throw new RangeError('tempo inválido'); return value; };
+  return {
+    time:0, paused:false, weaponKick:0, reloadProgress:-1, reloadDuration:2,
+    seek(time) { this.time = validTime(time); this.weaponKick = 0; this.reloadProgress = -1; },
+    shoot() { if (this.reloadProgress >= 0) return false; this.weaponKick = Math.max(this.weaponKick, .5); return true; },
+    reload() { this.reloadProgress = 0; this.weaponKick = 0; },
+    scrubReload(value) { if (!Number.isFinite(value)) throw new RangeError('recarga inválida'); this.reloadProgress = value < 0 ? -1 : Math.min(1, value); },
+    advance(dt) {
+      validTime(dt); this.time += dt;
+      this.weaponKick = Math.max(0, this.weaponKick - dt * 7);
+      if (this.reloadProgress >= 0 && dt > 0) {
+        this.reloadProgress += dt / this.reloadDuration;
+        if (this.reloadProgress >= 1) this.reloadProgress = -1;
+      }
+    },
+    tick(dt) { if (!this.paused) this.advance(dt); },
+    sample() {
+      const p = this.reloadProgress;
+      return { kick:this.weaponKick * .1, reloadProgress:p,
+        reload:p >= 0 ? Math.sin(p * Math.PI) : 0,
+        magazine:p >= 0 ? Math.max(0, Math.sin(p * Math.PI * 2)) : 0 };
+    }
+  };
+}
+// END PREVIEW TRANSPORT
+const transport = createPreviewTransport();
+const state = { anim:'ready', source:null, sourceClip:null, ik:true, inPlace:true, slow:false, view:'persp',
+  get time() { return transport.time; }, set time(value) { transport.seek(value); } };
 function resetPose() {
   for (const n of ORDER) B[n].quaternion.identity();
   B.Hips.position.copy(REST_HIPS);
@@ -625,6 +661,7 @@ function placeGun(mode, t) {
   const y = up.clone().sub(x.clone().multiplyScalar(up.dot(x))).normalize();
   gun.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, x.clone().cross(y)));
   gun.position.copy(anchorWorld).sub(anchorLocal.clone().multiplyScalar(GUN_S).applyQuaternion(gun.quaternion));
+  applyWeaponMotion();
   gun.updateMatrixWorld(true);
   return mode;
 }
@@ -632,12 +669,30 @@ function holdGun(mode) {
   const g = gun.quaternion;
   const gripW = gun.localToWorld(GRIP.clone());
   const foreW = gun.localToWorld(FOREGRIP.clone());
+  const motion = transport.sample();
+  if (motion.reloadProgress >= 0) {
+    // Native gun +Z forward maps to viewer +X, native +X maps to viewer -Z.
+    // Native metres / .085 = character pixels; convert back to gun-local units.
+    const magazine = GRIP.clone().lerp(FOREGRIP, .55);
+    magazine.y -= .12 / .085 / GUN_S;
+    foreW.lerp(gun.localToWorld(magazine), motion.magazine);
+  }
   reachError = 0;
   const aim = mode === 'aim';
   solveArm('Right', gripW, g.clone().multiply(R_RIGHT), PALM_RIGHT, aim ? new THREE.Vector3(-1, -.7, -.4) : new THREE.Vector3(-1, -.9, -.6));
   solveArm('Left', foreW, g.clone().multiply(R_LEFT), PALM_LEFT, aim ? new THREE.Vector3(.3, -1, -.2) : new THREE.Vector3(1, -1, -.3));
   curlFingers('Right', true);
   curlFingers('Left', true);
+}
+function applyWeaponMotion() {
+  const { kick, reload } = transport.sample();
+  const forward = X_AXIS.clone().applyQuaternion(gun.quaternion);
+  const right = new THREE.Vector3(0, 0, -1).applyQuaternion(gun.quaternion);
+  const roll = Q().setFromAxisAngle(forward, -.55 * reload);
+  const pitch = Q().setFromAxisAngle(right, .35 * reload - kick);
+  gun.quaternion.premultiply(pitch).premultiply(roll);
+  gun.position.addScaledVector(forward, -kick * .3 / .085);
+  gun.position.y -= reload * 1.4;
 }
 // Sem IK (animação de fuzil do Mixamo): a arma acompanha a mão direita.
 const HAND_TO_GUN = R_RIGHT.clone().invert();
@@ -647,6 +702,7 @@ function gunInRightHand() {
   gun.quaternion.copy(hq.clone().multiply(HAND_TO_GUN));
   const contact = hand.getWorldPosition(V()).add(PALM_RIGHT.clone().applyQuaternion(hq));
   gun.position.copy(contact).sub(GRIP.clone().multiplyScalar(GUN_S).applyQuaternion(gun.quaternion));
+  applyWeaponMotion();
   gun.updateMatrixWorld(true);
   curlFingers('Right', true);
 }
@@ -758,12 +814,14 @@ function selectAnim(name) {
 document.querySelectorAll('#anims .btn').forEach(b => b.addEventListener('click', () => selectAnim(b.dataset.anim)));
 function toggle(id, key, after) {
   const el = document.getElementById(id);
-  el.addEventListener('click', () => { state[key] = !state[key]; el.classList.toggle('on', state[key]); if (after) after(); });
+  el.setAttribute('aria-pressed', String(state[key]));
+  el.addEventListener('click', () => { state[key] = !state[key]; el.classList.toggle('on', state[key]); el.setAttribute('aria-pressed', String(state[key])); if (after) after(); });
 }
 toggle('ik', 'ik');
 toggle('inplace', 'inPlace');
 toggle('slow', 'slow');
-document.getElementById('bones').addEventListener('click', e => { skeletonHelper.visible = !skeletonHelper.visible; e.currentTarget.classList.toggle('on', skeletonHelper.visible); });
+document.getElementById('bones').setAttribute('aria-pressed', 'false');
+document.getElementById('bones').addEventListener('click', e => { skeletonHelper.visible = !skeletonHelper.visible; e.currentTarget.classList.toggle('on', skeletonHelper.visible); e.currentTarget.setAttribute('aria-pressed', String(skeletonHelper.visible)); });
 const VIEWS = { persp:[38, 28, 52], front:[0, 19, 62], side:[62, 19, 0], back:[0, 21, -62], shoulder:[-13, 30, -40] };
 const desired = new THREE.Vector3(...VIEWS.persp);
 let flying = false;
@@ -778,6 +836,7 @@ function setView(v) {
     controls.target.set(v === 'shoulder' ? -4 : 0, v === 'shoulder' ? 21 : 17, v === 'shoulder' ? 12 : 0);
   }
   if (fps && state.anim !== 'aim' && !state.source) selectAnim('aim');
+  if (transport.paused) { settleCamera(); step(0, false); }
 }
 document.querySelectorAll('#views .btn[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
 document.getElementById('sheetBtn').addEventListener('click', () => { sheetEl.src = renderSheet(); sheetEl.hidden = false; });
@@ -830,12 +889,15 @@ setStatus('Pronto: ' + ORDER.length + ' ossos, ' + meshCount + ' blocos.');
 
 // ============================================================================ quadro
 const clock = new THREE.Clock();
+document.addEventListener('visibilitychange', () => { clock.getDelta(); });
 function frame() {
   requestAnimationFrame(frame);
-  step(Math.min(clock.getDelta(), .05) * (state.slow ? .25 : 1));
+  const dt = Math.min(clock.getDelta(), .05) * (state.slow ? .25 : 1);
+  step(transport.paused ? 0 : dt, !transport.paused);
 }
-function step(dt) {
-  state.time += dt;
+function step(dt, updateCamera = true) {
+  transport.advance(dt);
+  reachError = 0;
   resetPose();
   let mode = null;
   if (state.source) {
@@ -850,7 +912,10 @@ function step(dt) {
   gun.visible = mode !== null;
   if (mode === 'hand') gunInRightHand();
   else if (mode) { placeGun(mode, state.time); holdGun(mode); }
-  else { curlFingers('Left', false); curlFingers('Right', false); }
+  else {
+    gun.position.set(0, 0, 0); gun.quaternion.identity(); gun.updateMatrixWorld(true);
+    curlFingers('Left', false); curlFingers('Right', false);
+  }
   hero.updateMatrixWorld(true);
   reachEl.textContent = mode && mode !== 'hand' ? 'Alcance das mãos: ' + (reachError < .05 ? 'ok' : 'falta ' + reachError.toFixed(2) + ' px') : '';
   if (state.view === 'fps') {
@@ -859,15 +924,79 @@ function step(dt) {
     camera.position.copy(eye);
     const aiming = state.anim === 'aim' && !state.source;
     camera.lookAt(eye.clone().add(new THREE.Vector3(aiming ? .08 : .12, aiming ? -.3 : -.62, 1)));
-  } else {
-    if (flying) { camera.position.lerp(desired, .09); if (camera.position.distanceToSquared(desired) < .01) flying = false; }
+  } else if (updateCamera) {
+    if (flying) { camera.position.lerp(desired, 1 - Math.exp(-5.66 * dt)); if (camera.position.distanceToSquared(desired) < .01) flying = false; }
     controls.update();
   }
   renderer.render(scene, camera);
+  document.getElementById('previewTime').value = state.time.toFixed(4);
+  document.getElementById('reloadScrub').value = Math.max(0, transport.reloadProgress);
+  document.getElementById('reloadScrub').setAttribute('aria-valuetext', transport.reloadProgress < 0 ? 'Sem recarga' : 'Recarga: ' + Math.round(transport.reloadProgress * 100) + '%');
 }
+function setPaused(paused) {
+  transport.paused = Boolean(paused);
+  const button = document.getElementById('pause');
+  button.textContent = transport.paused ? 'Continuar' : 'Pausar';
+}
+function seek(time) {
+  transport.seek(time);
+  if (state.source) state.source.mixer.setTime(time);
+  step(0);
+}
+function shoot() { const fired = transport.shoot(); step(0); return fired; }
+function reload() { transport.reload(); step(0); }
+function scrubReload(progress) { transport.scrubReload(progress); step(0); }
+function snapshot() {
+  hero.updateMatrixWorld(true); gun.updateMatrixWorld(true);
+  const transform = object => ({ position:object.getWorldPosition(V()).toArray(), quaternion:object.getWorldQuaternion(Q()).toArray() });
+  return { time:state.time, anim:state.anim, view:state.view, paused:transport.paused, motion:transport.sample(),
+    camera:{ ...transform(camera), target:controls.target.toArray(), fov:camera.fov, aspect:camera.aspect, flying },
+    gun:{ ...transform(gun), visible:gun.visible },
+    bones:Object.fromEntries(ORDER.map(name => [name, transform(B[name])])), reachError };
+}
+// Captura absoluta: tempo da pose e eventos da arma são entradas independentes.
+// seek() limpa eventos; aplique reloadProgress/shotAge depois para reproduzi-los.
+function capture({ anim = 'ready', time = 0, view = 'persp', reloadProgress = -1, shotAge = null, ik = true } = {}) {
+  if (!ANIMS[anim]) throw new RangeError('animação inválida');
+  if (view !== 'fps' && !VIEWS[view]) throw new RangeError('vista inválida');
+  if (!Number.isFinite(time) || time < 0) throw new RangeError('tempo inválido');
+  if (shotAge !== null && (!Number.isFinite(shotAge) || shotAge < 0)) throw new RangeError('tempo do disparo inválido');
+  if (!Number.isFinite(reloadProgress)) throw new RangeError('recarga inválida');
+  setPaused(true);
+  selectAnim(anim); setView(view); seek(time);
+  state.ik = Boolean(ik);
+  document.getElementById('ik').classList.toggle('on', state.ik);
+  document.getElementById('ik').setAttribute('aria-pressed', String(state.ik));
+  transport.scrubReload(reloadProgress);
+  transport.weaponKick = shotAge === null ? 0 : Math.max(0, .5 - shotAge * 7);
+  settleCamera();
+  step(0, false);
+  return snapshot();
+}
+function settleCamera() {
+  // Uma atualização sem amortecimento consome o movimento pendente do OrbitControls.
+  const damping = controls.enableDamping;
+  controls.enableDamping = false;
+  controls.update();
+  flying = false;
+  if (state.view !== 'fps') {
+    camera.position.copy(desired);
+    controls.target.set(state.view === 'shoulder' ? -4 : 0, state.view === 'shoulder' ? 21 : 17, state.view === 'shoulder' ? 12 : 0);
+    controls.update();
+  }
+  controls.enableDamping = damping;
+}
+document.getElementById('shoot').addEventListener('click', shoot);
+document.getElementById('reload').addEventListener('click', reload);
+document.getElementById('pause').addEventListener('click', () => setPaused(!transport.paused));
+document.getElementById('advance').addEventListener('click', () => { setPaused(true); step(1 / 30); });
+document.getElementById('previewTime').addEventListener('change', e => { setPaused(true); seek(Math.max(0, Number(e.target.value) || 0)); });
+document.getElementById('reloadScrub').addEventListener('input', e => { setPaused(true); scrubReload(Number(e.target.value)); });
 frame();
 // Depuração: avança quadros sem depender do requestAnimationFrame (aba em segundo plano).
 window.__heroi = { B, gun, state, ANIMS, selectAnim, setView, step, camera, controls, renderSheet,
+  pause:setPaused, seek, shoot, reload, scrubReload, snapshot, capture, settleCamera,
+  advance(frames = 1) { if (!Number.isInteger(frames) || frames < 0) throw new RangeError('quadros inválidos'); setPaused(true); step(frames / 30); return snapshot(); },
   sheet(anim) { if (anim) selectAnim(anim); for (let i = 0; i < 30; i++) step(1 / 30); document.querySelector('aside').style.display = 'none'; resize(); sheetEl.src = renderSheet(); sheetEl.hidden = false; return reachEl.textContent; },
   snap(view, frames = 40) { setView(view); for (let i = 0; i < frames; i++) step(1 / 30); if (view !== 'fps') { camera.position.copy(desired); controls.update(); } step(0); return reachEl.textContent; } };
 </script>

@@ -81,7 +81,7 @@ void CharacterModel::sample(int clipIndex, float time, bool loop, Pose& pose) co
         else t = std::min(time, clip.duration);
     }
     for (const auto& ch : clip.channels) {
-        if (ch.node >= static_cast<int>(nodes_.size()) || ch.times.empty()) continue;
+        if (ch.node < 0 || ch.node >= static_cast<int>(nodes_.size()) || ch.times.empty()) continue;
         const int comps = ch.path == 1 ? 4 : 3;
         size_t n = ch.times.size();
         if (ch.values.size() < n * comps) continue;
@@ -130,6 +130,10 @@ void Animator::play(int clip, bool loop, float fade, float speed) {
         speed_ = speed;
         return;
     }
+    // Interruptions start at the last displayed blend, not its target clip.
+    // Ordinary transitions still advance the outgoing clip while fading.
+    fadeFromPose_ = fade > 0 && fade_ > 0 && !displayedPose_.t.empty();
+    if (fadeFromPose_) fadeSourcePose_ = displayedPose_;
     prevClip_ = clip_;
     prevTime_ = time_;
     prevLoop_ = loop_;
@@ -157,12 +161,17 @@ void Animator::evaluate(const CharacterModel& model, Pose& out) {
     model.bindPose(scratchA_);
     model.sample(clip_, time_, loop_, scratchA_);
     if (fade_ > 0 && prevClip_ >= 0 && fadeDuration_ > 0) {
-        model.bindPose(scratchB_);
-        model.sample(prevClip_, prevTime_, prevLoop_, scratchB_);
-        blendPose(scratchB_, scratchA_, 1.0f - fade_ / fadeDuration_, out);
+        if (fadeFromPose_) {
+            blendPose(fadeSourcePose_, scratchA_, 1.0f - fade_ / fadeDuration_, out);
+        } else {
+            model.bindPose(scratchB_);
+            model.sample(prevClip_, prevTime_, prevLoop_, scratchB_);
+            blendPose(scratchB_, scratchA_, 1.0f - fade_ / fadeDuration_, out);
+        }
     } else {
         out = scratchA_;
     }
+    displayedPose_ = out;
 }
 
 }  // namespace zz

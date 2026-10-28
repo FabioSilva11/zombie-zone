@@ -98,6 +98,8 @@ private:
     bool loop_ = true, prevLoop_ = true;
     float speed_ = 1.0f, prevSpeed_ = 1.0f;
     Pose scratchA_, scratchB_;
+    Pose displayedPose_, fadeSourcePose_;
+    bool fadeFromPose_ = false;
 };
 
 }  // namespace zz

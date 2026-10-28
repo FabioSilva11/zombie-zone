@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import './shims.mjs';
+import { createClipSampler, sampleTime, removeHorizontalDrift } from './sampling.mjs';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
@@ -66,17 +67,13 @@ function convert(job) {
   const hipsRest = root.worldToLocal(hips.getWorldPosition(new THREE.Vector3()));
   const scale = HIPS_Y / hipsRest.y;
 
-  const mixer = new THREE.AnimationMixer(root);
-  const action = mixer.clipAction(clip);
-  action.play();
+  const sample = createClipSampler(root, clip);
   const frames = Math.max(2, Math.round(clip.duration * FPS) + 1);
   const used = ORDER.filter(n => bones.has(n));
   const rot = new Map(used.map(n => [n, []]));
   const hipsT = [];
   for (let f = 0; f < frames; f++) {
-    action.time = Math.min(clip.duration, f / FPS);
-    mixer.update(0);
-    root.updateMatrixWorld(true);
+    sample(sampleTime(f, frames, clip.duration, FPS));
     const W = new Map();
     for (const n of ORDER) {
       const parentW = PARENT[n] ? W.get(PARENT[n]) : new THREE.Quaternion();
@@ -96,8 +93,7 @@ function convert(job) {
   }
   if (job.drift) {
     // Tira a caminhada para a frente (o jogo move o personagem pela física), mantendo o balanço.
-    const a = hipsT[0], b = hipsT[hipsT.length - 1];
-    hipsT.forEach((d, i) => { const k = i / (hipsT.length - 1); d.x -= a.x + (b.x - a.x) * k; d.z -= a.z + (b.z - a.z) * k; });
+    removeHorizontalDrift(hipsT);
   }
   // Formato ZZA1: cabeçalho, ossos (nome + quaternions por quadro) e a translação do quadril.
   const nameBytes = used.map(n => Buffer.from(n, 'ascii'));

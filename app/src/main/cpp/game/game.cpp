@@ -875,7 +875,8 @@ void Game::updatePlayer(float dt, const InputState& in) {
             const int jumpClip = m.clipIndex("jump");
             const bool jumping = !player_.onGround && jumpClip >= 0;
             int clip = jumping ? jumpClip : locomotionClip(m, player_.velocity, playerModelYaw_, horizontal, sprinting, crouching_, meleeTime_ >= 0);
-            float speed = jumping ? 1.0f : (crouching_ ? std::max(0.5f, horizontal / 2.2f)
+            const bool idle = clip == m.clipIndex("idle") || clip == m.clipIndex("crouch-idle");
+            float speed = (jumping || idle) ? 1.0f : (crouching_ ? std::max(0.5f, horizontal / 2.2f)
                                      : (sprinting ? horizontal / 6.0f : std::max(0.6f, horizontal / 3.6f)));
             // Animações do Mixamo: nadando; parado mirando ou atirando com a arma nas mãos.
             const int swimClip = m.clipIndex("swim"), aimIdle = m.clipIndex("aim-idle");
@@ -2654,7 +2655,8 @@ void Game::updateRemotes(float dt) {
             const CharacterModel& m = r.asset->model;
             const bool sprinting = r.speed > 5.4f && !(r.flags & NF_CROUCH);
             int clip = locomotionClip(m, r.moveVelocity, r.renderYaw, r.speed, sprinting, (r.flags & NF_CROUCH) != 0);
-            float speed = sprinting ? r.speed / 6.0f : std::max(0.6f, r.speed / 3.6f);
+            const bool idle = clip == m.clipIndex("idle") || clip == m.clipIndex("crouch-idle");
+            float speed = idle ? 1.0f : (sprinting ? r.speed / 6.0f : std::max(0.6f, r.speed / 3.6f));
             r.anim.play(clip, true, sprinting ? 0.15f : 0.2f, speed);
         }
         r.anim.update(dt);
