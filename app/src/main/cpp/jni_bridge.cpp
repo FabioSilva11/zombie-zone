@@ -45,10 +45,6 @@ JNIEXPORT void JNICALL ZZ_FN(drawFrame)(JNIEnv*, jobject, jlong nanos) { game().
 
 JNIEXPORT void JNICALL ZZ_FN(enterLobby)(JNIEnv*, jobject, jint look, jint screen) { game().enterLobby(static_cast<uint32_t>(look), screen); }
 
-JNIEXPORT void JNICALL ZZ_FN(setPreviewSkin)(JNIEnv*, jobject, jint look) { game().setPreviewSkin(static_cast<uint32_t>(look)); }
-
-JNIEXPORT void JNICALL ZZ_FN(rotatePreview)(JNIEnv*, jobject, jfloat dx) { game().rotatePreview(dx); }
-
 JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray values, jint look) {
     using namespace zz::proto;
     float c[C_COUNT] = {0};
@@ -68,7 +64,6 @@ JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray val
     cfg.crystalTotal = static_cast<int>(c[C_CRYSTAL_TOTAL]);
     cfg.sensitivity = c[C_SENSITIVITY];
     cfg.aimAssist = c[C_AIM_ASSIST] > 0.5f;
-    cfg.autoFire = c[C_AUTO_FIRE] > 0.5f;
     cfg.invertY = c[C_INVERT_Y] > 0.5f;
     cfg.seed = static_cast<uint32_t>(c[C_SEED]);
     cfg.reloadSpeed = c[C_RELOAD_SPEED] > 0 ? c[C_RELOAD_SPEED] : 1.0f;
@@ -93,7 +88,7 @@ JNIEXPORT void JNICALL ZZ_FN(startMission)(JNIEnv* env, jobject, jfloatArray val
     cfg.cargo = c[C_CARGO] > 0.5f;
     cfg.perfMode = static_cast<int>(c[C_PERF]);
     cfg.perfFrames = static_cast<int>(c[C_PERF_FRAMES]);
-    game().setGraphics(static_cast<int>(c[C_QUALITY]), c[C_CINEMATIC] > 0.5f);
+    game().setGraphics(static_cast<int>(c[C_QUALITY]));
     game().startMission(cfg);
 }
 
@@ -134,11 +129,11 @@ JNIEXPORT void JNICALL ZZ_FN(setPaused)(JNIEnv*, jobject, jboolean paused) { gam
 
 JNIEXPORT void JNICALL ZZ_FN(revive)(JNIEnv*, jobject) { game().revive(); }
 
-JNIEXPORT void JNICALL ZZ_FN(setSettings)(JNIEnv*, jobject, jfloat sensitivity, jboolean aimAssist, jboolean autoFire, jboolean invertY) {
-    game().setSettings(sensitivity, aimAssist, autoFire, invertY);
+JNIEXPORT void JNICALL ZZ_FN(setSettings)(JNIEnv*, jobject, jfloat sensitivity, jboolean aimAssist, jboolean invertY) {
+    game().setSettings(sensitivity, aimAssist, invertY);
 }
 
-JNIEXPORT void JNICALL ZZ_FN(setGraphics)(JNIEnv*, jobject, jint quality, jboolean cinematic) { game().setGraphics(quality, cinematic); }
+JNIEXPORT void JNICALL ZZ_FN(setGraphics)(JNIEnv*, jobject, jint quality) { game().setGraphics(quality); }
 
 JNIEXPORT void JNICALL ZZ_FN(requestSupply)(JNIEnv*, jobject) { game().requestSupply(); }
 

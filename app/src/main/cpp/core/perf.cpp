@@ -135,7 +135,7 @@ void FrameProfiler::logWindow(double now) {
         "sm.str=%.1f sm.nav=%.1f sm.mini=%.1f sm.upl=%.1f slow33=%d slow50=%d gaps=%lld "
         "gen.ps=%.1f gen.max=%lld mesh.ps=%.1f mesh.max=%lld unl.ps=%.1f up.ps=%.1f up.max=%lld upKB.ps=%.0f "
         "pend=%d pend.max=%d pendUrg=%d chunks=%d gpuMB=%.1f dc.chunks=%.0f dc.chars=%.0f dc.boxes=%.0f dc.bb=%.0f cull=%.0f "
-        "mode=%d q=%d cin=%d flags=%d",
+        "mode=%d q=%d flags=%d",
         s.frames, s.fps, s.intAvg, s.intP50, s.intP95, s.intMax, s.workAvg, s.workP95, s.workMax,
         s.sec[0], s.sec[1], s.sec[2], s.sec[3], s.sec[4], s.sec[5], s.sec[6], s.sec[7],
         s.secMax[1], s.secMax[2], s.secMax[3], s.secMax[6], s.slow33, s.slow50, gaps_,
@@ -143,7 +143,7 @@ void FrameProfiler::logWindow(double now) {
         mx(Cnt::Uploads), ps(Cnt::UploadBytes) / 1024.0f,
         pendGen_, pendingMax_, pendUrgent_, chunks_, gpuMB_, avgPerFrame(Cnt::ChunkDraws), avgPerFrame(Cnt::CharDraws),
         avgPerFrame(Cnt::BoxDraws), avgPerFrame(Cnt::BillboardDraws), avgPerFrame(Cnt::Culled),
-        mode_, quality_, cinematic_ ? 1 : 0, flags_);
+        mode_, quality_, flags_);
 }
 
 void FrameProfiler::logHitch(float interval, float work) {

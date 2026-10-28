@@ -34,8 +34,7 @@ object Shapes {
 /** Ícones da interface, todos desenhados em vetor (sem imagens). */
 enum class Icon {
     GEAR, BAG, BULLET, STAR, DIAMOND, HEART, LOCK, CHECK, CHEST, SWORDS, CLOSE, PLAY,
-    MISSIONS, UPGRADE, VAULT, RIFLE, HELMET, VEST, PISTOL, FIST, JUMP, SCOPE, WIFI, GIFT, PLUS, MAP_FLAG,
-    SKIN, HAIR, FACE, SHIRT, PANTS, ACCESSORY,
+    MISSIONS, UPGRADE, RIFLE, HELMET, VEST, PISTOL, FIST, JUMP, SCOPE, WIFI, GIFT, PLUS, MAP_FLAG,
 }
 
 object Icons {
@@ -232,14 +231,6 @@ object Icons {
                 path.moveTo(x(-0.7f), y(0.8f)); path.lineTo(x(0f), y(0.2f)); path.lineTo(x(0.7f), y(0.8f))
                 canvas.drawPath(path, paint)
             }
-            Icon.VAULT -> {
-                strokeMode(0.16f)
-                rect.set(x(-0.85f), y(-0.8f), x(0.85f), y(0.8f))
-                canvas.drawRoundRect(rect, s * 0.14f, s * 0.14f, paint)
-                canvas.drawCircle(cx, cy, s * 0.3f, paint)
-                canvas.drawLine(x(0f), y(-0.3f), x(0f), y(-0.62f), paint)
-                canvas.drawLine(x(0f), y(0.3f), x(0f), y(0.62f), paint)
-            }
             Icon.SCOPE -> {
                 strokeMode(0.14f)
                 canvas.drawCircle(cx, cy, s * 0.6f, paint)
@@ -309,70 +300,6 @@ object Icons {
                 canvas.drawPath(path, paint)
                 paint.color = Color.argb(90, 0, 0, 0)
                 canvas.drawRect(x(-0.04f), y(-0.2f), x(0.04f), y(0.9f), paint)
-            }
-            Icon.SKIN -> {
-                strokeMode(0.16f)
-                canvas.drawCircle(cx, cy, s * 0.78f, paint)
-                fillMode()
-                canvas.drawCircle(x(-0.32f), y(-0.12f), s * 0.14f, paint)
-                canvas.drawCircle(x(0.32f), y(-0.12f), s * 0.14f, paint)
-                strokeMode(0.14f)
-                path.reset()
-                path.moveTo(x(-0.3f), y(0.36f)); path.quadTo(x(0f), y(0.62f), x(0.3f), y(0.36f))
-                canvas.drawPath(path, paint)
-            }
-            Icon.HAIR -> {
-                fillMode()
-                path.reset()
-                path.moveTo(x(-0.88f), y(0.5f))
-                path.cubicTo(x(-0.95f), y(-1f), x(0.95f), y(-1f), x(0.88f), y(0.5f))
-                path.cubicTo(x(0.5f), y(0.05f), x(0.3f), y(0.45f), x(0f), y(0.1f))
-                path.cubicTo(x(-0.3f), y(0.45f), x(-0.5f), y(0.05f), x(-0.88f), y(0.5f))
-                path.close()
-                canvas.drawPath(path, paint)
-            }
-            Icon.FACE -> {
-                fillMode()
-                rect.set(x(-0.8f), y(-0.85f), x(0.8f), y(0.8f))
-                canvas.drawRoundRect(rect, s * 0.32f, s * 0.32f, paint)
-                paint.color = Color.argb(120, 0, 0, 0)
-                rect.set(x(-0.5f), y(-0.4f), x(-0.16f), y(-0.06f)); canvas.drawRoundRect(rect, s * 0.07f, s * 0.07f, paint)
-                rect.set(x(0.16f), y(-0.4f), x(0.5f), y(-0.06f)); canvas.drawRoundRect(rect, s * 0.07f, s * 0.07f, paint)
-                rect.set(x(-0.42f), y(0.24f), x(0.42f), y(0.42f)); canvas.drawRoundRect(rect, s * 0.09f, s * 0.09f, paint)
-            }
-            Icon.SHIRT -> {
-                fillMode()
-                path.reset()
-                path.moveTo(x(-0.34f), y(-0.92f)); path.lineTo(x(0.34f), y(-0.92f))
-                path.lineTo(x(0.92f), y(-0.5f)); path.lineTo(x(0.62f), y(-0.22f))
-                path.lineTo(x(0.62f), y(0.92f)); path.lineTo(x(-0.62f), y(0.92f))
-                path.lineTo(x(-0.62f), y(-0.22f)); path.lineTo(x(-0.92f), y(-0.5f))
-                path.close()
-                canvas.drawPath(path, paint)
-                paint.color = Color.argb(110, 0, 0, 0)
-                path.reset()
-                path.moveTo(x(-0.34f), y(-0.92f)); path.lineTo(x(0f), y(-0.4f)); path.lineTo(x(0.34f), y(-0.92f))
-                path.close()
-                canvas.drawPath(path, paint)
-            }
-            Icon.PANTS -> {
-                fillMode()
-                rect.set(x(-0.82f), y(-0.95f), x(0.82f), y(-0.55f))
-                canvas.drawRoundRect(rect, s * 0.12f, s * 0.12f, paint)
-                rect.set(x(-0.82f), y(-0.5f), x(-0.12f), y(0.95f))
-                canvas.drawRoundRect(rect, s * 0.12f, s * 0.12f, paint)
-                rect.set(x(0.12f), y(-0.5f), x(0.82f), y(0.95f))
-                canvas.drawRoundRect(rect, s * 0.12f, s * 0.12f, paint)
-            }
-            Icon.ACCESSORY -> {
-                strokeMode(0.2f)
-                rect.set(x(-0.95f), y(-0.42f), x(-0.1f), y(0.3f))
-                canvas.drawRoundRect(rect, s * 0.18f, s * 0.18f, paint)
-                rect.set(x(0.1f), y(-0.42f), x(0.95f), y(0.3f))
-                canvas.drawRoundRect(rect, s * 0.18f, s * 0.18f, paint)
-                canvas.drawLine(x(-0.1f), y(-0.12f), x(0.1f), y(-0.12f), paint)
-                canvas.drawLine(x(-0.95f), y(-0.5f), x(-0.95f), y(-0.82f), paint)
-                canvas.drawLine(x(0.95f), y(-0.5f), x(0.95f), y(-0.82f), paint)
             }
         }
         paint.style = Paint.Style.FILL

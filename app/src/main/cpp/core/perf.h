@@ -82,7 +82,7 @@ public:
     void count(Cnt c, long long n = 1) { cnt_[static_cast<int>(c)] += n; }
     // Valores instantâneos para o log/HUD (chame antes de end()).
     void gauge(int pendingGen, int pendingUrgent, int pendingUploads, int chunks, float gpuMB, int flags);
-    void setContext(int mode, int quality, bool cinematic) { mode_ = mode; quality_ = quality; cinematic_ = cinematic; }
+    void setContext(int mode, int quality) { mode_ = mode; quality_ = quality; }
     void skipFrames(int n) { skip_ = n; }        // descarta quadros de carga/transição
 
     // Execução reproduzível: acumula TODOS os quadros até endRun() e loga p50/p95/p99/máx globais.
@@ -120,7 +120,6 @@ private:
     // Valores instantâneos.
     int pendGen_ = 0, pendUrgent_ = 0, pendUp_ = 0, chunks_ = 0, flags_ = 0, mode_ = 0, quality_ = 0;
     float gpuMB_ = 0, otherEma_ = 8.0f, genPs_ = 0, upPs_ = 0;
-    bool cinematic_ = false;
     int slowSeconds_ = 0;
     Snapshot snap_;
     // Execução reproduzível.

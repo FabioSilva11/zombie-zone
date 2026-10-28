@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Automação de medição de desempenho (tag ZZPerf). Sem dependências. Exige um aparelho no adb e um APK DEBUG.
-//   node scripts/zzperf.mjs run     --label baseline --perf 1 --stage 2 [--quality 1] [--cinematic 0] [--zombies -1] [--install] [--runs 3]
+//   node scripts/zzperf.mjs run     --label baseline --perf 1 --stage 2 [--quality 1] [--zombies -1] [--install] [--runs 3]
 //   node scripts/zzperf.mjs bench   --label baseline --stage 2
 //   node scripts/zzperf.mjs live
 //   node scripts/zzperf.mjs compare perf-results/a.json perf-results/b.json
@@ -118,7 +118,7 @@ async function cmdRun(o, bench) {
   for (let r = 0; r < runs; r++) {
     adb('logcat', '-c');
     const args = ['shell', 'am', 'start', '-S', '-n', `${PKG}/.MainActivity`, '--ei', 'zz_perf', bench ? '3' : String(o.perf ?? 1), '--ei', 'zz_stage', String(o.stage ?? 2), '--ei', 'zz_seed', String(o.seed ?? 1234567)];
-    for (const [flag, extra] of [['quality', 'zz_quality'], ['cinematic', 'zz_cinematic'], ['zombies', 'zz_zombies'], ['frames', 'zz_frames'], ['meters', 'zz_meters'], ['policy', 'zz_policy']]) if (o[flag] !== undefined) args.push('--ei', extra, String(o[flag]));
+    for (const [flag, extra] of [['quality', 'zz_quality'], ['zombies', 'zz_zombies'], ['frames', 'zz_frames'], ['meters', 'zz_meters'], ['policy', 'zz_policy']]) if (o[flag] !== undefined) args.push('--ei', extra, String(o[flag]));
     adb(...args);
     const log = await waitFor(bench ? 'bench done' : 'run done', 4 * 60 * 1000);
     results.push({ info: deviceInfo(), args, ...parseLog(log) });

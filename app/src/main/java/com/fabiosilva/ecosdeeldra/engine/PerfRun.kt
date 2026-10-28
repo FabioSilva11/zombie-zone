@@ -7,7 +7,6 @@ data class PerfRun(
     val seed: Int = 1_234_567,        // < 2^24: cabe exato no FloatArray da configuração
     val frames: Int = 7200,
     val quality: Int = -1,            // -1 mantém o ajuste salvo
-    val cinematic: Int = -1,
     val zombies: Int = -1,
     val meters: Int = 900,
     val policy: Int = 2,
@@ -18,7 +17,6 @@ data class PerfRun(
         config[Cfg.PERF] = if (mode == MODE_BENCH) 0f else mode.toFloat()
         config[Cfg.PERF_FRAMES] = frames.toFloat()
         if (quality >= 0) config[Cfg.QUALITY] = quality.toFloat()
-        if (cinematic >= 0) config[Cfg.CINEMATIC] = cinematic.toFloat()
         if (zombies >= 0) config[Cfg.ZOMBIES] = zombies.toFloat()
     }
 
@@ -37,7 +35,6 @@ data class PerfRun(
                 seed = getInt("zz_seed", 1_234_567).coerceIn(1, 16_000_000),
                 frames = getInt("zz_frames", 7200).coerceIn(600, 36_000),
                 quality = getInt("zz_quality", -1).coerceIn(-1, 2),
-                cinematic = getInt("zz_cinematic", -1).coerceIn(-1, 1),
                 zombies = getInt("zz_zombies", -1).coerceIn(-1, 60),
                 meters = getInt("zz_meters", 900).coerceIn(100, 5000),
                 policy = getInt("zz_policy", 2).coerceIn(0, 2),

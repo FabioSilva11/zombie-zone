@@ -1,6 +1,5 @@
 // Renderizador OpenGL ES 3.0: céu, nuvens, chunks voxel (com vento na grama e nas folhas), personagens,
-// caixas coloridas, partículas e decalques. O modo cinematográfico adiciona sombras do sol em tempo real,
-// bloom, raios de sol, névoa baixa, tone mapping filmico, correção de cor e vinheta.
+// caixas coloridas, partículas e decalques.
 #pragma once
 
 #include <GLES3/gl3.h>
@@ -25,8 +24,6 @@ struct CharacterAsset {
     Image image;
     bool pixelArt = false;  // pele em pixel art: ampliação sem suavizar
     bool doubleSided = false;
-    float roughness = 0.82f;
-    float metallic = 0.0f;
     struct MeshGpu {
         GLuint vao = 0, vbo = 0, ibo = 0;
         GLsizei count = 0;
@@ -98,7 +95,6 @@ struct RenderStats {
     size_t uploadBytes = 0, gpuBytes = 0;      // gpuBytes: VBOs de chunk residentes
     float uploadMs = 0;
     int chunkDraws[3] = {0, 0, 0};             // opaco, recorte, água (passe principal)
-    int shadowChunkDraws = 0;                  // mapa de sombras (cinematic)
     int characterDraws = 0, partDraws = 0;     // personagens e partes (1 draw por parte)
     int boxDraws = 0, billboardFlushes = 0;
     int culledCharacters = 0, culledBoxes = 0;
@@ -125,7 +121,7 @@ struct FrameScene {
     float portalYaw = 0;
     float portalOpen = 0;
     float drawDistance = 140;
-    Vec3 focus;  // centro da área de sombras (o jogador)
+    Vec3 focus;  // centro de prioridade dos uploads (o jogador)
     UploadBudget upload;
 };
 
@@ -134,8 +130,6 @@ public:
     void onSurfaceCreated();
     void onSurfaceChanged(int width, int height);
     void setTheme(const Theme& theme);
-    void setCinematic(bool on) { cinematic_ = on; }
-    bool cinematic() const { return cinematic_; }
     void render(FrameScene& scene);
     int width() const { return width_; }
     int height() const { return height_; }
@@ -148,42 +142,27 @@ public:
     int pendingUploads() const { return stats_.uploadsPending; }
 
 private:
-    struct Target {
-        GLuint fbo = 0, color = 0, depth = 0;
-        int w = 0, h = 0;
-    };
-
     void createPrograms();
     void createStaticBuffers();
     void uploadBlockTextures();
     void syncChunks(World& world, const FrameScene& scene);
     void uploadChunk(Chunk& chunk, size_t bytes);
     void ensureQuadIndices(size_t quads);
-    bool ensurePostTargets();
     void drawSky(const FrameScene& scene, const Mat4& viewProj);
     void drawClouds(const FrameScene& scene, const Mat4& viewProj);
     void drawChunks(const FrameScene& scene, int pass, const Vec4* planes, float maxDist, const Vec3& center, int* drawCounter);
-    void drawCharacters(const FrameScene& scene, const ShaderProgram& program, bool depthOnly);
+    void drawCharacters(const FrameScene& scene, const ShaderProgram& program);
     void drawBoxes(const FrameScene& scene, const ShaderProgram& program);
     void drawBillboards(const FrameScene& scene, const Mat4& viewProj);
-    void renderShadowMap(const FrameScene& scene);
-    void postProcess(const FrameScene& scene, const Mat4& viewProj);
-    const ShaderProgram& voxelProgram() const { return useShadows() ? voxelLit_ : voxel_; }
-    const ShaderProgram& modelProgram() const { return useShadows() ? modelLit_ : model_; }
-    bool useShadows() const { return cinematic_ && shadowReady_; }
     void setVoxelUniforms(const FrameScene& scene, const ShaderProgram& p, const Mat4& viewProj);
     void setModelUniforms(const FrameScene& scene, const ShaderProgram& p, const Mat4& viewProj);
     void setLightUniforms(const FrameScene& scene, const ShaderProgram& p);
-    void drawFullscreen();
 
     int width_ = 1, height_ = 1;
     int contextId_ = 0;
-    bool cinematic_ = false;
-    bool shadowReady_ = false;
-    ShaderProgram voxel_, voxelLit_, voxelDepth_;
-    ShaderProgram model_, modelLit_, modelDepth_;
+    ShaderProgram voxel_;
+    ShaderProgram model_;
     ShaderProgram sky_, billboard_, cloud_;
-    ShaderProgram bright_, blur_, rays_, composite_;
     GLuint quadIbo_ = 0;
     size_t quadIboCapacity_ = 0;
     GLuint blockTextures_ = 0;
@@ -202,14 +181,6 @@ private:
     Theme theme_ = themeForStage(1);
     bool themeDirty_ = true;
     Vec4 frustum_[6];
-    // Sombras e pós-processamento (modo cinematográfico).
-    GLuint shadowFbo_ = 0, shadowTex_ = 0;
-    int shadowContext_ = -1;
-    Mat4 shadowMatrix_;
-    Vec4 shadowPlanes_[6];
-    Vec3 shadowCenter_;
-    Target scene_, bloomA_, bloomB_;
-    int postContext_ = -1;
 };
 
 }  // namespace zz

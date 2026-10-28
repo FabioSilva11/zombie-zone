@@ -82,7 +82,7 @@ node scripts/lan-bot.mjs <ip-do-celular>
 | Suprimentos | Botão SUPRIMENTOS (anúncio premiado): caixa de paraquedas com vida, munição e itens |
 | Mapa | Tocar no minimapa abre o mapa da ilha (o jogo pausa) |
 
-Nos Ajustes há sensibilidade, mira assistida, tiro automático, eixo Y invertido, personalização completa do HUD (mover, aumentar ou esconder cada botão), modo canhoto, vibração, volumes, qualidade gráfica (60/80/100% da resolução), modo ultra-realista, FPS e lembretes. **REVER TUTORIAL** refaz as dicas da primeira fase sem mexer no seu progresso.
+Nos Ajustes há sensibilidade, mira assistida, eixo Y invertido, personalização completa do HUD (mover, aumentar ou esconder cada botão), modo canhoto, vibração, volumes, qualidade gráfica (60/80/100% da resolução), FPS e lembretes. **REVER TUTORIAL** refaz as dicas da primeira fase sem mexer no seu progresso.
 
 ## Armas, mochila e melhorias
 
@@ -93,7 +93,6 @@ Nos Ajustes há sensibilidade, mira assistida, tiro automático, eixo Y invertid
 
 ## Personagem, progresso e anúncios
 
-- **Editor de personagem** em blocos (até 6 heróis). As peças comuns são livres; 17 peças especiais (além do kit básico) são liberadas por objetivos (abates, tiros na cabeça, fases, estrelas, cristais, minutos jogados), por dias de login, por anúncios assistidos ou por diamantes.
 - **Calendário diário** com 7 prêmios crescentes (30 → 150 diamantes), resgatado uma vez por dia.
 - **3 missões diárias** sorteadas por data, mais um bônus por completar as três.
 - **Baú grátis a cada 4 horas.** Dá para abrir antes do tempo assistindo a um anúncio.

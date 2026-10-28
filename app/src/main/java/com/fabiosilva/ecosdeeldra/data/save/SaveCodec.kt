@@ -1,6 +1,5 @@
 package com.fabiosilva.ecosdeeldra.data.save
 
-import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import com.fabiosilva.ecosdeeldra.data.DailyMission
 import com.fabiosilva.ecosdeeldra.data.Hero
 import com.fabiosilva.ecosdeeldra.data.Inventory
@@ -29,7 +28,7 @@ object SaveCodec {
 
     /** Chaves de topo que o app conhece. O resto é preservado em Progress.saveExtras. */
     internal val KNOWN_KEYS: Set<String> = setOf(
-        "version", "writtenBy", "diamonds", "ownedSkins", "selectedHero", "heroes", "stages",
+        "version", "writtenBy", "diamonds", "selectedHero", "heroes", "stages",
         "vitality", "power", "reload", "upgrades", "inventory", "survival", "supplyAdsDay", "supplyAdsToday",
         "stats", "lastLoginDay", "calendarClaims", "lastCalendarClaim", "dailyDay", "daily", "dailyBonusClaimed",
         "adsDay", "adsToday", "chestReadyAt", "tutorialSeen", "tutorial", "playTapsSinceAd", "missionsSinceInterstitial",
@@ -37,8 +36,8 @@ object SaveCodec {
     )
 
     /** Aposentadas: ignoradas na leitura e nunca mais gravadas (nem como extras). */
-    internal val REMOVED_KEYS: Set<String> = setOf("adRevenueMicros", "adRevenueCurrency")
-    internal val REMOVED_SETTINGS_KEYS: Set<String> = setOf("adRevenueDifficulty")
+    internal val REMOVED_KEYS: Set<String> = setOf("adRevenueMicros", "adRevenueCurrency", "ownedSkins")
+    internal val REMOVED_SETTINGS_KEYS: Set<String> = setOf("adRevenueDifficulty", "autoFire", "cinematic")
 
     private fun Float.finiteOr(default: Float = 0f): Float = if (isFinite()) this else default
 
@@ -47,7 +46,6 @@ object SaveCodec {
         o.put("version", SCHEMA_VERSION)
         if (writtenBy.isNotEmpty()) o.put("writtenBy", writtenBy)
         o.put("diamonds", p.diamonds)
-        o.put("ownedSkins", JSONArray(p.ownedCosmetics.toList()))           // nome antigo mantido
         o.put("selectedHero", p.selectedHero)
         o.put("heroes", JSONArray().apply { p.heroes.forEach { put(JSONObject().put("name", it.name).put("look", it.look)) } })
         o.put("stages", JSONObject().apply {
@@ -106,7 +104,6 @@ object SaveCodec {
             put("musicVolume", s.musicVolume.finiteOr(0.6f).toDouble())
             put("sfxVolume", s.sfxVolume.finiteOr(1f).toDouble())
             put("aimAssist", s.aimAssist)
-            put("autoFire", s.autoFire)
             put("invertY", s.invertY)
             put("vibration", s.vibration)
             put("quality", s.quality)
@@ -114,7 +111,6 @@ object SaveCodec {
             put("showFps", s.showFps)
             put("leftHanded", s.leftHanded)
             put("playerName", s.playerName)
-            put("cinematic", s.cinematic)
             put("hudLayout", s.hudLayout)
             put("hudOpacity", s.hudOpacity.finiteOr(0.85f).toDouble())
         })
@@ -179,10 +175,6 @@ object SaveCodec {
 
         // ---- críticas: formato errado => save inválido (cai para os backups; nunca zera em silêncio) ----
         p.diamonds = o.strictInt("diamonds", 0).coerceAtLeast(0)
-        o.strictArray("ownedSkins")?.let { arr ->
-            for (i in 0 until arr.length()) arr.optInt(i, -1).takeIf { it in Cosmetics.all.indices }?.let { p.ownedCosmetics.add(it) }
-        }
-        p.ownedCosmetics.add(0)
         o.strictArray("heroes")?.let { arr ->
             val list = (0 until arr.length()).mapNotNull { i ->
                 val h = arr.optJSONObject(i) ?: return@mapNotNull null
@@ -191,7 +183,7 @@ object SaveCodec {
             if (arr.length() > 0 && list.isEmpty()) throw SaveFormatException("lista de heróis ilegível")
             if (list.isNotEmpty()) {
                 p.heroes.clear()
-                p.heroes.addAll(list.take(Rules.MAX_HEROES))
+                p.heroes.addAll(list.take(6))
             }
         }
         p.selectedHero = o.strictInt("selectedHero", 0).coerceIn(0, p.heroes.size - 1)
@@ -276,7 +268,6 @@ object SaveCodec {
             t.musicVolume = s.optDouble("musicVolume", 0.6).toFloat().coerceIn(0f, 1f)
             t.sfxVolume = s.optDouble("sfxVolume", 1.0).toFloat().coerceIn(0f, 1f)
             t.aimAssist = s.optBoolean("aimAssist", true)
-            t.autoFire = s.optBoolean("autoFire", true)
             t.invertY = s.optBoolean("invertY", false)
             t.vibration = s.optBoolean("vibration", true)
             t.quality = s.optInt("quality", 1).coerceIn(0, 2)
@@ -284,7 +275,6 @@ object SaveCodec {
             t.showFps = s.optBoolean("showFps", false)
             t.leftHanded = s.optBoolean("leftHanded", false)
             t.playerName = s.optString("playerName", "")
-            t.cinematic = s.optBoolean("cinematic", false)
             t.hudLayout = s.optString("hudLayout", "")
             t.hudOpacity = s.optDouble("hudOpacity", 0.85).toFloat().coerceIn(0.3f, 1f)
         }

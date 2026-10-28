@@ -31,7 +31,6 @@ import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
 import com.fabiosilva.ecosdeeldra.data.SaveStore
-import com.fabiosilva.ecosdeeldra.data.Cosmetic
 import com.fabiosilva.ecosdeeldra.data.SurvivalResult
 import com.fabiosilva.ecosdeeldra.data.Upgrades
 import com.fabiosilva.ecosdeeldra.data.ZombieKinds
@@ -62,7 +61,6 @@ import com.fabiosilva.ecosdeeldra.ui.ExpeditionPrepScreen
 import com.fabiosilva.ecosdeeldra.ui.ExpeditionResultOverlay
 import com.fabiosilva.ecosdeeldra.ui.HomeScreen
 import com.fabiosilva.ecosdeeldra.ui.HudEditorScreen
-import com.fabiosilva.ecosdeeldra.ui.CharacterScreen
 import com.fabiosilva.ecosdeeldra.ui.HudView
 import com.fabiosilva.ecosdeeldra.ui.InventoryScreen
 import com.fabiosilva.ecosdeeldra.ui.LoadingOverlay
@@ -206,7 +204,7 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         setContentView(root)
         enterImmersive()
         val s = progress.settings
-        engine { NativeBridge.setGraphics(s.quality, s.cinematic) }
+        engine { NativeBridge.setGraphics(s.quality) }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = onBack()
@@ -246,7 +244,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     /** Tudo que o arranque fazia depois de carregar o save; também roda ao sair da tela de recuperação. */
     private fun startSession(notices: List<SaveNotice>) {
         val newDay = Rules.onAppOpen(progress, today())
-        Rules.refreshCosmeticUnlocks(progress)
         store.save(progress)
         showHome()
         showSaveNotices(notices)
@@ -395,7 +392,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 if (granted) {
                     Rules.registerAdWatched(progress)
                     onGranted()
-                    checkUnlocks()
                 }
                 save()
                 homeScreen?.refresh()
@@ -425,23 +421,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         }
     }
 
-    /** Libera visuais por objetivo e celebra cada um. */
-    fun checkUnlocks() {
-        val unlocked = Rules.refreshCosmeticUnlocks(progress)
-        if (unlocked.isEmpty()) return
-        save()
-        announceUnlocks(unlocked)
-    }
-
-    private fun announceUnlocks(list: List<Cosmetic>) {
-        if (list.isEmpty()) return
-        audio.playUi("unlock", 1f)
-        val names = list.joinToString(", ") { it.name }
-        Popup.show(this, "Novo visual liberado!", "$names já pode ser usado no editor de PERSONAGEM.", "VER PERSONAGEM", "DEPOIS") { ok ->
-            if (ok && !inMission) showSkins()
-        }
-    }
-
     fun requestNotificationsOnce() {
         if (Build.VERSION.SDK_INT >= 33 && progress.settings.reminders &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -468,15 +447,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val look = progress.lookCode
         engine { NativeBridge.enterLobby(look, 0) }
         showScreen(StagesScreen(this))
-    }
-
-    /** Editor de personagem (estilo Minecraft). */
-    fun showSkins() {
-        closeOverlay()
-        hud.visibility = View.GONE
-        val look = progress.lookCode
-        engine { NativeBridge.enterLobby(look, 1) }
-        showScreen(CharacterScreen(this))
     }
 
     fun showMissions() = showScreen(MissionsScreen(this))
@@ -526,9 +496,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
     fun showUpgrades() = showScreen(UpgradesScreen(this))
     fun showSettings() = showScreen(SettingsScreen(this, fromPause = false))
 
-    fun previewLook(code: Int) = engine { NativeBridge.setPreviewSkin(code) }
-    fun rotatePreview(dx: Float) = NativeBridge.rotatePreview(dx)
-
     fun showDailyReward(force: Boolean = false, onDone: (() -> Unit)? = null) {
         val canClaim = Rules.canClaimCalendar(progress, today())
         if (!canClaim && !force) return
@@ -541,7 +508,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
                 homeScreen?.refresh()
                 onDone?.invoke()
                 showReward("◆ $got DIAMANTES", "Prêmio diário • Dia $day") {
-                    checkUnlocks()
                     requestNotificationsOnce()
                 }
             }, onClose = { closeOverlay() }),
@@ -562,8 +528,8 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         surface.setQuality(s.quality)
         hud.applySettings(s.leftHanded, s.vibration, s.showFps, s.hudLayout, s.hudOpacity)
         engine {
-            NativeBridge.setSettings(s.sensitivity, s.aimAssist, s.autoFire, s.invertY)
-            NativeBridge.setGraphics(s.quality, s.cinematic)
+            NativeBridge.setSettings(s.sensitivity, s.aimAssist, s.invertY)
+            NativeBridge.setGraphics(s.quality)
         }
         save()
     }
@@ -628,7 +594,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         config[Cfg.CRYSTAL_TOTAL] = if (survivalMode) 0f else stage.crystalTotal.toFloat()
         config[Cfg.SENSITIVITY] = p.settings.sensitivity
         config[Cfg.AIM_ASSIST] = if (p.settings.aimAssist) 1f else 0f
-        config[Cfg.AUTO_FIRE] = if (p.settings.autoFire) 1f else 0f
         config[Cfg.INVERT_Y] = if (p.settings.invertY) 1f else 0f
         // A semente vem do plano (sorteada na preparação ou colada de um código); até 2^24 cabe exato em float.
         config[Cfg.SEED] = plan.seed.toFloat()
@@ -636,7 +601,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         config[Cfg.BOOST_HEALTH] = 1f
         config[Cfg.BOOST_DAMAGE] = 1f
         config[Cfg.QUALITY] = p.settings.quality.toFloat()
-        config[Cfg.CINEMATIC] = if (p.settings.cinematic) 1f else 0f
         config[Cfg.MODE] = if (survivalMode) Cfg.MODE_SURVIVAL.toFloat() else Cfg.MODE_CAMPAIGN.toFloat()
         config[Cfg.ARMOR] = Upgrades.armor(p.upgrade("armor"))
         config[Cfg.REGEN] = Upgrades.regen(p.upgrade("regen"))
@@ -964,12 +928,11 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val stage = Campaign.stage(missionStage)
         val result = readResult(victory)
         val summary = ExpeditionRules.applyCampaign(progress, plan, stage, result, readContractRun(), today())
-        val unlocked = Rules.refreshCosmeticUnlocks(progress)
         progress.missionsSinceInterstitial += 1
         save()
         audio.playUi(if (victory) "victory" else "defeat", 1f)
         audio.setMusic(GameAudio.Music.MENU)
-        showOverlay(ExpeditionResultOverlay(this, plan, stage, result, summary, unlocked))
+        showOverlay(ExpeditionResultOverlay(this, plan, stage, result, summary))
     }
 
     private fun showDefeat() {
@@ -1011,7 +974,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         val result = readResult(false)
         ExpeditionRules.applyCampaign(progress, plan, Campaign.stage(missionStage), result, readContractRun(), today())
         progress.missionsSinceInterstitial += 1
-        checkUnlocks()
         save()
     }
 
@@ -1172,7 +1134,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
 
     fun finishSurvival() {
         val (result, summary) = recordSurvival() ?: return
-        val unlocked = Rules.refreshCosmeticUnlocks(progress)
         save()
         defeatShown = false
         hud.visibility = View.GONE
@@ -1181,7 +1142,6 @@ class MainActivity : ComponentActivity(), HudView.Listener {
         audio.setMusic(GameAudio.Music.MENU)
         val ranking = Rules.survivalRanking(progress)
         showOverlay(SurvivalResultOverlay(this, result, summary.base, ranking, ranking.getOrNull(summary.base.rank - 1), plan, summary.contract))
-        if (unlocked.isNotEmpty()) surface.postDelayed({ announceUnlocks(unlocked) }, 1500)
     }
 
     fun leaveSurvival(again: Boolean) {

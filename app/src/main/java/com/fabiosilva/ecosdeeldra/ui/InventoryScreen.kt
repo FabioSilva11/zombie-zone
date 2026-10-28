@@ -855,9 +855,6 @@ class InventoryScreen(
                         if (gridDrag && gridMax > 0f) {
                             gridScroll = (gridScroll - (e.y - lastY)).coerceIn(0f, gridMax)
                             invalidate()
-                        } else if (!inMatch && e.x > panel.right) {
-                            // No menu: arrastar fora do painel gira o herói.
-                            app.rotatePreview((e.x - lastX) / resources.displayMetrics.density)
                         }
                     }
                     lastX = e.x

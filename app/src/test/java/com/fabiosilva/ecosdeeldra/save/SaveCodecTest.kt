@@ -34,7 +34,6 @@ class SaveCodecTest {
 
     private fun fullProgress(): Progress = Progress().apply {
         diamonds = 777
-        ownedCosmetics.add(2)
         heroes.add(Hero("Bia", 4242))
         selectedHero = 1
         stages[1] = StageRecord(true, 3, 99.5f, 7, 2, false)
@@ -52,13 +51,29 @@ class SaveCodecTest {
         dailyBonusClaimed = true; adsDay = "2026-10-18"; adsToday = 2; chestReadyAt = 1_760_000_000_000L
         tutorialVersion = 1; tutorialMask = 0b10101; playTapsSinceAd = 2; missionsSinceInterstitial = 3; lastAdAt = 1_760_000_000_001L
         settings.sensitivity = 1.5f; settings.musicVolume = 0.3f; settings.sfxVolume = 0.8f; settings.aimAssist = false
-        settings.autoFire = false; settings.invertY = true; settings.vibration = false; settings.quality = 2
+        settings.invertY = true; settings.vibration = false; settings.quality = 2
         settings.reminders = false; settings.showFps = true; settings.leftHanded = true; settings.playerName = "Ze"
-        settings.cinematic = true; settings.hudLayout = "a=1,2"; settings.hudOpacity = 0.6f
+        settings.hudLayout = "a=1,2"; settings.hudOpacity = 0.6f
         saveExtras["futuro"] = "[{\"a\":[1,2]}]"
         expeditions.add(ExpeditionRecord("ZZ-80W0-Y4G0-100RS", ExpeditionKind.CAMPAIGN, 7, ContractId.SILENT_RECOVERY, ExpeditionOutcome.VICTORY, 212, 19, 6, 38, 118, "2026-10-18"))
         expeditions.remember(ExpeditionPlan(ExpeditionKind.CAMPAIGN, 7, 5, ContractId.RED_NIGHT))
         expeditions.grantModule("nucleo_instavel")
+    }
+
+    @Test
+    fun retiredOptionsAreDroppedWhileSavedAppearanceAndProgressSurvive() {
+        val legacy = JSONObject(SaveFixtures.V4_JSON)
+        legacy.getJSONObject("settings").put("autoFire", true).put("cinematic", true)
+        val decoded = ok(legacy.toString()).progress
+        val encoded = JSONObject(SaveCodec.encode(decoded))
+        assertEquals(1234, decoded.diamonds)
+        assertEquals("Bia", decoded.currentHero.name)
+        assertEquals(legacy.getJSONArray("heroes").getJSONObject(1).getInt("look"), decoded.lookCode)
+        assertEquals(SaveFixtures.STARTER_INVENTORY, decoded.inventory.encode())
+        assertFalse(encoded.has("ownedSkins"))
+        assertFalse(encoded.getJSONObject("settings").has("autoFire"))
+        assertFalse(encoded.getJSONObject("settings").has("cinematic"))
+        assertFalse(decoded.saveExtras.containsKey("ownedSkins"))
     }
 
     @Test

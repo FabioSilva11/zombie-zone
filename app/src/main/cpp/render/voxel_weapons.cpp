@@ -508,8 +508,6 @@ void buildVoxelItem(VoxelItem item, CharacterAsset& out) {
     out.pixelArt = true;
     out.doubleSided = true;
     // Madeira e metal grafite foscos, como os materiais do visualizador.
-    out.roughness = 0.8f;
-    out.metallic = item == VoxelItem::Knife ? 0.45f : 0.25f;
 }
 
 Vec3 voxelMuzzle(VoxelItem item) { return handPoint(item, spec(item).muzzle); }

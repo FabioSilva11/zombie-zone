@@ -24,16 +24,14 @@ object NativeBridge {
     external fun drawFrame(nanos: Long)
 
     external fun enterLobby(look: Int, screen: Int)
-    external fun setPreviewSkin(look: Int)
-    external fun rotatePreview(dx: Float)
     /** [look] = aparência do personagem (Look codificado). */
     external fun startMission(config: FloatArray, look: Int)
     /** [looks] = aparência de cada jogador por id. */
     external fun startPvp(config: FloatArray, hostIp: String, looks: IntArray)
     external fun setPaused(paused: Boolean)
     external fun revive()
-    external fun setSettings(sensitivity: Float, aimAssist: Boolean, autoFire: Boolean, invertY: Boolean)
-    external fun setGraphics(quality: Int, cinematic: Boolean)
+    external fun setSettings(sensitivity: Float, aimAssist: Boolean, invertY: Boolean)
+    external fun setGraphics(quality: Int)
 
     // Entrada (seguras em qualquer thread)
     external fun setMove(x: Float, y: Float)

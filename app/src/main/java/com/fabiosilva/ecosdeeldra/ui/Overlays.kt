@@ -23,7 +23,6 @@ import com.fabiosilva.ecosdeeldra.data.ContractId
 import com.fabiosilva.ecosdeeldra.data.ExpeditionPlan
 import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.RewardSummary
-import com.fabiosilva.ecosdeeldra.data.Cosmetic
 import com.fabiosilva.ecosdeeldra.data.Stage
 import com.fabiosilva.ecosdeeldra.engine.Hud
 import com.fabiosilva.ecosdeeldra.engine.NativeBridge

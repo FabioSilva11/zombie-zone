@@ -41,10 +41,9 @@ class PerfRunTest {
         assertEquals(777f, config[Cfg.SEED], 0f)
         assertEquals(1f, config[Cfg.QUALITY], 0f)  // quality < 0: mantém o ajuste salvo
 
-        PerfRun.parse(extras("zz_perf" to 2, "zz_quality" to 2, "zz_cinematic" to 1, "zz_zombies" to 30))!!.applyTo(config)
+        PerfRun.parse(extras("zz_perf" to 2, "zz_quality" to 2, "zz_zombies" to 30))!!.applyTo(config)
         assertEquals(2f, config[Cfg.PERF], 0f)
         assertEquals(2f, config[Cfg.QUALITY], 0f)
-        assertEquals(1f, config[Cfg.CINEMATIC], 0f)
         assertEquals(30f, config[Cfg.ZOMBIES], 0f)
     }
 

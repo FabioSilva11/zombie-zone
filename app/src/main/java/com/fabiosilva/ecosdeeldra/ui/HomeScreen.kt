@@ -16,7 +16,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Campaign
-import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import com.fabiosilva.ecosdeeldra.data.ExpeditionKind
 import com.fabiosilva.ecosdeeldra.data.Look
 import com.fabiosilva.ecosdeeldra.data.LookPainter
@@ -66,7 +65,6 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
     private val currencies = FrameLayout(app)
     private val stagesValue = Ui.title(app, "", 10.5f)
     private val starsValue = Ui.title(app, "", 10.5f)
-    private val heroesValue = Ui.title(app, "", 10.5f)
     private val missions: Entry
     private val daily: Entry
     private val chest: Entry
@@ -221,7 +219,6 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         }
         stat("FASES", stagesValue)
         stat("ESTRELAS", starsValue)
-        stat("HERÓIS", heroesValue)
         addView(stats, Ui.frame(app.dpi(100), Ui.WRAP, Gravity.TOP or Gravity.END))
 
         // Menu lateral esquerdo
@@ -236,7 +233,7 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         }
         addView(menu, Ui.frame(app.dpi(120), Ui.WRAP, Gravity.TOP or Gravity.START))
 
-        // Barra inferior: COFRE • ARMAS • FASES
+        // Barra inferior: ARMAS • FASES
         val bar = Ui.row(app).apply {
             background = PanelDrawable(app, Color.parseColor("#D90B0720"), Color.parseColor("#668B5BFF"), 8f)
             setPadding(app.dpi(4), app.dpi(2), app.dpi(4), app.dpi(2))
@@ -265,7 +262,6 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
             if (bar.childCount > 0) bar.addView(View(app).apply { setBackgroundColor(Color.argb(70, 255, 255, 255)) }, Ui.lp(app.dpi(1), app.dpi(18)))
             bar.addView(item, Ui.lp(0, Ui.MATCH, 1f))
         }
-        barItem(Icon.VAULT, "COFRE") { app.showSkins() }
         barItem(Icon.RIFLE, "ARMAS") { app.showUpgrades() }
         barItem(Icon.MAP_FLAG, "FASES") { app.showStages() }
         addView(bar, Ui.frame(app.dpi(330), app.dpi(31), Gravity.BOTTOM or Gravity.START))
@@ -357,7 +353,6 @@ class HomeScreen(private val app: MainActivity) : FrameLayout(app) {
         val p = app.progress
         stagesValue.text = "${p.completedStages()}/${p.highestUnlockedStage()}"
         starsValue.text = "${p.totalStars()}/${p.highestUnlockedStage() * 3}"
-        heroesValue.text = "${p.heroes.size}/${Cosmetics.all.size}"
         missions.badge.setCount(Rules.claimableDailyCount(p))
         daily.badge.setCount(if (Rules.canClaimCalendar(p, app.today())) 1 else 0)
         val remaining = Rules.adsRemaining(p, app.today())

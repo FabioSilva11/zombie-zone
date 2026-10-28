@@ -14,7 +14,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.fabiosilva.ecosdeeldra.MainActivity
-import com.fabiosilva.ecosdeeldra.data.Cosmetic
 import com.fabiosilva.ecosdeeldra.data.ContractId
 import com.fabiosilva.ecosdeeldra.data.ContractReward
 import com.fabiosilva.ecosdeeldra.data.Contracts
@@ -67,7 +66,6 @@ class ExpeditionResultOverlay(
     stage: Stage,
     result: MissionResult,
     summary: ExpeditionSummary,
-    unlocked: List<Cosmetic>,
 ) : FrameLayout(app) {
     init {
         setBackgroundColor(Color.argb(190, 4, 7, 14))
@@ -163,9 +161,6 @@ class ExpeditionResultOverlay(
         totalRow.addView(Ui.title(app, "TOTAL", 16f), Ui.lp(0, Ui.WRAP, 1f))
         totalRow.addView(totalText)
         rewards.addView(totalRow, Ui.lp(Ui.MATCH, Ui.WRAP).apply { topMargin = app.dpi(6) })
-        if (unlocked.isNotEmpty()) {
-            rewards.addView(Ui.text(app, "NOVO VISUAL: ${unlocked.joinToString { it.name }}!", 13f, Palette.gold, Fonts.title).apply { setPadding(0, app.dpi(6), 0, 0) })
-        }
         columns.addView(rewards, Ui.lp(0, Ui.WRAP, 1.3f).apply { marginStart = app.dpi(16) })
         content.addView(columns, Ui.lp(Ui.MATCH, Ui.WRAP))
 
@@ -201,6 +196,5 @@ class ExpeditionResultOverlay(
         val width = minOf(app.dpi(680), resources.displayMetrics.widthPixels - app.dpi(24))
         addView(panel, Ui.frame(width, Ui.WRAP, Gravity.CENTER))
         Ui.popIn(panel)
-        if (unlocked.isNotEmpty()) postDelayed({ app.audio.playUi("unlock", 1f) }, 1200)
     }
 }

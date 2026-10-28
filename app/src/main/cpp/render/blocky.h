@@ -1,5 +1,5 @@
 // Personagens de blocos estilo Minecraft gerados em código: corpo de caixas (cabeça, tronco, braços e
-// pernas), pele 64x64 em pixel art pintada a partir da aparência escolhida no editor e animações
+// pernas), pele 64x64 em pixel art pintada a partir da aparência salva e animações
 // (parado, andar, correr, morrer, gestos). Zumbis usam o mesmo gerador com pele esverdeada e roupa rasgada.
 #pragma once
 

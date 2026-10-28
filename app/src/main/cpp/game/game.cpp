@@ -97,7 +97,7 @@ void Game::onSurfaceChanged(int width, int height) { renderer_.onSurfaceChanged(
 CharacterAsset* Game::character(uint32_t look) {
     auto it = characters_.find(look);
     if (it != characters_.end()) return it->second.get();
-    // No editor cada ajuste cria uma aparência nova: limpa o cache no lobby (sem zumbis em cena).
+    // Limita o cache entre partidas no lobby, quando não há zumbis em cena.
     if (characters_.size() > 40 && mode_ == Mode::Lobby) {
         for (auto i = characters_.begin(); i != characters_.end();) {
             if (i->second.get() == playerAsset_) {
@@ -169,7 +169,6 @@ void Game::enterLobby(uint32_t skin, int screen) {
         camYaw_ = 0;
         camPitch_ = 0;
         portalOpen_ = false;
-        previewYaw_ = 0;
     }
     playerAsset_ = character(skin);
     playerAnim_ = Animator();
@@ -179,32 +178,15 @@ void Game::enterLobby(uint32_t skin, int screen) {
     lobbyEmoteCount_ = 0;
 }
 
-void Game::setPreviewSkin(uint32_t skin) {
-    playerAsset_ = character(skin);
-    playerAnim_ = Animator();
-    if (playerAsset_) {
-        playerAnim_.play(playerAsset_->model.clipIndex("wave"), false, 0);
-        lobbyEmoteTimer_ = 6.0f;
-        lobbyEmoteCount_ = 1;  // depois do aceno vem a dança
-    }
-}
-
-void Game::rotatePreview(float dx) {
-    std::lock_guard<std::mutex> lock(inputMutex_);
-    input_.previewRotate += dx;
-}
-
-void Game::setSettings(float sensitivity, bool aimAssist, bool autoFire, bool invertY) {
+void Game::setSettings(float sensitivity, bool aimAssist, bool invertY) {
     config_.sensitivity = sensitivity;
     config_.aimAssist = aimAssist;
-    config_.autoFire = autoFire;
     config_.invertY = invertY;
 }
 
-void Game::setGraphics(int quality, bool cinematic) {
+void Game::setGraphics(int quality) {
     quality_ = quality;
     viewRadius_ = quality <= 0 ? 6 : (quality >= 2 ? 10 : 8);
-    renderer_.setCinematic(cinematic);
 }
 
 void Game::setPaused(bool paused) {
@@ -318,7 +300,6 @@ void Game::consumeInput(InputState& in) {
     in = input_;
     input_.lookX = input_.lookY = 0;
     input_.jumps = input_.reloads = 0;
-    input_.previewRotate = 0;
     input_.supplyRequests = 0;
     input_.crouchToggles = input_.sprintToggles = input_.melees = input_.grenades = input_.shoulderSwaps = 0;
     input_.tapCount = input_.useCount = 0;
@@ -341,7 +322,7 @@ void Game::frame(double now) {
     }
     if (autopilot_.active) dt = 1.0f / 60.0f;  // trajetória independente da taxa de quadros
     time_ += dt;
-    prof_.setContext(static_cast<int>(mode_), quality_, renderer_.cinematic());  // o log ZZPerf (5 s) substitui o antigo "FPS"
+    prof_.setContext(static_cast<int>(mode_), quality_);  // o log ZZPerf (5 s) substitui o antigo "FPS"
 
     if (mode_ == Mode::Lobby) { worldTime_ += dt; updateLobby(dt); }
     else if (mode_ == Mode::Pvp) updatePvp(dt);
@@ -402,8 +383,6 @@ int Game::perfFlags() const {
 void Game::updateLobby(float dt) {
     InputState in;
     consumeInput(in);
-    previewYaw_ += in.previewRotate * 0.012f;
-    if (lobbyScreen_ == 0) previewYaw_ = lerpAngle(previewYaw_, 0.0f, damp(1.5f, dt));
     if (playerAsset_) {
         playerAnim_.update(dt);
         lobbyEmoteTimer_ -= dt;
@@ -420,11 +399,7 @@ void Game::updateLobby(float dt) {
 
     Vec3 c = layout_.start;
     Vec3 target, eye;
-    if (lobbyScreen_ == 1) {
-        // Editor de personagem: o menu ocupa a faixa esquerda, então o herói fica à direita.
-        target = c + Vec3(-2.35f, 0.95f, 0);
-        eye = target + Vec3(0.0f, 0.3f, 4.4f);
-    } else if (lobbyScreen_ == 2) {
+    if (lobbyScreen_ == 2) {
         // Inventário: o herói aparece no painel "Personagem" à esquerda da tela.
         target = c + Vec3(5.0f, 0.62f, 0);
         eye = target + Vec3(0.0f, 0.3f, 6.8f);
@@ -1010,13 +985,7 @@ void Game::updateWeapon(float dt, const InputState& in) {
     targetLocked_ = assistTarget_ >= 0;
     targetHp_ = targetLocked_ ? zombies_[static_cast<size_t>(assistTarget_)].health / zombies_[static_cast<size_t>(assistTarget_)].maxHealth : 0;
 
-    bool autoTrigger = false;
-    if (config_.autoFire && assistTarget_ >= 0) {
-        const Zombie& z = zombies_[static_cast<size_t>(assistTarget_)];
-        float reach = std::min(42.0f, w.range);
-        autoTrigger = assistAngle_ < 0.035f && distXZ(z.body.position, player_.position) < reach;
-    }
-    bool trigger = (in.fire || autoTrigger) && swapTimer_ <= 0 && !throwAiming_ && throwAnimTime_ < 0;
+    bool trigger = in.fire && swapTimer_ <= 0 && !throwAiming_ && throwAnimTime_ < 0;
     if (trigger && ammo_ == 0 && reloadTimer_ <= 0 && meleeTime_ < 0) {
         if (emptyClick_ <= 0) {
             emitSound(SND_EMPTY, player_.position, 0.8f);  // clique de arma vazia
@@ -1930,9 +1899,9 @@ void Game::buildScene() {
         posePlayer(scratchPose_, armed);
         bool playing = mode_ == Mode::Mission || mode_ == Mode::Pvp;
         Vec3 pos = player_.position + Vec3(0, visualStep_ - (playing ? 0.12f * crouchBlend_ : 0.0f), 0);
-        // No editor a câmera está do lado oposto ao herói: o corpo vira de frente para ela.
-        float facing = lobbyScreen_ == 2 ? 0.6f : (lobbyScreen_ == 1 ? -0.49f : 0.0f);
-        float yaw = mode_ == Mode::Lobby ? kPi + previewYaw_ - facing : playerModelYaw_;
+        // No inventário o herói acompanha o enquadramento do painel.
+        float facing = lobbyScreen_ == 2 ? 0.6f : 0.0f;
+        float yaw = mode_ == Mode::Lobby ? kPi - facing : playerModelYaw_;
         float flash = invulnerable_ > 0 && damageFlash_ > 0.6f ? 0.45f : 0.0f;
         addCharacter(playerAsset_, pos, yaw, 1.0f, scratchPose_, {1, 1, 1}, flash, Vec3(1, 1, 1), playing ? leanRoll_ : 0.0f);
         CharacterDraw& draw = scene_.characters[scene_.characterCount - 1];
@@ -2428,8 +2397,7 @@ void Game::startPvp(const PvpConfig& c) {
     config_.crystalTotal = 0;
     config_.sensitivity = c.sensitivity;
     config_.invertY = c.invertY;
-    config_.aimAssist = false;  // PvP: sem assistência de mira nem tiro automático
-    config_.autoFire = false;
+    config_.aimAssist = false;  // PvP: sem assistência de mira
     config_.seed = c.seed;
     int zoneStage = static_cast<int>(c.seed % 4) * 5 + 1;
     theme_ = applySkyVariant(themeForStage(zoneStage), c.seed, true);

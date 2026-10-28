@@ -47,7 +47,6 @@ struct MissionConfig {
     int crystalTotal = 3;
     float sensitivity = 1.0f;
     bool aimAssist = true;
-    bool autoFire = false;
     bool invertY = false;
     uint32_t seed = 1;
     float reloadSpeed = 1.0f;
@@ -123,7 +122,6 @@ struct InputState {
     int aimStage = 0;  // 0 = fora da mira, 1 = ADS, 2 = segundo nível da luneta
     int jumps = 0;
     int reloads = 0;
-    float previewRotate = 0;
     int supplyRequests = 0;
     int crouchToggles = 0;
     int sprintToggles = 0;
@@ -349,14 +347,13 @@ public:
 
     // Comandos (thread GL)
     void enterLobby(uint32_t look, int screen);
-    void setPreviewSkin(uint32_t look);
     void startMission(const MissionConfig& config);
     void startPvp(const PvpConfig& config);
     void stopPvp();
     void setPaused(bool paused);
     void revive();
-    void setSettings(float sensitivity, bool aimAssist, bool autoFire, bool invertY);
-    void setGraphics(int quality, bool cinematic);
+    void setSettings(float sensitivity, bool aimAssist, bool invertY);
+    void setGraphics(int quality);
 
     // Entrada (qualquer thread)
     void setMove(float x, float y);
@@ -366,7 +363,6 @@ public:
     void setAimStage(int stage);
     void pressJump();
     void pressReload();
-    void rotatePreview(float dx);
     void requestSupply();
     void toggleCrouch();
     void toggleSprint();
@@ -619,7 +615,6 @@ private:
     bool wasInWater_ = false;
     float lobbyEmoteTimer_ = 5;
     int lobbyEmoteCount_ = 0;
-    float previewYaw_ = 0;
     int lobbyScreen_ = 0;
     float burning_ = 0, bleeding_ = 0, poisoned_ = 0, slowed_ = 0;
     float damageBoost_ = 0;

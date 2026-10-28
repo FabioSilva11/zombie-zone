@@ -9,15 +9,12 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.fabiosilva.ecosdeeldra.MainActivity
 import com.fabiosilva.ecosdeeldra.data.Rules
-import com.fabiosilva.ecosdeeldra.data.Cosmetics
-import com.fabiosilva.ecosdeeldra.data.UnlockKind
 import com.fabiosilva.ecosdeeldra.data.Upgrades
 import java.util.Calendar
 
-/** Missões diárias e conquistas (objetivos que liberam skins). Menu lateral à esquerda, como na tela de skins. */
+/** Missões diárias e seu progresso. */
 @SuppressLint("ViewConstructor")
 class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
-    private var tab = 0
 
     init {
         setBackgroundColor(Color.argb(170, 6, 10, 20))
@@ -28,7 +25,7 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
     private fun build() {
         removeAllViews()
         val column = Ui.column(app)
-        column.addView(Header.build(app, "MISSÕES", "VOLTE TODO DIA • LIBERE VISUAIS") { app.showHome() })
+        column.addView(Header.build(app, "MISSÕES", "COMPLETE OBJETIVOS • GANHE DIAMANTES") { app.showHome() })
         val body = Ui.row(app, Gravity.TOP)
         body.addView(sidebar(), Ui.lp(app.dpi(200), Ui.MATCH).apply { setMargins(app.dpi(20), app.dpi(8), app.dpi(10), app.dpi(14)) })
         body.addView(contentArea(), Ui.lp(0, Ui.MATCH, 1f).apply { setMargins(0, app.dpi(8), app.dpi(20), app.dpi(14)) })
@@ -37,11 +34,6 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
     }
 
     private fun refresh() = build()
-
-    private fun selectTab(i: Int) {
-        tab = i
-        build()
-    }
 
     private fun sidebar(): View {
         val side = Ui.column(app).apply {
@@ -52,13 +44,6 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
             letterSpacing = 0.1f
             setPadding(app.dpi(4), 0, 0, app.dpi(8))
         })
-        listOf("DIÁRIAS", "CONQUISTAS").forEachIndexed { i, label ->
-            val selected = i == tab
-            side.addView(
-                Ui.button(app, label, if (selected) Palette.lime else Palette.stone, if (selected) Palette.dark else Color.WHITE, 13f) { selectTab(i) },
-                Ui.lp(Ui.MATCH, app.dpi(50)).apply { bottomMargin = app.dpi(8) },
-            )
-        }
         val claimed = app.progress.daily.count { it.claimed }
         side.addView(View(app), Ui.lp(0, 0, 1f))
         val summary = Ui.column(app).apply {
@@ -82,21 +67,19 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
             background = PanelDrawable(app, Palette.panel, Palette.line, 14f)
             setPadding(app.dpi(16), app.dpi(14), app.dpi(16), app.dpi(10))
         }
-        val daily = tab == 0
-        area.addView(Ui.title(app, if (daily) "Missões diárias" else "Suas conquistas", 22f))
+        area.addView(Ui.title(app, "Missões diárias", 22f))
         area.addView(
-            Ui.text(app, captionText(daily), 12f, Palette.muted).apply {
+            Ui.text(app, captionText(), 12f, Palette.muted).apply {
                 setLineSpacing(0f, 1.15f)
                 setPadding(0, app.dpi(4), 0, app.dpi(10))
             },
             Ui.lp(Ui.MATCH, Ui.WRAP),
         )
-        area.addView(if (daily) dailyView() else achievementsView(), Ui.lp(Ui.MATCH, 0, 1f))
+        area.addView(dailyView(), Ui.lp(Ui.MATCH, 0, 1f))
         return area
     }
 
-    private fun captionText(daily: Boolean): String {
-        if (!daily) return "Acompanhe seus marcos e desbloqueie recompensas especiais."
+    private fun captionText(): String {
         val midnight = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0) }
         val hours = ((midnight.timeInMillis - System.currentTimeMillis()) / 3_600_000).coerceAtLeast(0)
         return "Renovam em ${hours}h • complete as 3 missões para ganhar ◆ ${Rules.DAILY_BONUS}"
@@ -152,25 +135,6 @@ class MissionsScreen(private val app: MainActivity) : FrameLayout(app) {
         return ScrollView(app).apply { addView(list) }
     }
 
-    private fun achievementsView(): View {
-        val p = app.progress
-        val list = Ui.column(app)
-        val s = p.stats
-        list.addView(Ui.text(app, "Abates ${s.kills} • Tiros na cabeça ${s.headshots} • Vitórias ${s.wins} • Cristais ${s.crystals} • Tempo ${s.playSeconds / 60} min • Anúncios ${s.adsWatched}", 12f, Palette.muted).apply { setPadding(0, 0, 0, app.dpi(8)) })
-        for (skin in Cosmetics.all.filter { it.unlock != UnlockKind.FREE && it.unlock != UnlockKind.DIAMONDS }) {
-            val owned = skin.index in p.ownedCosmetics
-            val (value, goal) = Cosmetics.progressOf(skin, p)
-            val color = when (skin.unlock) { UnlockKind.ADS -> Palette.cyan; UnlockKind.LOGIN_DAYS -> Palette.gold; else -> Palette.lime }
-            val button = if (owned) Ui.button(app, "LIBERADA ✓", Palette.limeDark, Palette.dark, 12f) {}.also { Ui.setEnabledLook(it, false) }
-            else if (skin.unlock == UnlockKind.ADS) Ui.button(app, "▶ ANÚNCIO", Palette.cyan, Palette.dark, 12f) { app.watchAd { refresh() } }
-            else null
-            list.addView(
-                rowCard("Visual: ${skin.name}", Cosmetics.requirementText(skin), if (owned) 1f else value.toFloat() / goal.coerceAtLeast(1), if (owned) "✓" else "${value.coerceAtMost(goal)}/$goal", color, button),
-                Ui.lp(Ui.MATCH, Ui.WRAP).apply { bottomMargin = app.dpi(8) },
-            )
-        }
-        return ScrollView(app).apply { addView(list) }
-    }
 }
 
 @SuppressLint("ViewConstructor")

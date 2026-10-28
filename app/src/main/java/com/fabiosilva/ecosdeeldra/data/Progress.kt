@@ -47,7 +47,6 @@ class Settings {
     var musicVolume = 0.6f
     var sfxVolume = 1.0f
     var aimAssist = true
-    var autoFire = true
     var invertY = false
     var vibration = true
     var quality = 1 // 0 baixa, 1 média, 2 alta
@@ -55,7 +54,6 @@ class Settings {
     var showFps = false
     var leftHanded = false
     var playerName = ""
-    var cinematic = false // modo ultra-realista (PBR aproximado, sombras do sol e pós-processamento)
     var hudLayout = ""    // posições dos controles montadas pelo jogador (vazio = padrão)
     var hudOpacity = 0.85f
 }
@@ -63,9 +61,7 @@ class Settings {
 /** Todo o progresso salvo do jogador. A lógica fica em [Rules] para ser testável sem Android. */
 class Progress {
     var diamonds = 0
-    /** Visuais especiais liberados para o editor de personagem (índices de [Cosmetics]). */
-    val ownedCosmetics: MutableSet<Int> = sortedSetOf(0)
-    /** Personagens criados pelo jogador (estilo Minecraft); sempre há pelo menos um. */
+    /** Personagens salvos por versões anteriores; sempre há pelo menos um. */
     val heroes: MutableList<Hero> = mutableListOf(Hero("Herói", Look().encode()))
     var selectedHero = 0
     val currentHero: Hero get() = heroes.getOrElse(selectedHero) { heroes.first() }
@@ -256,7 +252,7 @@ object Rules {
     fun adsRemaining(p: Progress, day: String): Int =
         AD_DAILY_CAP - (if (p.adsDay == day) p.adsToday else 0)
 
-    /** Todo anúncio assistido conta para skins de anúncio e para a missão diária. */
+    /** Registra anúncios assistidos nas estatísticas gerais. */
     fun registerAdWatched(p: Progress) {
         p.stats.adsWatched += 1
         bumpDaily(p, "ad", 1)
@@ -364,38 +360,6 @@ object Rules {
         p.stats.wins + p.stats.losses >= 3 &&
             p.missionsSinceInterstitial >= INTERSTITIAL_EVERY &&
             now - p.lastAdAt >= INTERSTITIAL_GAP_MS
-
-    /** Libera visuais cujo objetivo foi cumprido; retorna os recém-liberados. */
-    fun refreshCosmeticUnlocks(p: Progress): List<Cosmetic> {
-        val unlocked = Cosmetics.all.filter { it.index !in p.ownedCosmetics && Cosmetics.objectiveMet(it, p) }
-        unlocked.forEach { p.ownedCosmetics.add(it.index) }
-        return unlocked
-    }
-
-    fun buyCosmetic(p: Progress, index: Int): Boolean {
-        val c = Cosmetics.get(index)
-        if (index in p.ownedCosmetics || c.price <= 0 || p.diamonds < c.price) return false
-        p.diamonds -= c.price
-        p.ownedCosmetics.add(index)
-        return true
-    }
-
-    const val MAX_HEROES = 6
-
-    /** Cria um personagem novo (aleatório, só com peças livres) e já o seleciona. */
-    fun createHero(p: Progress, look: Look, name: String): Boolean {
-        if (p.heroes.size >= MAX_HEROES) return false
-        p.heroes.add(Hero(sanitizeName(name), Cosmetics.sanitize(p, look).encode()))
-        p.selectedHero = p.heroes.size - 1
-        return true
-    }
-
-    fun deleteHero(p: Progress, index: Int): Boolean {
-        if (p.heroes.size <= 1 || index !in p.heroes.indices) return false
-        p.heroes.removeAt(index)
-        if (p.selectedHero >= index) p.selectedHero = (p.selectedHero - 1).coerceAtLeast(0)
-        return true
-    }
 
     /** Recompensa de uma partida PvP: 2 diamantes por abate + bônus de participação/vitória. */
     fun applyPvpResult(p: Progress, kills: Int, won: Boolean): Int {

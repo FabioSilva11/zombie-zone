@@ -6,8 +6,8 @@ namespace zz::proto {
 // Configuração da missão (FloatArray vindo do Kotlin).
 enum ConfigIndex {
     C_STAGE = 0, C_SKIN, C_ZOMBIES, C_ZOMBIE_HP, C_ZOMBIE_DMG, C_ZOMBIE_SPEED, C_PLAYER_HP, C_MAGAZINE,
-    C_POWER, C_CRYSTAL_MASK, C_CRYSTAL_TOTAL, C_SENSITIVITY, C_AIM_ASSIST, C_AUTO_FIRE, C_INVERT_Y, C_SEED,
-    C_RELOAD_SPEED, C_BOOST_HEALTH, C_BOOST_DAMAGE, C_QUALITY, C_CINEMATIC,
+    C_POWER, C_CRYSTAL_MASK, C_CRYSTAL_TOTAL, C_SENSITIVITY, C_AIM_ASSIST, C_INVERT_Y, C_SEED,
+    C_RELOAD_SPEED, C_BOOST_HEALTH, C_BOOST_DAMAGE, C_QUALITY,
     // Modo e melhorias
     C_MODE,          // 0 campanha, 1 sobrevivência por ondas
     C_ARMOR,         // redução de dano 0..0.6

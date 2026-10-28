@@ -5,7 +5,6 @@ import com.fabiosilva.ecosdeeldra.data.MissionResult
 import com.fabiosilva.ecosdeeldra.data.Progress
 import com.fabiosilva.ecosdeeldra.data.Rules
 import com.fabiosilva.ecosdeeldra.data.Settings
-import com.fabiosilva.ecosdeeldra.data.Cosmetics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -48,31 +47,12 @@ class RulesTest {
     }
 
     @Test
-    fun objectiveSkinsUnlockWhenGoalReached() {
-        val p = Progress()
-        p.stats.kills = 39
-        assertTrue(Rules.refreshCosmeticUnlocks(p).isEmpty())
-        p.stats.kills = 40
-        val unlocked = Rules.refreshCosmeticUnlocks(p)
-        assertTrue(unlocked.any { it.name == "Colete tático" })
-        assertTrue(2 in p.ownedCosmetics)
-    }
-
-    @Test
-    fun adSkinsUnlockByWatchingAds() {
-        val p = Progress()
-        repeat(3) { Rules.registerAdWatched(p) }
-        assertTrue(Rules.refreshCosmeticUnlocks(p).any { it.index == 5 })
-    }
-
-    @Test
-    fun loginDaysCountOncePerDayAndUnlockExclusiveSkins() {
+    fun loginDaysCountOncePerDay() {
         val p = Progress()
         assertTrue(Rules.onAppOpen(p, "2026-10-02"))
         assertFalse(Rules.onAppOpen(p, "2026-10-02"))
         assertTrue(Rules.onAppOpen(p, "2026-10-03"))
         assertEquals(2, p.stats.loginDays)
-        assertTrue(Rules.refreshCosmeticUnlocks(p).any { it.name == "Boné" })
     }
 
     @Test
@@ -127,12 +107,9 @@ class RulesTest {
     }
 
     @Test
-    fun buyingSkinsAndUpgradesSpendsDiamonds() {
+    fun buyingUpgradesSpendsDiamonds() {
         val p = Progress()
-        p.diamonds = 200
-        assertTrue(Rules.buyCosmetic(p, 1))
-        assertEquals(50, p.diamonds)
-        assertFalse(Rules.buyCosmetic(p, 3)) // visual de login não se compra
+        p.diamonds = 50
         assertFalse(Rules.buyUpgrade(p, "power"))
         p.diamonds = 60
         assertTrue(Rules.buyUpgrade(p, "power"))
@@ -242,6 +219,5 @@ class RulesTest {
         assertTrue(hard.zombieHealth > easy.zombieHealth)
         // 5 níveis de poder (+75%) e o bônus da zona 4 (+12% de zona x 0,8).
         assertEquals(1.75f * (1f + 0.12f * 0.8f), hard.power, 0.001f)
-        assertEquals(18, Cosmetics.all.size)
     }
 }
